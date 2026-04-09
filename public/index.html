@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="th"><head>
+<meta charset="utf-8"><title>ร้านค้า — JC-Stock Market</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+</head><body>
+<div id="nav"></div>
+<div class="container">
+  <div class="card">
+    <div class="row">
+      <input id="q" placeholder="🔎 ค้นหาสินค้า..." style="flex:2;min-width:240px">
+      <select id="cat" style="flex:1;min-width:160px"><option value="">ทุกหมวดหมู่</option></select>
+    </div>
+  </div>
+  <div id="items" class="grid"></div>
+</div>
+<script src="/js/app.js"></script>
+<script>
+if(!requireLogin()) throw '';
+document.getElementById('nav').innerHTML = renderNav('index.html');
+
+async function load() {
+  const q = document.getElementById('q').value;
+  const cat = document.getElementById('cat').value;
+  const items = await api('/api/items?' + new URLSearchParams({q,category:cat}));
+  const el = document.getElementById('items');
+  if (!items.length) { el.innerHTML = '<p style="color:var(--muted)">ไม่พบสินค้า</p>'; return; }
+  el.innerHTML = items.map(it => `
+    <div class="item-card">
+      <span class="badge">${it.category||'-'}</span>
+      <h3>${it.name}</h3>
+      <div class="meta">${it.item_no}</div>
+      <div class="price">฿${it.unit_price.toLocaleString()}<span style="font-size:12px;color:var(--muted)"> /${it.uom}</span></div>
+      <div class="meta">คงเหลือ: <span class="badge ${it.inventory>0?'ok':'low'}">${it.inventory} ${it.uom}</span></div>
+      <button class="btn sm" style="width:100%;margin-top:10px" disabled>เพิ่มลงตะกร้า (Phase 2)</button>
+    </div>`).join('');
+}
+
+async function loadCats() {
+  const cats = await api('/api/items/categories');
+  document.getElementById('cat').innerHTML = '<option value="">ทุกหมวดหมู่</option>' + cats.map(c=>`<option>${c}</option>`).join('');
+}
+
+document.getElementById('q').oninput = () => { clearTimeout(window._t); window._t=setTimeout(load,250); };
+document.getElementById('cat').onchange = load;
+loadCats(); load();
+</script>
+</body></html>
