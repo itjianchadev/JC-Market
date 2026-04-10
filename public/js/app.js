@@ -31,20 +31,33 @@ function toast(msg) {
   setTimeout(() => el.remove(), 2500);
 }
 
+async function updateCartBadge() {
+  try {
+    const r = await api('/api/cart/count');
+    const badge = document.getElementById('cartBadge');
+    if (badge) {
+      badge.textContent = r.count || '';
+      badge.style.display = r.count > 0 ? 'inline-flex' : 'none';
+    }
+  } catch {}
+}
+
 function renderNav(active) {
   const u = getUser();
   if (!u) return '';
   const links = [
     ['index.html','🛒 ร้านค้า'],
-    ['cart.html','🧺 ตะกร้า'],
+    ['cart.html','🧺 ตะกร้า<span id="cartBadge" class="cart-badge" style="display:none"></span>'],
     ['orders.html','📋 คำสั่งซื้อ'],
   ];
   if (u.role === 'admin') links.push(['admin.html','⚙️ Admin']);
-  return `<div class="nav">
-    <div class="brand">🛍️ JC-Stock Market</div>
+  const html = `<div class="nav">
+    <div class="brand">JC-Stock Market</div>
     ${links.map(([h,l])=>`<a href="${h}" class="${active===h?'active':''}">${l}</a>`).join('')}
     <div class="spacer"></div>
     <div class="user">${u.full_name} (${u.branch_name||u.role})</div>
     <a href="#" onclick="clearAuth();return false">ออกจากระบบ</a>
   </div>`;
+  setTimeout(updateCartBadge, 100);
+  return html;
 }

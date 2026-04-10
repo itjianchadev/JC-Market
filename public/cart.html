@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="th"><head>
+<meta charset="utf-8"><title>ตะกร้า — JC-Stock Market</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<style>
+.cart-table{width:100%;border-collapse:collapse}
+.cart-table th{text-align:left;color:var(--muted);font-size:13px;padding:10px 8px;border-bottom:1px solid var(--border)}
+.cart-table td{padding:12px 8px;border-bottom:1px solid var(--border);vertical-align:middle}
+.qty-wrap{display:flex;align-items:center;gap:6px}
+.qty-wrap input{min-width:40px;max-width:80px;width:auto;text-align:center;padding:6px 4px}
+.qty-wrap button{width:30px;height:30px;display:flex;align-items:center;justify-content:center}
+.summary{display:flex;justify-content:space-between;align-items:center;padding:20px 0;flex-wrap:wrap;gap:12px}
+.summary .total{font-size:28px;font-weight:700;color:var(--gold)}
+</style>
+</head><body>
+<div id="nav"></div>
+<div class="container">
+  <h2 style="margin-bottom:16px">ตะกร้าสินค้า</h2>
+  <div class="card">
+    <div id="cartContent">กำลังโหลด...</div>
+  </div>
+</div>
+<script src="/js/app.js"></script>
+<script>
+if(!requireLogin()) throw '';
+document.getElementById('nav').innerHTML = renderNav('cart.html');
+
+let cartData = null;
+
+async function load() {
+  try {
+    cartData = await api('/api/cart');
+    render();
+    updateCartBadge();
+  } catch (e) { document.getElementById('cartContent').textContent = e.message; }
+}
+
+function render() {
+  const el = document.getElementById('cartContent');
+  if (!cartData || !cartData.items.length) {
+    el.innerHTML = `<div style="text-align:center;padding:40px;color:var(--muted)">
+      <p style="font-size:48px;margin-bottom:12px">🧺</p>
+      <p>ตะกร้าว่าง</p>
+      <a href="index.html" class="btn" style="margin-top:16px;display:inline-block">เลือกสินค้า</a>
+    </div>`;
+    return;
+  }
+  el.innerHTML = `
+    <table class="cart-table">
+      <thead><tr>
+        <th>สินค้า</th><th>ราคา/หน่วย</th><th>จำนวน</th><th>หน่วย</th><th>รวม</th><th></th>
+      </tr></thead>
+      <tbody>
+        ${cartData.items.map(it => `<tr>
+          <td>
+            <strong>${it.item_name||it.item_no}</strong>
+            <div style="font-size:12px;color:var(--muted)">${it.item_no} | ${it.category||'-'} | คงเหลือ ${it.inventory} ${it.uom||''}</div>
+          </td>
+          <td>฿${it.unit_price.toLocaleString()}</td>
+          <td>
+            <div class="qty-wrap">
+              <button class="btn sm ghost" onclick="updateQty(${it.id},${it.quantity-1})">-</button>
+              <input type="number" value="${it.quantity}" min="1" max="${it.inventory}" onchange="updateQty(${it.id},this.value)" style="width:${Math.max(40, String(it.quantity).length * 16 + 24)}px">
+              <button class="btn sm ghost" onclick="updateQty(${it.id},${it.quantity+1})">+</button>
+            </div>
+          </td>
+          <td style="color:var(--muted)">${it.uom||'-'}</td>
+          <td style="font-weight:600;color:var(--gold)">฿${(it.quantity*it.unit_price).toLocaleString()}</td>
+          <td><button class="btn sm ghost" style="color:var(--err);border-color:var(--err)" onclick="removeItem(${it.id})">ลบ</button></td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+    <div class="summary">
+      <div>
+        <button class="btn ghost" onclick="clearCart()">ล้างตะกร้า</button>
+        <a href="index.html" class="btn ghost" style="margin-left:8px">เลือกเพิ่ม</a>
+      </div>
+      <div style="text-align:right">
+        <div style="color:var(--muted);font-size:14px">${cartData.count} รายการ</div>
+        <div class="total">฿${cartData.total.toLocaleString()}</div>
+        <button class="btn" style="margin-top:12px;font-size:16px;padding:12px 32px" onclick="goCheckout()">ดำเนินการชำระเงิน</button>
+      </div>
+    </div>`;
+}
+
+async function updateQty(id, qty) {
+  qty = parseInt(qty);
+  if (isNaN(qty) || qty < 0) return;
+  try {
+    await api('/api/cart/' + id, { method: 'PUT', body: JSON.stringify({ quantity: qty }) });
+    load();
+  } catch (e) { toast(e.message); }
+}
+
+async function removeItem(id) {
+  try {
+    await api('/api/cart/' + id, { method: 'DELETE' });
+    toast('ลบรายการแล้ว');
+    load();
+  } catch (e) { toast(e.message); }
+}
+
+async function clearCart() {
+  if (!confirm('ล้างตะกร้าทั้งหมด?')) return;
+  try {
+    await api('/api/cart', { method: 'DELETE' });
+    load();
+  } catch (e) { toast(e.message); }
+}
+
+function goCheckout() {
+  location.href = '/checkout.html';
+}
+
+load();
+</script>
+</body></html>

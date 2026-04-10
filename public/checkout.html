@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="th"><head>
+<meta charset="utf-8"><title>ชำระเงิน — JC-Stock Market</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<style>
+.checkout-layout{display:flex;gap:24px;flex-wrap:wrap}
+.checkout-left{flex:1;min-width:320px}
+.checkout-right{width:380px;flex-shrink:0}
+.order-items{list-style:none;padding:0}
+.order-items li{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:14px}
+.order-items li .name{flex:1}
+.order-items li .qty{color:var(--muted);margin:0 12px}
+.qr-box{text-align:center;padding:20px}
+.qr-box img{max-width:280px;border-radius:12px;background:#fff;padding:12px}
+.qr-box .amount{font-size:32px;font-weight:700;color:var(--gold);margin:12px 0}
+.upload-area{border:2px dashed var(--border);border-radius:12px;padding:30px;text-align:center;cursor:pointer;transition:.2s;margin-top:16px}
+.upload-area:hover{border-color:var(--gold)}
+.upload-area.has-file{border-color:var(--ok);background:rgba(34,197,94,.05)}
+.slip-preview{max-width:200px;border-radius:8px;margin:12px auto;display:block}
+.step{display:flex;gap:12px;align-items:center;margin-bottom:16px}
+.step .num{width:32px;height:32px;border-radius:50%;background:var(--gold);color:#000;display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0}
+.step.done .num{background:var(--ok)}
+.step .label{font-size:14px}
+@media(max-width:768px){.checkout-right{width:100%}}
+</style>
+</head><body>
+<div id="nav"></div>
+<div class="container">
+  <!-- Step 1: Review & Confirm -->
+  <div id="step1">
+    <h2 style="margin-bottom:16px">ยืนยันคำสั่งซื้อ</h2>
+    <div class="checkout-layout">
+      <div class="checkout-left">
+        <div class="card">
+          <h4 style="margin-bottom:12px">รายการสินค้า</h4>
+          <ul id="orderItems" class="order-items"></ul>
+          <div style="display:flex;justify-content:flex-end;margin-top:16px;font-size:13px;color:var(--muted)">
+            <span id="itemCount"></span>
+          </div>
+        </div>
+        <div class="card" style="margin-top:12px">
+          <label>หมายเหตุ (ถ้ามี)</label>
+          <textarea id="note" rows="2" placeholder="ระบุหมายเหตุเพิ่มเติม..."></textarea>
+        </div>
+      </div>
+      <div class="checkout-right">
+        <div class="card">
+          <h4 style="margin-bottom:16px">สรุปคำสั่งซื้อ</h4>
+          <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span>ยอดรวม</span><span id="subtotal" style="font-weight:600"></span></div>
+          <hr style="border-color:var(--border);margin:12px 0">
+          <div style="display:flex;justify-content:space-between;font-size:24px;font-weight:700"><span>รวมทั้งสิ้น</span><span id="grandTotal" style="color:var(--gold)"></span></div>
+          <button class="btn" style="width:100%;margin-top:20px;font-size:16px;padding:14px" onclick="placeOrder()">ยืนยันสั่งซื้อ</button>
+          <div class="err" id="orderErr"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 2: Payment -->
+  <div id="step2" style="display:none">
+    <h2 style="margin-bottom:16px">ชำระเงิน</h2>
+    <div class="checkout-layout">
+      <div class="checkout-left">
+        <div class="card">
+          <div class="step"><div class="num done">1</div><div class="label">สร้างคำสั่งซื้อ <strong id="orderNo"></strong> สำเร็จ</div></div>
+          <div class="step" id="stepScan"><div class="num">2</div><div class="label">สแกน QR PromptPay ชำระเงิน</div></div>
+          <div class="step" id="stepSlip"><div class="num">3</div><div class="label">อัพโหลดสลิปการโอน</div></div>
+        </div>
+        <div class="card" style="margin-top:12px">
+          <h4 style="margin-bottom:8px">อัพโหลดสลิป</h4>
+          <div class="upload-area" id="dropArea" onclick="document.getElementById('slipFile').click()">
+            <input type="file" id="slipFile" accept="image/*,.pdf" style="display:none" onchange="previewSlip(this)">
+            <p style="color:var(--muted)">คลิกหรือลากไฟล์สลิปมาวางที่นี่</p>
+            <p style="font-size:12px;color:var(--muted)">รองรับ JPG, PNG, PDF (สูงสุด 10MB)</p>
+          </div>
+          <img id="slipPreview" class="slip-preview" style="display:none">
+          <button class="btn" style="width:100%;margin-top:12px" id="uploadBtn" onclick="uploadSlip()" disabled>ส่งสลิป</button>
+          <div class="err" id="slipErr"></div>
+        </div>
+      </div>
+      <div class="checkout-right">
+        <div class="card qr-box">
+          <h4>PromptPay QR</h4>
+          <div class="amount" id="qrAmount"></div>
+          <img id="qrImg" src="" alt="QR Code">
+          <p style="font-size:12px;color:var(--muted);margin-top:12px">สแกน QR ด้วยแอปธนาคาร</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 3: Done -->
+  <div id="step3" style="display:none">
+    <div class="card" style="text-align:center;padding:60px 20px">
+      <div id="doneIcon" style="font-size:64px;margin-bottom:16px">✅</div>
+      <h2 id="doneTitle" style="margin-bottom:8px"></h2>
+      <p style="color:var(--muted);margin-bottom:8px">คำสั่งซื้อ <strong id="doneOrderNo"></strong></p>
+      <p id="doneMsg" style="color:var(--muted);margin-bottom:8px"></p>
+      <div id="verifyDetail" style="margin:16px auto;max-width:320px;text-align:left;display:none">
+        <div class="card" style="font-size:13px;padding:14px"></div>
+      </div>
+      <div class="row" style="justify-content:center;margin-top:16px">
+        <a href="orders.html" class="btn">ดูคำสั่งซื้อ</a>
+        <a href="index.html" class="btn ghost">กลับหน้าร้านค้า</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/js/app.js"></script>
+<script>
+if(!requireLogin()) throw '';
+document.getElementById('nav').innerHTML = renderNav('');
+
+let currentOrderId = null;
+let cartData = null;
+
+async function init() {
+  try {
+    cartData = await api('/api/cart');
+    if (!cartData.items.length) { location.href = '/cart.html'; return; }
+    document.getElementById('orderItems').innerHTML = cartData.items.map(it => `
+      <li>
+        <span class="name">${it.item_name} <span style="color:var(--muted);font-size:12px">(${it.item_no})</span></span>
+        <span class="qty">${it.quantity} ${it.uom||''}</span>
+        <span style="color:var(--gold);font-weight:600">฿${(it.quantity*it.unit_price).toLocaleString()}</span>
+      </li>`).join('');
+    document.getElementById('itemCount').textContent = `${cartData.count} รายการ`;
+    document.getElementById('subtotal').textContent = `฿${cartData.total.toLocaleString()}`;
+    document.getElementById('grandTotal').textContent = `฿${cartData.total.toLocaleString()}`;
+  } catch (e) { alert(e.message); }
+}
+
+async function placeOrder() {
+  const note = document.getElementById('note').value;
+  try {
+    const r = await api('/api/orders/checkout', { method:'POST', body: JSON.stringify({ note }) });
+    currentOrderId = r.order_id;
+    // Show step 2
+    document.getElementById('step1').style.display = 'none';
+    document.getElementById('step2').style.display = 'block';
+    document.getElementById('orderNo').textContent = r.order_number;
+    document.getElementById('qrAmount').textContent = `฿${r.total.toLocaleString()}`;
+    document.getElementById('qrImg').src = r.qr_data_url;
+    document.getElementById('doneOrderNo').textContent = r.order_number;
+    updateCartBadge();
+  } catch (e) {
+    document.getElementById('orderErr').textContent = e.message;
+  }
+}
+
+function previewSlip(input) {
+  const file = input.files[0];
+  if (!file) return;
+  document.getElementById('dropArea').classList.add('has-file');
+  document.getElementById('uploadBtn').disabled = false;
+  if (file.type.startsWith('image/')) {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = document.getElementById('slipPreview');
+      img.src = e.target.result;
+      img.style.display = 'block';
+    };
+    reader.readAsDataURL(file);
+  } else {
+    document.getElementById('slipPreview').style.display = 'none';
+    document.getElementById('dropArea').innerHTML = `<p style="color:var(--ok)">${file.name}</p>`;
+  }
+}
+
+async function uploadSlip() {
+  if (!currentOrderId) return;
+  const file = document.getElementById('slipFile').files[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('slip', file);
+  try {
+    document.getElementById('uploadBtn').disabled = true;
+    document.getElementById('uploadBtn').textContent = 'กำลังอัพโหลด...';
+    const r = await fetch(`/api/orders/${currentOrderId}/slip`, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + getToken() },
+      body: fd,
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error);
+    // Show step 3
+    document.getElementById('step2').style.display = 'none';
+    document.getElementById('step3').style.display = 'block';
+
+    if (j.auto_verified) {
+      // Auto-approved!
+      document.getElementById('doneIcon').textContent = '✅';
+      document.getElementById('doneTitle').style.color = 'var(--ok)';
+      document.getElementById('doneTitle').textContent = 'ตรวจสอบสลิปผ่าน — อนุมัติอัตโนมัติ!';
+      document.getElementById('doneMsg').textContent = 'คำสั่งซื้อได้รับการอนุมัติแล้ว';
+      const vr = j.verify_result || {};
+      if (vr.amount || vr.sender) {
+        const detail = document.getElementById('verifyDetail');
+        detail.style.display = 'block';
+        detail.querySelector('.card').innerHTML = `
+          <div style="margin-bottom:6px"><strong>ยอดโอน:</strong> ฿${(vr.amount||0).toLocaleString()}</div>
+          ${vr.sender ? `<div style="margin-bottom:6px"><strong>ผู้โอน:</strong> ${vr.sender}</div>` : ''}
+          ${vr.receiver ? `<div style="margin-bottom:6px"><strong>ผู้รับ:</strong> ${vr.receiver}</div>` : ''}
+          ${vr.ref ? `<div style="margin-bottom:6px"><strong>Ref:</strong> ${vr.ref}</div>` : ''}
+          <div style="color:var(--ok)">✓ ${vr.reason}</div>`;
+      }
+    } else {
+      // Manual review needed
+      document.getElementById('doneIcon').textContent = '⏳';
+      document.getElementById('doneTitle').style.color = '#f59e0b';
+      document.getElementById('doneTitle').textContent = 'ส่งสลิปแล้ว — รอตรวจสอบ';
+      document.getElementById('doneMsg').innerHTML = `ตรวจอัตโนมัติไม่ผ่าน: <span style="color:var(--err)">${(j.verify_result||{}).reason||''}</span><br>รอ Admin ตรวจสอบสลิปและอนุมัติ`;
+    }
+  } catch (e) {
+    document.getElementById('slipErr').textContent = e.message;
+    document.getElementById('uploadBtn').disabled = false;
+    document.getElementById('uploadBtn').textContent = 'ส่งสลิป';
+  }
+}
+
+// Drag & drop
+const drop = document.getElementById('dropArea');
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.style.borderColor = 'var(--gold)'; });
+drop.addEventListener('dragleave', () => { drop.style.borderColor = ''; });
+drop.addEventListener('drop', e => {
+  e.preventDefault();
+  drop.style.borderColor = '';
+  const file = e.dataTransfer.files[0];
+  if (file) {
+    const input = document.getElementById('slipFile');
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    input.files = dt.files;
+    previewSlip(input);
+  }
+});
+
+init();
+</script>
+</body></html>

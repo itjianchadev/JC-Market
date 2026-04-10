@@ -4,46 +4,175 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/css/style.css">
+<style>
+.shop-layout{display:flex;gap:20px;min-height:calc(100vh - 80px)}
+.sidebar{width:220px;flex-shrink:0}
+.sidebar .cat-list{list-style:none;padding:0}
+.sidebar .cat-list li{padding:10px 14px;border-radius:8px;cursor:pointer;color:var(--muted);font-size:14px;transition:.15s;display:flex;justify-content:space-between;align-items:center}
+.sidebar .cat-list li:hover{background:var(--card);color:var(--text)}
+.sidebar .cat-list li.active{background:var(--gold);color:#000;font-weight:600}
+.sidebar .cat-list li .count{font-size:12px;opacity:.7}
+.main-area{flex:1;min-width:0}
+@media(max-width:768px){.shop-layout{flex-direction:column}.sidebar{width:100%}.sidebar .cat-list{display:flex;overflow-x:auto;gap:6px;padding-bottom:8px}.sidebar .cat-list li{white-space:nowrap;flex-shrink:0}}
+</style>
 </head><body>
 <div id="nav"></div>
 <div class="container">
-  <div class="card">
-    <div class="row">
-      <input id="q" placeholder="🔎 ค้นหาสินค้า..." style="flex:2;min-width:240px">
-      <select id="cat" style="flex:1;min-width:160px"><option value="">ทุกหมวดหมู่</option></select>
+  <div class="shop-layout">
+    <!-- Sidebar -->
+    <div class="sidebar">
+      <div class="card" style="padding:12px">
+        <h4 style="margin-bottom:10px;color:var(--gold)">หมวดหมู่</h4>
+        <ul id="catList" class="cat-list"></ul>
+      </div>
+      <div class="card" style="padding:12px;margin-top:12px">
+        <div id="syncInfo" style="font-size:11px;color:var(--muted)"></div>
+      </div>
+    </div>
+    <!-- Main -->
+    <div class="main-area">
+      <div class="card" style="padding:12px">
+        <input id="q" placeholder="ค้นหาสินค้า..." style="width:100%">
+      </div>
+      <div style="margin:12px 0 8px;color:var(--muted);font-size:13px" id="resultInfo"></div>
+      <div id="items" class="grid"></div>
     </div>
   </div>
-  <div id="items" class="grid"></div>
 </div>
+
+<!-- Add to cart modal -->
+<div id="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:999;align-items:center;justify-content:center">
+  <div class="card" style="max-width:380px;width:90%;margin:auto;position:relative">
+    <button onclick="closeModal()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer">&times;</button>
+    <h3 id="mName" style="margin-bottom:4px"></h3>
+    <div id="mMeta" style="color:var(--muted);font-size:13px;margin-bottom:12px"></div>
+    <div id="mPrice" style="color:var(--gold);font-size:24px;font-weight:700;margin-bottom:16px"></div>
+    <label>จำนวน</label>
+    <div class="row" style="align-items:center;margin-bottom:16px">
+      <button class="btn sm ghost" onclick="adjQty(-1)">-</button>
+      <input id="mQty" type="number" min="1" value="1" style="text-align:center;width:80px">
+      <button class="btn sm ghost" onclick="adjQty(1)">+</button>
+      <span id="mStock" style="color:var(--muted);font-size:12px;margin-left:8px"></span>
+    </div>
+    <button class="btn" style="width:100%" onclick="addToCart()">เพิ่มลงตะกร้า</button>
+    <div class="err" id="mErr"></div>
+  </div>
+</div>
+
 <script src="/js/app.js"></script>
 <script>
 if(!requireLogin()) throw '';
 document.getElementById('nav').innerHTML = renderNav('index.html');
 
-async function load() {
-  const q = document.getElementById('q').value;
-  const cat = document.getElementById('cat').value;
-  const items = await api('/api/items?' + new URLSearchParams({q,category:cat}));
+let selectedItem = null;
+let activeCat = '';
+let allItems = [];
+let categories = [];
+
+async function loadAll() {
+  allItems = await api('/api/items?' + new URLSearchParams({q:'',category:''}));
+  // Build category counts
+  const catMap = {};
+  allItems.forEach(it => {
+    const c = it.category || 'อื่นๆ';
+    catMap[c] = (catMap[c]||0) + 1;
+  });
+  categories = Object.entries(catMap).sort((a,b) => a[0].localeCompare(b[0]));
+  renderCats();
+  renderItems();
+}
+
+function renderCats() {
+  const total = allItems.length;
+  let html = `<li class="${activeCat===''?'active':''}" onclick="setCat('')">ทั้งหมด <span class="count">${total}</span></li>`;
+  for (const [cat, count] of categories) {
+    html += `<li class="${activeCat===cat?'active':''}" onclick="setCat('${cat}')">${cat} <span class="count">${count}</span></li>`;
+  }
+  document.getElementById('catList').innerHTML = html;
+}
+
+function setCat(cat) {
+  activeCat = cat;
+  renderCats();
+  renderItems();
+}
+
+function renderItems() {
+  const q = (document.getElementById('q').value || '').toLowerCase();
+  let filtered = allItems.filter(it => {
+    if (activeCat && (it.category||'อื่นๆ') !== activeCat) return false;
+    if (q && !it.name.toLowerCase().includes(q) && !it.item_no.toLowerCase().includes(q)) return false;
+    return true;
+  });
+  document.getElementById('resultInfo').textContent = `แสดง ${filtered.length} รายการ${activeCat?' ในหมวด '+activeCat:''}`;
   const el = document.getElementById('items');
-  if (!items.length) { el.innerHTML = '<p style="color:var(--muted)">ไม่พบสินค้า</p>'; return; }
-  el.innerHTML = items.map(it => `
+  if (!filtered.length) { el.innerHTML = '<p style="color:var(--muted);padding:20px">ไม่พบสินค้า</p>'; return; }
+  el.innerHTML = filtered.map(it => `
     <div class="item-card">
       <span class="badge">${it.category||'-'}</span>
       <h3>${it.name}</h3>
       <div class="meta">${it.item_no}</div>
       <div class="price">฿${it.unit_price.toLocaleString()}<span style="font-size:12px;color:var(--muted)"> /${it.uom}</span></div>
       <div class="meta">คงเหลือ: <span class="badge ${it.inventory>0?'ok':'low'}">${it.inventory} ${it.uom}</span></div>
-      <button class="btn sm" style="width:100%;margin-top:10px" disabled>เพิ่มลงตะกร้า (Phase 2)</button>
+      <button class="btn sm" style="width:100%;margin-top:10px" onclick='openModal(${JSON.stringify(it)})' ${it.inventory<=0?'disabled':''}>${it.inventory>0?'เพิ่มลงตะกร้า':'สินค้าหมด'}</button>
     </div>`).join('');
 }
 
-async function loadCats() {
-  const cats = await api('/api/items/categories');
-  document.getElementById('cat').innerHTML = '<option value="">ทุกหมวดหมู่</option>' + cats.map(c=>`<option>${c}</option>`).join('');
+function openModal(item) {
+  selectedItem = item;
+  document.getElementById('mName').textContent = item.name;
+  document.getElementById('mMeta').textContent = `${item.item_no} | ${item.category}`;
+  document.getElementById('mPrice').textContent = `฿${item.unit_price.toLocaleString()} /${item.uom}`;
+  document.getElementById('mStock').textContent = `คงเหลือ ${item.inventory} ${item.uom}`;
+  const qtyInput = document.getElementById('mQty');
+  qtyInput.value = 1;
+  qtyInput.max = item.inventory;
+  qtyInput.oninput = updateModalStock;
+  document.getElementById('mErr').textContent = '';
+  updateModalStock();
+  document.getElementById('modal').style.display = 'flex';
 }
 
-document.getElementById('q').oninput = () => { clearTimeout(window._t); window._t=setTimeout(load,250); };
-document.getElementById('cat').onchange = load;
-loadCats(); load();
+function closeModal() { document.getElementById('modal').style.display = 'none'; selectedItem = null; }
+
+function adjQty(d) {
+  const inp = document.getElementById('mQty');
+  const v = Math.max(1, Math.min(selectedItem.inventory, parseInt(inp.value||1)+d));
+  inp.value = v;
+  updateModalStock();
+}
+
+function updateModalStock() {
+  if (!selectedItem) return;
+  const qty = parseInt(document.getElementById('mQty').value) || 1;
+  const remaining = Math.max(0, selectedItem.inventory - qty);
+  const el = document.getElementById('mStock');
+  el.textContent = `คงเหลือ ${remaining} ${selectedItem.uom}`;
+  el.style.color = remaining <= 0 ? 'var(--err)' : 'var(--muted)';
+}
+
+async function addToCart() {
+  if (!selectedItem) return;
+  const qty = parseInt(document.getElementById('mQty').value) || 1;
+  try {
+    await api('/api/cart/add', { method:'POST', body: JSON.stringify({ item_no: selectedItem.item_no, quantity: qty }) });
+    toast(`เพิ่ม ${selectedItem.name} x${qty} ลงตะกร้าแล้ว`);
+    closeModal();
+    updateCartBadge();
+  } catch (e) {
+    document.getElementById('mErr').textContent = e.message;
+  }
+}
+
+async function loadSyncInfo() {
+  try {
+    const s = await api('/api/sync/status');
+    if (s) document.getElementById('syncInfo').textContent = `Sync: ${s.created_at}\n${s.count} items`;
+  } catch {}
+}
+
+document.getElementById('q').oninput = () => { clearTimeout(window._t); window._t=setTimeout(renderItems,200); };
+document.getElementById('modal').onclick = (e) => { if(e.target.id==='modal') closeModal(); };
+loadAll(); loadSyncInfo();
 </script>
 </body></html>

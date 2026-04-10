@@ -36,3 +36,4 @@ label{display:block;margin-bottom:6px;color:var(--muted);font-size:13px}
 .toast{position:fixed;bottom:24px;right:24px;background:var(--card);border:1px solid var(--gold);padding:14px 20px;border-radius:8px;z-index:1000;animation:slide .3s}
 @keyframes slide{from{transform:translateX(100%)}to{transform:translateX(0)}}
 .err{color:var(--err);font-size:13px;margin-top:8px;min-height:18px}
+.cart-badge{display:inline-flex;align-items:center;justify-content:center;background:var(--err);color:#fff;font-size:11px;font-weight:700;min-width:18px;height:18px;border-radius:99px;padding:0 5px;margin-left:4px;position:relative;top:-2px}
