@@ -1088,10 +1088,17 @@ app.post('/api/orders/:id/receive', requireAuth, async (req, res) => {
   const orderLineMap = {};
   for (const ol of orderLines) orderLineMap[ol.id] = ol;
 
-  // Validate
+  // Validate. We treat missing/non-numeric received_qty as an explicit
+  // 400 instead of silently dropping the line — earlier callers that sent
+  // `qty` instead of `received_qty` were having their receives recorded
+  // as zero with no error, which made the order look fulfilled when it
+  // wasn't.
   for (const rl of receiveLines) {
     const ol = orderLineMap[rl.order_line_id];
     if (!ol) return res.status(400).json({ error: `ไม่พบรายการ ${rl.order_line_id}` });
+    if (rl.received_qty === undefined || rl.received_qty === null || typeof rl.received_qty !== 'number') {
+      return res.status(400).json({ error: `received_qty ของรายการ ${rl.order_line_id} ต้องเป็นตัวเลข` });
+    }
     if (rl.received_qty < 0) return res.status(400).json({ error: 'จำนวนรับไม่ถูกต้อง' });
   }
 
