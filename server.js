@@ -1325,27 +1325,175 @@ app.post('/api/sync/fulfillment', requireAuth, requireAdmin, async (req, res) =>
 // ─── Stock Balance (per branch/user) ───
 app.get('/api/stock-balance', requireAuth, (req, res) => {
   const userId = isHqAdmin(req.user) && req.query.user_id ? req.query.user_id : req.user.id;
+  const user = db.prepare('SELECT full_name, branch_code, branch_name FROM users WHERE id=?').get(userId);
+  const branchCode = user ? user.branch_code : '';
 
-  // Sum all received quantities from GR for this user's orders
-  const stock = db.prepare(`
-    SELECT gl.item_no, gl.item_name, i.name_en as item_name_en,
-           SUM(gl.received_qty) as total_received,
-           i.uom, i.category
+  // on_hand = SUM(received from HQ via goods_receipts) − SUM(issued out via stock_issues)
+  // Two separate aggregates merged in JS rather than a FULL OUTER JOIN (which
+  // SQLite < 3.39 doesn't support reliably under better-sqlite3 in some envs).
+  const receivedRows = db.prepare(`
+    SELECT gl.item_no, SUM(gl.received_qty) as qty
     FROM goods_receipt_lines gl
     JOIN goods_receipts gr ON gr.id = gl.receipt_id
     JOIN orders o ON o.id = gr.order_id
-    LEFT JOIN items_cache i ON i.item_no = gl.item_no
     WHERE o.user_id = ?
     GROUP BY gl.item_no
-    ORDER BY gl.item_name
   `).all(userId);
 
-  const user = db.prepare('SELECT full_name, branch_code, branch_name FROM users WHERE id=?').get(userId);
+  const issuedRows = branchCode ? db.prepare(`
+    SELECT sil.item_no, SUM(sil.qty) as qty
+    FROM stock_issue_lines sil
+    JOIN stock_issues si ON si.id = sil.issue_id
+    WHERE si.branch_code = ?
+    GROUP BY sil.item_no
+  `).all(branchCode) : [];
+
+  const byItem = {};
+  for (const r of receivedRows) {
+    byItem[r.item_no] = { item_no: r.item_no, total_received: r.qty, total_issued: 0 };
+  }
+  for (const i of issuedRows) {
+    if (!byItem[i.item_no]) byItem[i.item_no] = { item_no: i.item_no, total_received: 0, total_issued: 0 };
+    byItem[i.item_no].total_issued = i.qty;
+  }
+  const getItem = db.prepare('SELECT name, name_en, uom, category FROM items_cache WHERE item_no=?');
+  for (const k of Object.keys(byItem)) {
+    const meta = getItem.get(k) || {};
+    byItem[k].item_name = meta.name || '';
+    byItem[k].item_name_en = meta.name_en || '';
+    byItem[k].uom = meta.uom || '';
+    byItem[k].category = meta.category || '';
+    byItem[k].on_hand = (byItem[k].total_received || 0) - (byItem[k].total_issued || 0);
+  }
+  const items = Object.values(byItem).sort((a, b) => (a.item_name || '').localeCompare(b.item_name || ''));
 
   res.json({
     branch: user ? { name: user.full_name, code: user.branch_code, branch_name: user.branch_name } : {},
-    items: stock,
+    items,
   });
+});
+
+// ─── Stock Issues: list / detail / create ───────────────────────────────────
+// FC users issue stock OUT (sale, damage, transfer, adjustment). Each issue
+// is a multi-line document with branch_code + issued_by + reason. The qty
+// is validated against the running on_hand BEFORE insert, so a branch
+// can't issue more than they currently have received minus issued.
+
+function genIssueNumber() {
+  const d = new Date();
+  const prefix = `IS${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+  const last = db.prepare("SELECT issue_number FROM stock_issues WHERE issue_number LIKE ? ORDER BY issue_number DESC LIMIT 1").get(prefix + '%');
+  const seq = last ? parseInt(last.issue_number.slice(-4)) + 1 : 1;
+  return prefix + String(seq).padStart(4, '0');
+}
+
+// On-hand for one (branch, item) pair — used by the issue-create endpoint.
+function onHandForItem(branchUserId, branchCode, itemNo) {
+  const recv = db.prepare(`
+    SELECT COALESCE(SUM(gl.received_qty), 0) as qty
+    FROM goods_receipt_lines gl
+    JOIN goods_receipts gr ON gr.id = gl.receipt_id
+    JOIN orders o ON o.id = gr.order_id
+    WHERE o.user_id = ? AND gl.item_no = ?
+  `).get(branchUserId, itemNo).qty || 0;
+  const iss = db.prepare(`
+    SELECT COALESCE(SUM(sil.qty), 0) as qty
+    FROM stock_issue_lines sil
+    JOIN stock_issues si ON si.id = sil.issue_id
+    WHERE si.branch_code = ? AND sil.item_no = ?
+  `).get(branchCode, itemNo).qty || 0;
+  return recv - iss;
+}
+
+app.post('/api/stock/issue', requireAuth, (req, res) => {
+  const { lines = [], reason = 'sale', note = '' } = req.body || {};
+  if (!Array.isArray(lines) || lines.length === 0) {
+    return res.status(400).json({ error: 'ต้องระบุรายการสินค้าที่เบิก' });
+  }
+  if (!req.user.branch_code) {
+    return res.status(400).json({ error: 'ผู้ใช้ไม่มีสาขา — เบิกของได้เฉพาะ user สาขา (fc)' });
+  }
+  const allowedReasons = ['sale', 'damage', 'transfer', 'adjustment', 'other'];
+  if (!allowedReasons.includes(reason)) {
+    return res.status(400).json({ error: `reason ต้องเป็นหนึ่งใน: ${allowedReasons.join(', ')}` });
+  }
+
+  // Validate each line shape
+  for (const l of lines) {
+    if (!l.item_no || typeof l.qty !== 'number' || l.qty <= 0) {
+      return res.status(400).json({ error: `รายการไม่ถูกต้อง — ต้องมี item_no + qty > 0: ${JSON.stringify(l)}` });
+    }
+  }
+
+  // Validate stock available BEFORE inserting anything
+  for (const l of lines) {
+    const onHand = onHandForItem(req.user.id, req.user.branch_code, l.item_no);
+    if (l.qty > onHand) {
+      return res.status(400).json({ error: `สต๊อก ${l.item_no} ไม่พอ (คงเหลือ ${onHand}, เบิก ${l.qty})` });
+    }
+  }
+
+  const issueId = crypto.randomUUID();
+  const issueNumber = genIssueNumber();
+  const insIssue = db.prepare('INSERT INTO stock_issues (id, issue_number, branch_code, issued_by, reason, note) VALUES (?,?,?,?,?,?)');
+  const insLine = db.prepare('INSERT INTO stock_issue_lines (issue_id, item_no, item_name, qty, note) VALUES (?,?,?,?,?)');
+  const getItem = db.prepare('SELECT name FROM items_cache WHERE item_no=?');
+
+  const tx = db.transaction(() => {
+    insIssue.run(issueId, issueNumber, req.user.branch_code, req.user.id, reason, note);
+    for (const l of lines) {
+      const itName = (getItem.get(l.item_no) || {}).name || '';
+      insLine.run(issueId, l.item_no, itName, l.qty, l.note || '');
+    }
+  });
+  tx();
+
+  res.json({
+    ok: true,
+    issue_id: issueId,
+    issue_number: issueNumber,
+    message: `บันทึกการเบิก ${issueNumber} สำเร็จ`,
+  });
+});
+
+app.get('/api/stock/issues', requireAuth, (req, res) => {
+  // HQ admin sees all; fc only sees own branch
+  const rows = isHqAdmin(req.user)
+    ? db.prepare(`
+        SELECT si.*, u.full_name as issued_by_name, u.branch_name,
+               (SELECT COUNT(*) FROM stock_issue_lines WHERE issue_id=si.id) as line_count,
+               (SELECT COALESCE(SUM(qty),0) FROM stock_issue_lines WHERE issue_id=si.id) as total_qty
+        FROM stock_issues si LEFT JOIN users u ON u.id=si.issued_by
+        ORDER BY si.created_at DESC LIMIT 200
+      `).all()
+    : db.prepare(`
+        SELECT si.*, u.full_name as issued_by_name, u.branch_name,
+               (SELECT COUNT(*) FROM stock_issue_lines WHERE issue_id=si.id) as line_count,
+               (SELECT COALESCE(SUM(qty),0) FROM stock_issue_lines WHERE issue_id=si.id) as total_qty
+        FROM stock_issues si LEFT JOIN users u ON u.id=si.issued_by
+        WHERE si.branch_code = ?
+        ORDER BY si.created_at DESC LIMIT 200
+      `).all(req.user.branch_code || '');
+  res.json(rows);
+});
+
+app.get('/api/stock/issues/:id', requireAuth, (req, res) => {
+  const issue = db.prepare(`
+    SELECT si.*, u.full_name as issued_by_name, u.branch_name
+    FROM stock_issues si LEFT JOIN users u ON u.id=si.issued_by
+    WHERE si.id=?
+  `).get(String(req.params.id));
+  if (!issue) return res.status(404).json({ error: 'Issue not found' });
+  if (!isHqAdmin(req.user) && issue.branch_code !== req.user.branch_code) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  const lines = db.prepare(`
+    SELECT sil.*, ic.uom, ic.name_en as item_name_en
+    FROM stock_issue_lines sil
+    LEFT JOIN items_cache ic ON ic.item_no = sil.item_no
+    WHERE sil.issue_id=?
+  `).all(issue.id);
+  res.json({ ...issue, lines });
 });
 
 // ─── Sync ───
