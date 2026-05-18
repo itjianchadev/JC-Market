@@ -91,6 +91,9 @@
     <div class="sidebar-item" onclick="switchTab('issue')" id="tabIssue">
       <span class="icon">📤</span> <span data-i18n="stock.issue_history">ประวัติการเบิก</span> <span class="count" id="issueCount">0</span>
     </div>
+    <div class="sidebar-item" onclick="switchTab('movements')" id="tabMovements">
+      <span class="icon">📊</span> <span>ความเคลื่อนไหวสต๊อก</span> <span class="count" id="movCount">0</span>
+    </div>
   </div>
   <div class="main-content">
     <!-- Stock balance panel -->
@@ -135,6 +138,86 @@
     <div id="panelIssue" style="display:none">
       <h3 style="margin-bottom:12px">ประวัติการเบิกสินค้า</h3>
       <div id="issueHistory"></div>
+    </div>
+    <!-- Movement ledger panel (unified IN/OUT report) -->
+    <div id="panelMovements" style="display:none">
+      <h3 style="margin-bottom:12px">📊 ความเคลื่อนไหวสต๊อก</h3>
+
+      <!-- Filters -->
+      <div class="card" style="padding:14px;margin-bottom:14px">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;align-items:end">
+          <div>
+            <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">ตั้งแต่</label>
+            <input type="date" id="movFrom" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">ถึง</label>
+            <input type="date" id="movTo" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">ประเภท</label>
+            <select id="movType" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+              <option value="">ทั้งหมด</option>
+              <option value="IN">🟢 รับ (IN)</option>
+              <option value="OUT">🔴 เบิก (OUT)</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">เหตุผล (เฉพาะ OUT)</label>
+            <select id="movReason" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+              <option value="">ทั้งหมด</option>
+              <option value="sale">เพื่อขาย</option>
+              <option value="damage">เสียหาย</option>
+              <option value="transfer">โอน</option>
+              <option value="adjustment">ปรับปรุง</option>
+              <option value="other">อื่นๆ</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">ค้นหา item / รหัส</label>
+            <input type="text" id="movSearch" placeholder="ชื่อ / รหัส / SKU..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn" onclick="loadMovements()" style="flex:1">🔍 ค้นหา</button>
+            <button class="btn ghost" onclick="resetMovFilters()" style="flex:1">ล้าง</button>
+          </div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;margin-top:10px;gap:8px">
+          <button class="btn ghost" onclick="exportMovementsCSV()" title="ดาวน์โหลดรายการตามตัวกรองปัจจุบัน — เปิดได้ด้วย Excel/Numbers">
+            📥 Export Excel (CSV)
+          </button>
+        </div>
+      </div>
+
+      <!-- Summary cards -->
+      <div id="movSummary" class="summary-cards"></div>
+
+      <!-- Top movers -->
+      <div class="card" id="movTopMovers" style="padding:14px;margin-bottom:14px;display:none">
+        <h4 style="margin-bottom:10px;color:var(--gold);font-size:14px">🏆 รายการเคลื่อนไหวมากสุด (Top 5)</h4>
+        <div id="movTopMoversBody"></div>
+      </div>
+
+      <!-- Movement table -->
+      <div class="card" style="padding:0;overflow-x:auto">
+        <table class="stock-table" style="font-size:13px">
+          <thead>
+            <tr>
+              <th>วันที่</th>
+              <th>ประเภท</th>
+              <th>เอกสาร</th>
+              <th>รหัส</th>
+              <th>สินค้า</th>
+              <th class="col-num">จำนวน</th>
+              <th>หน่วย</th>
+              <th>เหตุผล</th>
+              <th>ผู้ทำรายการ</th>
+              <th>หมายเหตุ</th>
+            </tr>
+          </thead>
+          <tbody id="movBody"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 </div>
@@ -199,14 +282,23 @@ document.getElementById('nav').innerHTML = renderNav('stock-balance.html');
 let allItems = [];
 let grData = [];
 let issueData = [];
+let movData = [];
+let movLoaded = false;
 
 function switchTab(tab) {
   document.getElementById('panelStock').style.display = tab === 'stock' ? 'block' : 'none';
   document.getElementById('panelGR').style.display = tab === 'gr' ? 'block' : 'none';
   document.getElementById('panelIssue').style.display = tab === 'issue' ? 'block' : 'none';
+  document.getElementById('panelMovements').style.display = tab === 'movements' ? 'block' : 'none';
   document.getElementById('tabStock').classList.toggle('active', tab === 'stock');
   document.getElementById('tabGR').classList.toggle('active', tab === 'gr');
   document.getElementById('tabIssue').classList.toggle('active', tab === 'issue');
+  document.getElementById('tabMovements').classList.toggle('active', tab === 'movements');
+  // Lazy-load movements first time the tab is opened
+  if (tab === 'movements' && !movLoaded) {
+    movLoaded = true;
+    loadMovements();
+  }
 }
 
 async function loadStock() {
@@ -586,6 +678,192 @@ async function toggleIssue(id) {
   } catch (e) {
     el.innerHTML = `<div style="color:var(--err);font-size:12px">โหลดไม่สำเร็จ: ${e.message}</div>`;
   }
+}
+
+// ─── Movement Ledger ───
+async function loadMovements() {
+  const from = document.getElementById('movFrom').value;
+  const to = document.getElementById('movTo').value;
+  const type = document.getElementById('movType').value;
+  const reason = document.getElementById('movReason').value;
+  const search = document.getElementById('movSearch').value.trim();
+
+  const qs = new URLSearchParams();
+  if (from) qs.set('from', from);
+  if (to) qs.set('to', to);
+  if (type) qs.set('type', type);
+  if (reason) qs.set('reason', reason);
+
+  try {
+    const data = await api('/api/stock/movements' + (qs.toString() ? '?' + qs.toString() : ''));
+    movData = data;
+    document.getElementById('movCount').textContent = data.summary.count_total;
+    renderMovSummary(data.summary);
+    renderMovTopMovers(data.top_movers);
+    renderMovTable(data.movements, search);
+  } catch (e) {
+    toast('โหลดความเคลื่อนไหวไม่สำเร็จ: ' + e.message);
+  }
+}
+
+function resetMovFilters() {
+  document.getElementById('movFrom').value = '';
+  document.getElementById('movTo').value = '';
+  document.getElementById('movType').value = '';
+  document.getElementById('movReason').value = '';
+  document.getElementById('movSearch').value = '';
+  loadMovements();
+}
+
+function renderMovSummary(s) {
+  document.getElementById('movSummary').innerHTML = `
+    <div class="card summary-card"><div class="num">${s.count_total}</div><div class="label">รายการ</div></div>
+    <div class="card summary-card"><div class="num" style="color:var(--ok)">${s.total_in.toLocaleString()}</div><div class="label">🟢 รับเข้า (${s.count_in})</div></div>
+    <div class="card summary-card"><div class="num" style="color:#dc2626">${s.total_out.toLocaleString()}</div><div class="label">🔴 เบิกออก (${s.count_out})</div></div>
+    <div class="card summary-card"><div class="num" style="color:${s.net>=0?'var(--ok)':'#dc2626'}">${s.net>=0?'+':''}${s.net.toLocaleString()}</div><div class="label">สุทธิ</div></div>
+    <div class="card summary-card"><div class="num">${s.unique_items}</div><div class="label">สินค้าไม่ซ้ำ</div></div>
+  `;
+}
+
+function renderMovTopMovers(items) {
+  if (!items || !items.length) {
+    document.getElementById('movTopMovers').style.display = 'none';
+    return;
+  }
+  document.getElementById('movTopMovers').style.display = 'block';
+  document.getElementById('movTopMoversBody').innerHTML = items.map((t, idx) => `
+    <div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:${idx===items.length-1?'none':'1px dashed var(--border)'}">
+      <div style="width:24px;height:24px;border-radius:50%;background:var(--gold);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0">${idx+1}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:600;font-size:13px">${t.item_name}</div>
+        <div style="font-size:11px;color:var(--muted)">${t.item_no} · ${t.count} ครั้ง</div>
+      </div>
+      <div style="text-align:right;font-size:12px">
+        <div style="color:var(--ok)">+${t.in_qty.toLocaleString()}</div>
+        <div style="color:#dc2626">-${t.out_qty.toLocaleString()}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+const movReasonLabel = {sale:'เพื่อขาย', damage:'เสียหาย', transfer:'โอน', adjustment:'ปรับปรุง', other:'อื่นๆ'};
+
+function renderMovTable(rows, search) {
+  let filtered = rows;
+  if (search) {
+    const q = search.toLowerCase();
+    filtered = rows.filter(r =>
+      (r.item_no||'').toLowerCase().includes(q) ||
+      (r.item_name||'').toLowerCase().includes(q) ||
+      (r.doc_no||'').toLowerCase().includes(q)
+    );
+  }
+  if (!filtered.length) {
+    document.getElementById('movBody').innerHTML = `<tr><td colspan="10" style="text-align:center;padding:30px;color:var(--muted)">ไม่พบข้อมูลตามเงื่อนไข</td></tr>`;
+    return;
+  }
+  document.getElementById('movBody').innerHTML = filtered.map(m => {
+    const typeBadge = m.type === 'IN'
+      ? `<span style="background:#e8f5e9;color:#2e7d32;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600">🟢 รับ</span>`
+      : `<span style="background:#ffebee;color:#c62828;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600">🔴 เบิก</span>`;
+    const reasonBadge = m.reason
+      ? `<span class="issue-reason reason-${m.reason}">${movReasonLabel[m.reason]||m.reason}</span>`
+      : '-';
+    return `
+      <tr>
+        <td style="white-space:nowrap;color:var(--muted);font-size:12px">${m.ts}</td>
+        <td>${typeBadge}</td>
+        <td style="font-family:monospace;font-size:12px">
+          <strong>${m.doc_no}</strong>
+          ${m.ref_no?`<div style="color:var(--muted);font-size:10px">ref: ${m.ref_no}</div>`:''}
+        </td>
+        <td style="font-family:monospace;font-size:12px">${m.item_no}</td>
+        <td>${m.item_name}</td>
+        <td class="col-num" style="font-weight:700;color:${m.type==='IN'?'var(--ok)':'#dc2626'}">${m.type==='IN'?'+':'−'}${(m.qty||0).toLocaleString()}</td>
+        <td style="color:var(--muted);font-size:12px">${m.uom||'-'}</td>
+        <td>${reasonBadge}</td>
+        <td style="font-size:12px">${m.actor_name||'-'}</td>
+        <td style="color:var(--muted);font-size:11px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${m.note||''}">${m.note||'-'}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+// Live-filter the table client-side as the user types in the search box —
+// no API roundtrip needed since we already loaded the rows.
+document.getElementById('movSearch').oninput = () => {
+  if (movData && movData.movements) renderMovTable(movData.movements, document.getElementById('movSearch').value.trim());
+};
+
+// ─── CSV export ───
+// UTF-8 with BOM so Excel/Numbers detects Thai correctly. Honors the current
+// filters: server-side ones are already baked into movData; client-side
+// search box is applied here so what the user sees is what they download.
+function exportMovementsCSV() {
+  if (!movData || !movData.movements) {
+    toast('ยังไม่มีข้อมูลให้ดาวน์โหลด — กดค้นหาก่อน');
+    return;
+  }
+  const search = document.getElementById('movSearch').value.trim().toLowerCase();
+  const rows = search
+    ? movData.movements.filter(r =>
+        (r.item_no||'').toLowerCase().includes(search) ||
+        (r.item_name||'').toLowerCase().includes(search) ||
+        (r.doc_no||'').toLowerCase().includes(search))
+    : movData.movements;
+
+  if (!rows.length) {
+    toast('ไม่มีรายการให้ดาวน์โหลด');
+    return;
+  }
+
+  // CSV-safe escape: wrap in quotes if the value contains delimiters, newlines,
+  // or quotes; double up internal quotes per RFC 4180.
+  const esc = (v) => {
+    const s = v == null ? '' : String(v);
+    return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+
+  const headers = ['วันที่', 'ประเภท', 'เอกสาร', 'เลขอ้างอิง', 'BC No.', 'รหัสสินค้า', 'ชื่อสินค้า', 'จำนวน', 'หน่วย', 'เหตุผล', 'ผู้ทำรายการ', 'หมายเหตุ'];
+
+  const lines = [headers.map(esc).join(',')];
+  for (const r of rows) {
+    lines.push([
+      r.ts,
+      r.type === 'IN' ? 'รับเข้า' : 'เบิกออก',
+      r.doc_no,
+      r.ref_no || '',
+      r.bc_no || '',
+      r.item_no,
+      r.item_name,
+      (r.type === 'IN' ? '+' : '-') + (r.qty || 0),
+      r.uom || '',
+      r.reason ? (movReasonLabel[r.reason] || r.reason) : '',
+      r.actor_name || '',
+      r.note || '',
+    ].map(esc).join(','));
+  }
+
+  // ﻿ = UTF-8 BOM — required for Excel to recognise UTF-8 in CSV.
+  // \r\n line endings are what Excel expects on Windows; macOS Excel is fine
+  // with both but \r\n is the safer default.
+  const csv = '﻿' + lines.join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+
+  const dt = new Date();
+  const stamp = `${dt.getFullYear()}${String(dt.getMonth()+1).padStart(2,'0')}${String(dt.getDate()).padStart(2,'0')}-${String(dt.getHours()).padStart(2,'0')}${String(dt.getMinutes()).padStart(2,'0')}`;
+  const branch = (getUser() || {}).branch_code || 'all';
+
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `stock-movements-${branch}-${stamp}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  toast(`ดาวน์โหลด ${rows.length} รายการเรียบร้อย`);
 }
 
 window.onLangChange = () => {
