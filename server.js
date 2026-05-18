@@ -1356,6 +1356,14 @@ app.get('/api/stock-balance', requireAuth, (req, res) => {
     if (!byItem[i.item_no]) byItem[i.item_no] = { item_no: i.item_no, total_received: 0, total_issued: 0 };
     byItem[i.item_no].total_issued = i.qty;
   }
+  // Pull all reorder-point settings for this branch in one query, keyed by
+  // item_no so we can attach them in the enrichment loop below.
+  const reorderMap = {};
+  if (branchCode) {
+    for (const r of db.prepare('SELECT item_no, reorder_point, reorder_qty FROM branch_item_settings WHERE branch_code=?').all(branchCode)) {
+      reorderMap[r.item_no] = r;
+    }
+  }
   const getItem = db.prepare('SELECT name, name_en, uom, category FROM items_cache WHERE item_no=?');
   for (const k of Object.keys(byItem)) {
     const meta = getItem.get(k) || {};
@@ -1364,6 +1372,14 @@ app.get('/api/stock-balance', requireAuth, (req, res) => {
     byItem[k].uom = meta.uom || '';
     byItem[k].category = meta.category || '';
     byItem[k].on_hand = (byItem[k].total_received || 0) - (byItem[k].total_issued || 0);
+    const rp = reorderMap[k];
+    byItem[k].reorder_point = rp ? rp.reorder_point : 0;
+    byItem[k].reorder_qty = rp ? rp.reorder_qty : 0;
+    // low_stock fires only when a threshold has been set (>0) and on-hand
+    // has dipped at or below it. We never flag the default 0-threshold as
+    // "low" because that would yell about every item the branch has never
+    // configured.
+    byItem[k].low_stock = byItem[k].reorder_point > 0 && byItem[k].on_hand <= byItem[k].reorder_point;
   }
   const items = Object.values(byItem).sort((a, b) => (a.item_name || '').localeCompare(b.item_name || ''));
 
@@ -1508,6 +1524,57 @@ app.get('/api/stock/issues/:id', requireAuth, (req, res) => {
     WHERE sil.issue_id=?
   `).all(issue.id);
   res.json({ ...issue, lines });
+});
+
+// ─── Reorder-point settings per (branch, item) ─────────────────────────────
+// FC users set their own thresholds. HQ admins can target any branch via
+// ?branch_code= (GET) or body.branch_code (POST).
+
+app.get('/api/reorder-points', requireAuth, (req, res) => {
+  const branchCode = (isHqAdmin(req.user) && req.query.branch_code)
+    ? String(req.query.branch_code) : req.user.branch_code;
+  if (!branchCode) return res.json([]);
+  const rows = db.prepare(`
+    SELECT bis.*, ic.name as item_name, ic.name_en as item_name_en, ic.uom, ic.category
+    FROM branch_item_settings bis
+    LEFT JOIN items_cache ic ON ic.item_no = bis.item_no
+    WHERE bis.branch_code = ?
+    ORDER BY ic.name
+  `).all(branchCode);
+  res.json(rows);
+});
+
+app.post('/api/reorder-points', requireAuth, (req, res) => {
+  const { item_no, reorder_point, reorder_qty = 0, note = '' } = req.body || {};
+  if (!item_no) return res.status(400).json({ error: 'item_no required' });
+  if (typeof reorder_point !== 'number' || reorder_point < 0) {
+    return res.status(400).json({ error: 'reorder_point must be a number >= 0' });
+  }
+  if (typeof reorder_qty !== 'number' || reorder_qty < 0) {
+    return res.status(400).json({ error: 'reorder_qty must be a number >= 0' });
+  }
+  // HQ admin can target any branch; everyone else writes to own branch
+  const branchCode = (isHqAdmin(req.user) && req.body.branch_code)
+    ? String(req.body.branch_code) : req.user.branch_code;
+  if (!branchCode) return res.status(400).json({ error: 'ผู้ใช้ไม่มีสาขา — เฉพาะ admin เท่านั้นที่ระบุ branch_code ได้' });
+
+  // Confirm item exists in catalog before saving the setting — otherwise
+  // we'd silently allow garbage item_no entries that never resolve.
+  const itemExists = db.prepare('SELECT 1 FROM items_cache WHERE item_no=?').get(item_no);
+  if (!itemExists) return res.status(404).json({ error: `ไม่พบสินค้า ${item_no}` });
+
+  db.prepare(`
+    INSERT INTO branch_item_settings (branch_code, item_no, reorder_point, reorder_qty, note, updated_by, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, datetime('now','localtime'))
+    ON CONFLICT(branch_code, item_no) DO UPDATE SET
+      reorder_point = excluded.reorder_point,
+      reorder_qty   = excluded.reorder_qty,
+      note          = excluded.note,
+      updated_by    = excluded.updated_by,
+      updated_at    = excluded.updated_at
+  `).run(branchCode, item_no, reorder_point, reorder_qty, note, req.user.id);
+
+  res.json({ ok: true, branch_code: branchCode, item_no, reorder_point, reorder_qty });
 });
 
 // ─── Sync ───
