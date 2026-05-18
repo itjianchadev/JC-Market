@@ -978,51 +978,126 @@ function humanizeBcError(rawError) {
   return `⚠️ BC error: ${raw.length > 220 ? raw.slice(0, 220) + '…' : raw}`;
 }
 
-// ─── Helper: create + post a Sales Invoice in BC for an already-received order ───
-// Used by the receive flow on success and by the admin retry endpoint after a
-// stock/permission issue is resolved. Idempotent: skips if bc_posted already 1
-// and self-cleans the orphan draft invoice on failure.
+// ─── Helper: post BC Sales Order — Ship+Invoice (preferred), with fallback ───
+//
+// Two-stage hybrid:
+//   1. Try `Microsoft.NAV.shipAndInvoice` on the SO → produces a Posted
+//      Sales Shipment + Posted Sales Invoice and keeps SO in BC archive
+//      (the "BC standard" flow). Requires items to have consistent Qty.
+//      Rounding Precision between sales unit and base unit — otherwise
+//      BC rejects with "out of balance" / "Qty. Rounding Precision".
+//
+//   2. If step 1 fails specifically with a rounding/UoM-conversion error,
+//      fall back to: createSalesInvoice + addLines + postInvoice +
+//      deleteSalesOrder. This bypasses the SO line's UoM constraints by
+//      creating a free-standing invoice line whose qty + price are taken
+//      verbatim from our local order. Used because:
+//
+//        * Fixing Qty. Rounding Precision on 461 items in BC is a
+//          multi-day admin job we can't block sales on
+//        * The fallback is the previous (proven) post path, so we know
+//          it works for this BC data shape
+//
+//      The SO is deleted as cleanup because the standalone posted invoice
+//      now carries the transaction and BC won't accept a duplicate.
+//
+// Anything that ISN'T a rounding error (customer not found, stock too low,
+// permission denied, etc.) is NOT eligible for fallback — those are real
+// business issues the admin needs to resolve in BC. We save the error to
+// bc_sync_error and let admin retry from the dashboard once fixed.
+//
+// Idempotent: skips when bc_posted=1.
 async function postSalesInvoiceForOrder(orderId) {
   const order = db.prepare('SELECT o.*, u.bc_customer_no FROM orders o LEFT JOIN users u ON u.id=o.user_id WHERE o.id=?').get(orderId);
   if (!order) return { ok: false, error: 'Order not found' };
   if (order.bc_posted) return { ok: true, already: true, bc_invoice_no: order.bc_invoice_no };
+  if (!order.bc_so_id) return { ok: false, error: 'ไม่มี BC SO id — checkout ยังไม่สำเร็จ' };
 
-  const customerNo = order.bc_customer_no || '';
-  if (!customerNo) return { ok: false, error: 'ไม่พบเลขลูกค้า BC (bc_customer_no)' };
-
-  const lines = db.prepare('SELECT * FROM order_lines WHERE order_id=?').all(orderId);
-  if (!lines.length) return { ok: false, error: 'ไม่มี order line' };
-
-  let draftInvoiceId = null;
+  // Read externalDocumentNumber from the SO BEFORE we touch it — needed
+  // for invoice lookup later AND as the externalDocumentNumber on any
+  // fallback invoice we create (so cross-referencing the SO ↔ invoice
+  // still works in BC).
+  let externalDocNo = order.order_number;
   try {
-    const inv = await bc.createSalesInvoice({
-      customerNumber: customerNo,
-      externalDocumentNumber: order.bc_so_no || order.order_number,
-    });
-    draftInvoiceId = inv.id;
-    for (const line of lines) {
-      const item = db.prepare('SELECT id FROM items_cache WHERE item_no=?').get(line.item_no);
-      await bc.addInvoiceLine(draftInvoiceId, {
-        itemId: item ? item.id : undefined,
-        lineType: 'Item',
-        quantity: line.quantity,
-        unitPrice: line.unit_price,
-        description: line.item_name,
-        locationId: '7e4291d6-d13e-f011-be59-000d3a086703', // CTI WH
-      });
-    }
-    const posted = await bc.postInvoice(draftInvoiceId);
-    const postedNo = posted?.number || inv.number || '';
-    const postedId = posted?.id || draftInvoiceId;
-    draftInvoiceId = null;
-    db.prepare("UPDATE orders SET bc_posted=1, bc_invoice_id=?, bc_invoice_no=?, bc_sync_error='' WHERE id=?")
-      .run(postedId, postedNo, orderId);
-    db.prepare('INSERT INTO sync_log (kind, status, message, count) VALUES (?,?,?,?)')
-      .run('post_invoice', 'ok', `Posted Invoice ${postedNo} for SO ${order.bc_so_no}`, 1);
+    const soBefore = await bc.getSalesOrder(order.bc_so_id);
+    if (soBefore?.externalDocumentNumber) externalDocNo = soBefore.externalDocumentNumber;
+  } catch (e) {
+    console.warn('[BC getSalesOrder pre-post]', e.message);
+  }
 
-    // Drop the orphan SO since the posted invoice now carries the transaction.
-    let soCleanup = null;
-    if (order.bc_so_id) {
+  // ─── Stage 1: try BC-native shipAndInvoice ───
+  try {
+    await bc.shipAndInvoiceSalesOrder(order.bc_so_id);
+
+    // Look up the resulting posted invoice via externalDocumentNumber
+    let bcInvoiceNo = '';
+    let bcInvoiceId = '';
+    try {
+      const lookup = await bc.findPostedInvoiceByExternalDoc(externalDocNo);
+      const inv = (lookup.value || [])[0];
+      if (inv) { bcInvoiceNo = inv.number || ''; bcInvoiceId = inv.id || ''; }
+    } catch (e) {
+      console.warn('[BC findPostedInvoice]', e.message);
+    }
+
+    db.prepare("UPDATE orders SET bc_posted=1, bc_invoice_id=?, bc_invoice_no=?, bc_sync_error='' WHERE id=?")
+      .run(bcInvoiceId, bcInvoiceNo, orderId);
+    db.prepare('INSERT INTO sync_log (kind, status, message, count) VALUES (?,?,?,?)')
+      .run('post_so', 'ok', `Ship+Invoice SO ${order.bc_so_no} → Invoice ${bcInvoiceNo || '(lookup-failed)'}`, 1);
+
+    return { ok: true, method: 'ship_and_invoice', bc_invoice_no: bcInvoiceNo, bc_invoice_id: bcInvoiceId, bc_so_no: order.bc_so_no };
+  } catch (shipErr) {
+    const shipMsg = String(shipErr.message || '');
+    console.warn('[BC shipAndInvoice]', shipMsg);
+
+    // Only fall back on rounding / UoM-conversion errors. Other BC errors
+    // (customer not found, stock low, etc.) are real issues admin must fix.
+    const isRoundingError = /Rounding Precision|out of balance|Qty.* Base/i.test(shipMsg);
+
+    if (!isRoundingError) {
+      const m = shipMsg.match(/"message":"([^"]+)"/);
+      const friendly = humanizeBcError(m ? m[1] : shipMsg);
+      db.prepare("UPDATE orders SET bc_sync_error=? WHERE id=?").run(friendly, orderId);
+      db.prepare('INSERT INTO sync_log (kind, status, message, count) VALUES (?,?,?,?)')
+        .run('post_so', 'error', `SO ${order.bc_so_no}: ${shipMsg}`, 1);
+      return { ok: false, error: friendly };
+    }
+
+    // ─── Stage 2: fallback to createSalesInvoice path ───
+    const customerNo = order.bc_customer_no || '';
+    if (!customerNo) {
+      const err = 'ไม่พบเลขลูกค้า BC (bc_customer_no) — fallback ใช้ไม่ได้';
+      db.prepare("UPDATE orders SET bc_sync_error=? WHERE id=?").run(err, orderId);
+      return { ok: false, error: err };
+    }
+    const lines = db.prepare('SELECT * FROM order_lines WHERE order_id=?').all(orderId);
+    if (!lines.length) return { ok: false, error: 'ไม่มี order line' };
+
+    let draftInvoiceId = null;
+    try {
+      const inv = await bc.createSalesInvoice({
+        customerNumber: customerNo,
+        externalDocumentNumber: externalDocNo,
+      });
+      draftInvoiceId = inv.id;
+      for (const line of lines) {
+        const item = db.prepare('SELECT id FROM items_cache WHERE item_no=?').get(line.item_no);
+        await bc.addInvoiceLine(draftInvoiceId, {
+          itemId: item ? item.id : undefined,
+          lineType: 'Item',
+          quantity: line.quantity,
+          unitPrice: line.unit_price,
+          description: line.item_name,
+          locationId: '7e4291d6-d13e-f011-be59-000d3a086703', // CTI WH
+        });
+      }
+      const posted = await bc.postInvoice(draftInvoiceId);
+      const postedNo = posted?.number || inv.number || '';
+      const postedId = posted?.id || draftInvoiceId;
+      draftInvoiceId = null;
+
+      // Delete orphan SO — the posted invoice now carries the transaction.
+      let soCleanup = null;
       try {
         await bc.deleteSalesOrder(order.bc_so_id);
         soCleanup = { deleted: true };
@@ -1032,22 +1107,32 @@ async function postSalesInvoiceForOrder(orderId) {
           .run('delete_so', 'error', `SO ${order.bc_so_no}: ${e.message}`, 1);
         soCleanup = { deleted: false, error: e.message };
       }
+
+      db.prepare("UPDATE orders SET bc_posted=1, bc_invoice_id=?, bc_invoice_no=?, bc_sync_error='' WHERE id=?")
+        .run(postedId, postedNo, orderId);
+      db.prepare('INSERT INTO sync_log (kind, status, message, count) VALUES (?,?,?,?)')
+        .run('post_so', 'fallback', `Fallback (rounding) — SO ${order.bc_so_no} → Invoice ${postedNo}`, 1);
+
+      return {
+        ok: true,
+        method: 'fallback_invoice',
+        fallback_reason: 'qty_rounding_precision',
+        bc_invoice_no: postedNo,
+        bc_invoice_id: postedId,
+        so_cleanup: soCleanup,
+      };
+    } catch (fbErr) {
+      console.error('[BC fallback]', fbErr.message);
+      if (draftInvoiceId) {
+        bc.deleteSalesInvoice(draftInvoiceId).catch(e => console.error('[BC cleanup]', e.message));
+      }
+      const m = String(fbErr.message || '').match(/"message":"([^"]+)"/);
+      const friendly = humanizeBcError(m ? m[1] : fbErr.message);
+      db.prepare("UPDATE orders SET bc_sync_error=? WHERE id=?").run(friendly, orderId);
+      db.prepare('INSERT INTO sync_log (kind, status, message, count) VALUES (?,?,?,?)')
+        .run('post_so', 'error', `Fallback failed — SO ${order.bc_so_no}: ${fbErr.message}`, 1);
+      return { ok: false, error: friendly };
     }
-    return { ok: true, bc_invoice_no: postedNo, bc_invoice_id: postedId, so_cleanup: soCleanup };
-  } catch (e) {
-    console.error('[BC postInvoice]', e.message);
-    if (draftInvoiceId) {
-      bc.deleteSalesInvoice(draftInvoiceId).catch(err => console.error('[BC cleanup]', err.message));
-    }
-    // Pull just the human-readable line out of the BC error JSON, then run it
-    // through humanizeBcError so the admin dashboard shows actionable Thai text.
-    const m = String(e.message || '').match(/"message":"([^"]+)"/);
-    const rawMsg = m ? m[1] : e.message;
-    const friendly = humanizeBcError(rawMsg);
-    db.prepare("UPDATE orders SET bc_sync_error=? WHERE id=?").run(friendly, orderId);
-    db.prepare('INSERT INTO sync_log (kind, status, message, count) VALUES (?,?,?,?)')
-      .run('post_invoice', 'error', `SO ${order.bc_so_no}: ${e.message}`, 1);
-    return { ok: false, error: friendly };
   }
 }
 
