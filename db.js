@@ -197,7 +197,32 @@ CREATE TABLE IF NOT EXISTS branch_item_settings (
   UNIQUE(branch_code, item_no)
 );
 CREATE INDEX IF NOT EXISTS idx_bis_branch ON branch_item_settings(branch_code);
+
+-- Software license — singleton row (CHECK id=1). Super admin sets product
+-- name, license key, licensee, issue/expiry dates. The UI computes days
+-- remaining client-side so admin can see the countdown without server work.
+CREATE TABLE IF NOT EXISTS license_info (
+  id           INTEGER PRIMARY KEY CHECK (id = 1),
+  product_name TEXT DEFAULT 'JC-Market',
+  license_key  TEXT DEFAULT '',
+  licensed_to  TEXT DEFAULT '',
+  issued_at    TEXT,
+  expires_at   TEXT,
+  features     TEXT DEFAULT '',
+  notes        TEXT DEFAULT '',
+  updated_by   TEXT,
+  updated_at   TEXT DEFAULT (datetime('now','localtime'))
+);
+INSERT OR IGNORE INTO license_info (id, product_name) VALUES (1, 'JC-Market');
 `);
+
+// ─── Per-branch license fields ─────────────────────────────────────────────
+// Each FC has its own software-licence expiry (franchise contract / SaaS
+// subscription). Stored directly on branches so the branches grid can show
+// status without a join.
+try { db.exec("ALTER TABLE branches ADD COLUMN license_key TEXT DEFAULT ''"); } catch (e) {}
+try { db.exec("ALTER TABLE branches ADD COLUMN license_issued_at TEXT"); } catch (e) {}
+try { db.exec("ALTER TABLE branches ADD COLUMN license_expires_at TEXT"); } catch (e) {}
 
 // ─── Migrate: cancel fields ───
 try { db.exec("ALTER TABLE orders ADD COLUMN cancelled_at TEXT"); } catch (e) {}
@@ -313,13 +338,14 @@ if (userCount === 0) {
     VALUES (?,?,?,?,?,?,?,?,?)`);
   // can_order: admins don't place orders (they manage), fc branches DO
   // bc_customer_no values JF001/JF002 are the real customers in the
-  // Jiancha_develop BC environment. C-JF039 etc. were placeholder and
-  // failed BC validation with Internal_InvalidTableRelation on checkout.
+  // Jiancha_develop BC environment. The two seeded branch users are
+  // branch_owner so they can manage their own branch team out of the box
+  // (add cashier / stock / staff under themselves via team.html).
   stmt.run(uid(), 'itmanager', hash('it1234'), 'IT Manager', 'super_admin', '', 'HQ', '', 0);
   stmt.run(uid(), 'admin', hash('admin1234'), 'SCM Admin', 'admin_scm', '', 'HQ', '', 0);
-  stmt.run(uid(), 'jf039', hash('fc1234'), 'FC JF039', 'fc', 'JF039', 'สาขา JF039', 'JF001', 1);
-  stmt.run(uid(), 'jf049', hash('fc1234'), 'FC JF049', 'fc', 'JF049', 'สาขา JF049', 'JF002', 1);
-  console.log('[db] Seeded users: itmanager/it1234 (super_admin), admin/admin1234 (admin_scm), jf039/jf049 (fc)');
+  stmt.run(uid(), 'jf039', hash('fc1234'), 'Owner JF039', 'branch_owner', 'JF039', 'สาขา JF039', 'JF001', 1);
+  stmt.run(uid(), 'jf049', hash('fc1234'), 'Owner JF049', 'branch_owner', 'JF049', 'สาขา JF049', 'JF002', 1);
+  console.log('[db] Seeded users: itmanager/it1234 (super_admin), admin/admin1234 (admin_scm), jf039/jf049 (branch_owner)');
 }
 
 // ─── Seed super_admin "IT Manager" ถ้ายังไม่มี ───

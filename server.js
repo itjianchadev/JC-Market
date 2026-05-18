@@ -48,6 +48,19 @@ app.get('/api/me', requireAuth, (req, res) => {
 // ─────────────── Branches (HQ admin CRUD) ───────────────
 
 // List branches — HQ admins see all, others see own
+// Compute days_remaining + status from an expires_at YYYY-MM-DD string.
+// Same shape as the global /api/admin/license computation so the UI can
+// reuse one renderer for both.
+function computeLicenseFields(expiresAt) {
+  if (!expiresAt) return { days_remaining: null, license_status: 'unset' };
+  const exp = new Date(expiresAt + (expiresAt.length === 10 ? 'T23:59:59' : ''));
+  const days = Math.ceil((exp - new Date()) / 86400000);
+  let status = 'active';
+  if (days < 0) status = 'expired';
+  else if (days <= 30) status = 'expiring_soon';
+  return { days_remaining: days, license_status: status };
+}
+
 app.get('/api/branches', requireAuth, (req, res) => {
   let rows;
   if (isHqAdmin(req.user)) {
@@ -55,12 +68,13 @@ app.get('/api/branches', requireAuth, (req, res) => {
   } else {
     rows = db.prepare('SELECT * FROM branches WHERE code=?').all(req.user.branch_code || '');
   }
-  // Attach user counts
+  // Attach user counts + license status
   const cntStmt = db.prepare("SELECT COUNT(*) c FROM users WHERE branch_code=? AND active=1");
   for (const b of rows) {
     b.user_count = cntStmt.get(b.code).c;
     b.show_tax_id = !!b.show_tax_id;
     b.active = !!b.active;
+    Object.assign(b, computeLicenseFields(b.license_expires_at));
   }
   res.json(rows);
 });
@@ -115,9 +129,10 @@ app.put('/api/branches/:code', requireAuth, (req, res) => {
   if (!isSuper && !isBranchOwner) return res.status(403).json({ error: 'Forbidden' });
 
   const p = req.body || {};
-  // Super Admin can change anything; branch_owner can change only contact + show_tax_id
+  // Super Admin can change anything (including per-branch license fields);
+  // branch_owner can change only contact + show_tax_id.
   if (isSuper) {
-    db.prepare(`UPDATE branches SET name=?, bc_customer_no=?, address=?, phone=?, manager_email=?, tax_id=?, show_tax_id=?, active=? WHERE code=?`)
+    db.prepare(`UPDATE branches SET name=?, bc_customer_no=?, address=?, phone=?, manager_email=?, tax_id=?, show_tax_id=?, active=?, license_key=?, license_issued_at=?, license_expires_at=? WHERE code=?`)
       .run(
         p.name ?? b.name,
         p.bc_customer_no ?? b.bc_customer_no,
@@ -127,6 +142,9 @@ app.put('/api/branches/:code', requireAuth, (req, res) => {
         p.tax_id ?? b.tax_id,
         (p.show_tax_id ?? b.show_tax_id) ? 1 : 0,
         (p.active ?? b.active) ? 1 : 0,
+        p.license_key ?? b.license_key ?? '',
+        p.license_issued_at ?? b.license_issued_at,
+        p.license_expires_at ?? b.license_expires_at,
         b.code
       );
   } else {
@@ -1637,6 +1655,56 @@ app.get('/api/stock/movements', requireAuth, (req, res) => {
     top_movers: topMovers,
     movements,
   });
+});
+
+// ─── Software license info (singleton) ─────────────────────────────────────
+// Any logged-in user can READ (so the expiry banner can render in the nav),
+// only super_admin can WRITE.
+app.get('/api/admin/license', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM license_info WHERE id=1').get();
+  if (!row) return res.json({ product_name: 'JC-Market' });
+
+  // Compute days_remaining server-side from `expires_at` so the client
+  // doesn't have to parse a local-time string with potential TZ skew. The
+  // result is a signed integer — negative when already expired.
+  let daysRemaining = null;
+  let status = 'unknown';
+  if (row.expires_at) {
+    const exp = new Date(row.expires_at + (row.expires_at.length === 10 ? 'T23:59:59' : ''));
+    const now = new Date();
+    daysRemaining = Math.ceil((exp - now) / 86400000);
+    if (daysRemaining < 0) status = 'expired';
+    else if (daysRemaining <= 30) status = 'expiring_soon';
+    else status = 'active';
+  }
+  res.json({ ...row, days_remaining: daysRemaining, status });
+});
+
+app.post('/api/admin/license', requireAuth, requireSuperAdmin, (req, res) => {
+  const { product_name, license_key, licensed_to, issued_at, expires_at, features, notes } = req.body || {};
+  db.prepare(`
+    UPDATE license_info SET
+      product_name = COALESCE(?, product_name),
+      license_key  = COALESCE(?, license_key),
+      licensed_to  = COALESCE(?, licensed_to),
+      issued_at    = COALESCE(?, issued_at),
+      expires_at   = COALESCE(?, expires_at),
+      features     = COALESCE(?, features),
+      notes        = COALESCE(?, notes),
+      updated_by   = ?,
+      updated_at   = datetime('now','localtime')
+    WHERE id = 1
+  `).run(
+    product_name ?? null,
+    license_key ?? null,
+    licensed_to ?? null,
+    issued_at ?? null,
+    expires_at ?? null,
+    features ?? null,
+    notes ?? null,
+    req.user.id,
+  );
+  res.json({ ok: true });
 });
 
 // ─── Reorder-point settings per (branch, item) ─────────────────────────────

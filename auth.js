@@ -24,7 +24,14 @@ function login(username, password) {
 // ─── Role helpers ───
 const HQ_ROLES = new Set(['super_admin', 'admin_scm']);        // HQ roles (no branch, admin-level)
 const ADMIN_ROLES = HQ_ROLES;                                   // กลุ่มที่ผ่าน requireAdmin
-const BRANCH_ROLES = new Set(['branch_owner', 'store_manager', 'cashier', 'fc']);
+// Branch-level role hierarchy (top → bottom):
+//   branch_owner   — manages users in own branch + everything below
+//   store_manager  — daily ops + approvals
+//   cashier        — sales / payment side
+//   stock          — receive + issue + reorder-point upkeep
+//   staff          — view + assist, no write to inventory
+//   fc             — legacy "generic branch member" (kept for back-compat)
+const BRANCH_ROLES = new Set(['branch_owner', 'store_manager', 'cashier', 'stock', 'staff', 'fc']);
 
 function isHqAdmin(user) { return !!user && ADMIN_ROLES.has(user.role); }
 function isSuperAdmin(user) { return !!user && user.role === 'super_admin'; }
