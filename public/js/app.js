@@ -190,7 +190,7 @@ const I18N = {
     'users.deactivate':'ปิด user','users.confirm_deactivate':'ปิด user นี้?',
     'role.super_admin':'Super Admin','role.admin_scm':'SCM Admin',
     'role.branch_owner':'Branch Owner','role.store_manager':'Store Manager',
-    'role.cashier':'แคชเชีย','role.fc':'สมาชิกสาขา',
+    'role.cashier':'แคชเชียร์','role.stock':'พนักงานสต๊อก','role.staff':'พนักงาน','role.fc':'สมาชิกสาขา',
     // legacy aliases (เผื่อข้อมูลเก่า)
     'role.admin':'SCM Admin','role.branch_admin':'Branch Owner','role.manager':'Store Manager',
     'nav.team':'👥 จัดการผู้ใช้',
@@ -383,7 +383,7 @@ const I18N = {
     'users.deactivate':'Deactivate','users.confirm_deactivate':'Deactivate this user?',
     'role.super_admin':'Super Admin','role.admin_scm':'SCM Admin',
     'role.branch_owner':'Branch Owner','role.store_manager':'Store Manager',
-    'role.cashier':'Cashier','role.fc':'Member',
+    'role.cashier':'Cashier','role.stock':'Stock Keeper','role.staff':'Staff','role.fc':'Member',
     // legacy aliases
     'role.admin':'SCM Admin','role.branch_admin':'Branch Owner','role.manager':'Store Manager',
     'nav.team':'👥 Team',

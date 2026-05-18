@@ -1639,6 +1639,56 @@ app.get('/api/stock/movements', requireAuth, (req, res) => {
   });
 });
 
+// ─── Software license info (singleton) ─────────────────────────────────────
+// Any logged-in user can READ (so the expiry banner can render in the nav),
+// only super_admin can WRITE.
+app.get('/api/admin/license', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM license_info WHERE id=1').get();
+  if (!row) return res.json({ product_name: 'JC-Market' });
+
+  // Compute days_remaining server-side from `expires_at` so the client
+  // doesn't have to parse a local-time string with potential TZ skew. The
+  // result is a signed integer — negative when already expired.
+  let daysRemaining = null;
+  let status = 'unknown';
+  if (row.expires_at) {
+    const exp = new Date(row.expires_at + (row.expires_at.length === 10 ? 'T23:59:59' : ''));
+    const now = new Date();
+    daysRemaining = Math.ceil((exp - now) / 86400000);
+    if (daysRemaining < 0) status = 'expired';
+    else if (daysRemaining <= 30) status = 'expiring_soon';
+    else status = 'active';
+  }
+  res.json({ ...row, days_remaining: daysRemaining, status });
+});
+
+app.post('/api/admin/license', requireAuth, requireSuperAdmin, (req, res) => {
+  const { product_name, license_key, licensed_to, issued_at, expires_at, features, notes } = req.body || {};
+  db.prepare(`
+    UPDATE license_info SET
+      product_name = COALESCE(?, product_name),
+      license_key  = COALESCE(?, license_key),
+      licensed_to  = COALESCE(?, licensed_to),
+      issued_at    = COALESCE(?, issued_at),
+      expires_at   = COALESCE(?, expires_at),
+      features     = COALESCE(?, features),
+      notes        = COALESCE(?, notes),
+      updated_by   = ?,
+      updated_at   = datetime('now','localtime')
+    WHERE id = 1
+  `).run(
+    product_name ?? null,
+    license_key ?? null,
+    licensed_to ?? null,
+    issued_at ?? null,
+    expires_at ?? null,
+    features ?? null,
+    notes ?? null,
+    req.user.id,
+  );
+  res.json({ ok: true });
+});
+
 // ─── Reorder-point settings per (branch, item) ─────────────────────────────
 // FC users set their own thresholds. HQ admins can target any branch via
 // ?branch_code= (GET) or body.branch_code (POST).
