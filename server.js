@@ -1526,6 +1526,119 @@ app.get('/api/stock/issues/:id', requireAuth, (req, res) => {
   res.json({ ...issue, lines });
 });
 
+// ─── Unified Stock Movement Ledger ─────────────────────────────────────────
+// Returns receipts (IN) and issues (OUT) merged + sorted desc by timestamp.
+// Filters: from / to (ISO date strings), item_no, type ('IN' or 'OUT'),
+// reason (for OUT only). Branch-scoped: fc sees own branch; HQ admin can
+// pass ?branch_code= or ?user_id= to target any.
+//
+// Each row carries: ts, type, doc_no, ref_no, bc_no, item_no, item_name,
+// uom, qty, actor_name, reason, note — uniform shape across IN/OUT so
+// the frontend can render a single table.
+app.get('/api/stock/movements', requireAuth, (req, res) => {
+  const targetUserId = (isHqAdmin(req.user) && req.query.user_id) ? String(req.query.user_id) : req.user.id;
+  const targetBranch = (isHqAdmin(req.user) && req.query.branch_code) ? String(req.query.branch_code) : (req.user.branch_code || '');
+  const { from, to, item_no, type, reason } = req.query;
+
+  const wantsIN = !type || type === 'IN';
+  const wantsOUT = !type || type === 'OUT';
+
+  let inRows = [];
+  if (wantsIN) {
+    let sql = `
+      SELECT
+        gr.created_at as ts,
+        'IN' as type,
+        gr.receipt_number as doc_no,
+        o.order_number as ref_no,
+        COALESCE(o.bc_invoice_no, '') as bc_no,
+        gl.item_no,
+        gl.item_name,
+        ic.uom as uom,
+        gl.received_qty as qty,
+        COALESCE(u.full_name, '') as actor_name,
+        '' as reason,
+        COALESCE(gr.note, '') as note
+      FROM goods_receipt_lines gl
+      JOIN goods_receipts gr ON gr.id = gl.receipt_id
+      JOIN orders o ON o.id = gr.order_id
+      LEFT JOIN users u ON u.id = gr.received_by
+      LEFT JOIN items_cache ic ON ic.item_no = gl.item_no
+      WHERE o.user_id = ?
+    `;
+    const params = [targetUserId];
+    if (from) { sql += ' AND gr.created_at >= ?'; params.push(from); }
+    if (to) { sql += ' AND gr.created_at <= ?'; params.push(to + ' 23:59:59'); }
+    if (item_no) { sql += ' AND gl.item_no = ?'; params.push(item_no); }
+    inRows = db.prepare(sql).all(...params);
+  }
+
+  let outRows = [];
+  if (wantsOUT && targetBranch) {
+    let sql = `
+      SELECT
+        si.created_at as ts,
+        'OUT' as type,
+        si.issue_number as doc_no,
+        '' as ref_no,
+        '' as bc_no,
+        sil.item_no,
+        sil.item_name,
+        ic.uom as uom,
+        sil.qty as qty,
+        COALESCE(u.full_name, '') as actor_name,
+        si.reason,
+        COALESCE(si.note, '') as note
+      FROM stock_issue_lines sil
+      JOIN stock_issues si ON si.id = sil.issue_id
+      LEFT JOIN users u ON u.id = si.issued_by
+      LEFT JOIN items_cache ic ON ic.item_no = sil.item_no
+      WHERE si.branch_code = ?
+    `;
+    const params = [targetBranch];
+    if (from) { sql += ' AND si.created_at >= ?'; params.push(from); }
+    if (to) { sql += ' AND si.created_at <= ?'; params.push(to + ' 23:59:59'); }
+    if (item_no) { sql += ' AND sil.item_no = ?'; params.push(item_no); }
+    if (reason) { sql += ' AND si.reason = ?'; params.push(reason); }
+    outRows = db.prepare(sql).all(...params);
+  }
+
+  const movements = [...inRows, ...outRows]
+    .sort((a, b) => (b.ts || '').localeCompare(a.ts || ''))
+    .slice(0, 1000);
+
+  // Summary block — totals + counts, plus net movement and a top-5 leaderboard
+  // for "most active items" so the UI can show a quick "what moved a lot"
+  // card without re-walking the rows in JS.
+  const totalIn = movements.filter(r => r.type === 'IN').reduce((s, r) => s + (r.qty || 0), 0);
+  const totalOut = movements.filter(r => r.type === 'OUT').reduce((s, r) => s + (r.qty || 0), 0);
+  const byItem = {};
+  for (const r of movements) {
+    const k = r.item_no;
+    if (!byItem[k]) byItem[k] = { item_no: k, item_name: r.item_name, in_qty: 0, out_qty: 0, count: 0 };
+    if (r.type === 'IN') byItem[k].in_qty += r.qty;
+    else byItem[k].out_qty += r.qty;
+    byItem[k].count++;
+  }
+  const topMovers = Object.values(byItem)
+    .sort((a, b) => (b.in_qty + b.out_qty) - (a.in_qty + a.out_qty))
+    .slice(0, 5);
+
+  res.json({
+    summary: {
+      total_in: totalIn,
+      total_out: totalOut,
+      net: totalIn - totalOut,
+      count_in: movements.filter(r => r.type === 'IN').length,
+      count_out: movements.filter(r => r.type === 'OUT').length,
+      count_total: movements.length,
+      unique_items: Object.keys(byItem).length,
+    },
+    top_movers: topMovers,
+    movements,
+  });
+});
+
 // ─── Reorder-point settings per (branch, item) ─────────────────────────────
 // FC users set their own thresholds. HQ admins can target any branch via
 // ?branch_code= (GET) or body.branch_code (POST).
