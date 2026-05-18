@@ -267,10 +267,13 @@ if (userCount === 0) {
   const stmt = db.prepare(`INSERT INTO users (id, username, password, full_name, role, branch_code, branch_name, bc_customer_no, can_order)
     VALUES (?,?,?,?,?,?,?,?,?)`);
   // can_order: admins don't place orders (they manage), fc branches DO
+  // bc_customer_no values JF001/JF002 are the real customers in the
+  // Jiancha_develop BC environment. C-JF039 etc. were placeholder and
+  // failed BC validation with Internal_InvalidTableRelation on checkout.
   stmt.run(uid(), 'itmanager', hash('it1234'), 'IT Manager', 'super_admin', '', 'HQ', '', 0);
   stmt.run(uid(), 'admin', hash('admin1234'), 'SCM Admin', 'admin_scm', '', 'HQ', '', 0);
-  stmt.run(uid(), 'jf039', hash('fc1234'), 'FC JF039', 'fc', 'JF039', 'สาขา JF039', 'C-JF039', 1);
-  stmt.run(uid(), 'jf049', hash('fc1234'), 'FC JF049', 'fc', 'JF049', 'สาขา JF049', 'C-JF049', 1);
+  stmt.run(uid(), 'jf039', hash('fc1234'), 'FC JF039', 'fc', 'JF039', 'สาขา JF039', 'JF001', 1);
+  stmt.run(uid(), 'jf049', hash('fc1234'), 'FC JF049', 'fc', 'JF049', 'สาขา JF049', 'JF002', 1);
   console.log('[db] Seeded users: itmanager/it1234 (super_admin), admin/admin1234 (admin_scm), jf039/jf049 (fc)');
 }
 
