@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="th"><head>
-<meta charset="utf-8"><title>ร้านค้า — JC-Stock Market</title>
+<meta charset="utf-8"><title>ร้านค้า — JC-Market</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/css/style.css">
@@ -9,53 +9,127 @@
 .sidebar{width:220px;flex-shrink:0}
 .sidebar .cat-list{list-style:none;padding:0}
 .sidebar .cat-list li{padding:10px 14px;border-radius:8px;cursor:pointer;color:var(--muted);font-size:14px;transition:.15s;display:flex;justify-content:space-between;align-items:center}
-.sidebar .cat-list li:hover{background:var(--card);color:var(--text)}
-.sidebar .cat-list li.active{background:var(--gold);color:#000;font-weight:600}
+.sidebar .cat-list li:hover{background:var(--beige);color:var(--text)}
+.sidebar .cat-list li.active{background:var(--gold);color:#fff;font-weight:600}
 .sidebar .cat-list li .count{font-size:12px;opacity:.7}
 .main-area{flex:1;min-width:0}
-@media(max-width:768px){.shop-layout{flex-direction:column}.sidebar{width:100%}.sidebar .cat-list{display:flex;overflow-x:auto;gap:6px;padding-bottom:8px}.sidebar .cat-list li{white-space:nowrap;flex-shrink:0}}
+/* Item list table */
+.item-table{width:100%;border-collapse:separate;border-spacing:0}
+.item-table thead th{position:sticky;top:0;background:var(--primary);color:var(--gold);font-size:13px;font-weight:600;text-align:left;padding:10px 12px;border-bottom:2px solid var(--gold)}
+.item-table tbody tr{cursor:pointer;transition:.15s}
+.item-table tbody tr:hover{background:rgba(173,156,130,.1)}
+.item-table tbody tr:nth-child(even){background:var(--beige)}
+.item-table tbody td{padding:10px 12px;border-bottom:1px solid var(--border);font-size:14px;vertical-align:middle}
+.item-table .col-no{width:120px;color:var(--muted);font-size:13px}
+.item-table .col-name{font-weight:600}
+.item-table .col-price{color:var(--gold-dark);font-weight:700;white-space:nowrap}
+.item-table .col-uom{color:var(--muted);font-size:13px;width:80px}
+.item-table .col-stock{width:120px}
+.item-table .col-action{width:100px;text-align:center}
+.stock-badge{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600}
+.stock-badge.ok{background:#e8f5e9;color:var(--ok)}
+.stock-badge.low{background:#ffebee;color:var(--err)}
+/* Modal overlay */
+#modal .card{background:var(--card);border:1px solid var(--border);box-shadow:0 8px 30px rgba(0,0,0,.15)}
+/* Responsive */
+@media(max-width:1024px){.sidebar{width:180px}}
+@media(max-width:768px){
+  .shop-layout{flex-direction:column}.sidebar{width:100%}
+  .sidebar .cat-list{display:flex;overflow-x:auto;gap:6px;padding-bottom:8px}
+  .sidebar .cat-list li{white-space:nowrap;flex-shrink:0;padding:8px 12px;font-size:13px}
+  .item-table{font-size:13px}
+  .item-table thead th,.item-table tbody td{padding:8px 6px}
+  .item-table .col-no{width:80px}
+  .item-table .col-action{width:70px}
+}
+@media(max-width:480px){
+  .item-table .col-no{display:none}
+  .item-table thead th:first-child{display:none}
+  .item-table .col-uom{width:50px}
+  .item-table .col-stock{width:60px}
+  .item-table thead th,.item-table tbody td{padding:6px 4px;font-size:12px}
+  .stock-badge{padding:2px 6px;font-size:11px}
+}
 </style>
-</head><body>
+</head><body data-i18n-title="shop.page_title">
 <div id="nav"></div>
 <div class="container">
   <div class="shop-layout">
     <!-- Sidebar -->
     <div class="sidebar">
       <div class="card" style="padding:12px">
-        <h4 style="margin-bottom:10px;color:var(--gold)">หมวดหมู่</h4>
+        <h4 style="margin-bottom:10px;color:var(--gold)" data-i18n="shop.categories">หมวดหมู่</h4>
         <ul id="catList" class="cat-list"></ul>
       </div>
       <div class="card" style="padding:12px;margin-top:12px">
-        <div id="syncInfo" style="font-size:11px;color:var(--muted)"></div>
+        <div id="syncInfo" style="font-size:11px;color:var(--muted);white-space:pre-line"></div>
       </div>
     </div>
     <!-- Main -->
     <div class="main-area">
       <div class="card" style="padding:12px">
-        <input id="q" placeholder="ค้นหาสินค้า..." style="width:100%">
+        <input id="q" data-i18n-placeholder="shop.search_placeholder" placeholder="ค้นหาสินค้า..." style="width:100%">
       </div>
       <div style="margin:12px 0 8px;color:var(--muted);font-size:13px" id="resultInfo"></div>
-      <div id="items" class="grid"></div>
+      <div class="card" style="padding:0;overflow-x:auto">
+        <table class="item-table" id="items">
+          <thead>
+            <tr>
+              <th data-i18n="shop.col.code">รหัส</th>
+              <th data-i18n="shop.col.name">ชื่อสินค้า</th>
+              <th data-i18n="shop.col.price">ราคา</th>
+              <th data-i18n="shop.col.stock">คงเหลือ</th>
+              <th data-i18n="shop.col.uom">หน่วย</th>
+              <th style="text-align:center" data-i18n="shop.col.action">สั่งซื้อ</th>
+            </tr>
+          </thead>
+          <tbody id="itemBody"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 </div>
 
 <!-- Add to cart modal -->
-<div id="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:999;align-items:center;justify-content:center">
+<div id="modal" style="display:none;position:fixed;inset:0;background:rgba(24,24,24,.5);backdrop-filter:blur(4px);z-index:999;align-items:center;justify-content:center">
   <div class="card" style="max-width:380px;width:90%;margin:auto;position:relative">
     <button onclick="closeModal()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer">&times;</button>
     <h3 id="mName" style="margin-bottom:4px"></h3>
     <div id="mMeta" style="color:var(--muted);font-size:13px;margin-bottom:12px"></div>
     <div id="mPrice" style="color:var(--gold);font-size:24px;font-weight:700;margin-bottom:16px"></div>
-    <label>จำนวน</label>
+    <label data-i18n="common.qty">จำนวน</label>
     <div class="row" style="align-items:center;margin-bottom:16px">
       <button class="btn sm ghost" onclick="adjQty(-1)">-</button>
       <input id="mQty" type="number" min="1" value="1" style="text-align:center;width:80px">
       <button class="btn sm ghost" onclick="adjQty(1)">+</button>
       <span id="mStock" style="color:var(--muted);font-size:12px;margin-left:8px"></span>
     </div>
-    <button class="btn" style="width:100%" onclick="addToCart()">เพิ่มลงตะกร้า</button>
+    <button class="btn" style="width:100%" onclick="addToCart()" data-i18n="shop.modal.add">เพิ่มลงตะกร้า</button>
     <div class="err" id="mErr"></div>
+  </div>
+</div>
+
+<!-- Order history modal (admin only) -->
+<div id="historyModal" style="display:none;position:fixed;inset:0;background:rgba(24,24,24,.5);backdrop-filter:blur(4px);z-index:999;align-items:flex-start;justify-content:center;padding:30px 16px;overflow-y:auto">
+  <div class="card" style="max-width:760px;width:100%;margin:auto;position:relative">
+    <button onclick="closeHistory()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer">&times;</button>
+    <h3 id="hName" style="margin-bottom:4px"></h3>
+    <div id="hMeta" style="color:var(--muted);font-size:13px;margin-bottom:4px"></div>
+    <div id="hTotal" style="color:var(--gold-dark);font-size:13px;margin-bottom:12px;font-weight:600"></div>
+    <div style="overflow-x:auto;max-height:60vh">
+      <table class="item-table" style="font-size:13px">
+        <thead><tr>
+          <th data-i18n="history.order_no">เลขที่</th>
+          <th data-i18n="history.branch">สาขา</th>
+          <th data-i18n="history.qty" style="text-align:center">จำนวน</th>
+          <th data-i18n="history.unit_price" style="text-align:right">ราคา/หน่วย</th>
+          <th data-i18n="history.line_total" style="text-align:right">รวม</th>
+          <th data-i18n="history.payment">สถานะ</th>
+          <th data-i18n="history.date">วันที่</th>
+        </tr></thead>
+        <tbody id="hBody"></tbody>
+      </table>
+    </div>
   </div>
 </div>
 
@@ -64,29 +138,55 @@
 if(!requireLogin()) throw '';
 document.getElementById('nav').innerHTML = renderNav('index.html');
 
+const me = getUser();
+const isAdminView = me && (me.role === 'super_admin' || me.role === 'admin_scm');
+
 let selectedItem = null;
 let activeCat = '';
 let allItems = [];
 let categories = [];
 
+// Adjust table header for admin — replace "สั่งซื้อ" with "สั่งล่าสุด" + "ประวัติ"
+if (isAdminView) {
+  const thead = document.querySelector('#items thead tr');
+  thead.innerHTML = `
+    <th data-i18n="shop.col.code">รหัส</th>
+    <th data-i18n="shop.col.name">ชื่อสินค้า</th>
+    <th data-i18n="shop.col.price">ราคา</th>
+    <th data-i18n="shop.col.stock">คงเหลือ</th>
+    <th data-i18n="shop.col.uom">หน่วย</th>
+    <th data-i18n="shop.col.last_order">สั่งล่าสุด</th>
+    <th style="text-align:center"></th>`;
+  applyI18n(thead);
+}
+
+function fmtRelDate(isoStr){
+  if (!isoStr) return '';
+  const d = new Date(isoStr);
+  if (isNaN(d.getTime())) return isoStr;
+  const locale = getLang() === 'th' ? 'th-TH' : 'en-US';
+  return d.toLocaleDateString(locale, { year:'2-digit', month:'short', day:'numeric' });
+}
+
 async function loadAll() {
   allItems = await api('/api/items?' + new URLSearchParams({q:'',category:''}));
-  // Build category counts
+  // Build category counts (keyed by original code so switching language stays stable)
   const catMap = {};
   allItems.forEach(it => {
-    const c = it.category || 'อื่นๆ';
+    const c = it.category || 'Other';
     catMap[c] = (catMap[c]||0) + 1;
   });
-  categories = Object.entries(catMap).sort((a,b) => a[0].localeCompare(b[0]));
+  categories = Object.entries(catMap).sort((a,b) => catName(a[0]).localeCompare(catName(b[0])));
   renderCats();
   renderItems();
 }
 
 function renderCats() {
   const total = allItems.length;
-  let html = `<li class="${activeCat===''?'active':''}" onclick="setCat('')">ทั้งหมด <span class="count">${total}</span></li>`;
+  let html = `<li class="${activeCat===''?'active':''}" onclick="setCat('')">${t('common.all')} <span class="count">${total}</span></li>`;
   for (const [cat, count] of categories) {
-    html += `<li class="${activeCat===cat?'active':''}" onclick="setCat('${cat}')">${cat} <span class="count">${count}</span></li>`;
+    const safe = cat.replace(/'/g, "\\'");
+    html += `<li class="${activeCat===cat?'active':''}" onclick="setCat('${safe}')">${catName(cat)} <span class="count">${count}</span></li>`;
   }
   document.getElementById('catList').innerHTML = html;
 }
@@ -100,30 +200,122 @@ function setCat(cat) {
 function renderItems() {
   const q = (document.getElementById('q').value || '').toLowerCase();
   let filtered = allItems.filter(it => {
-    if (activeCat && (it.category||'อื่นๆ') !== activeCat) return false;
-    if (q && !it.name.toLowerCase().includes(q) && !it.item_no.toLowerCase().includes(q)) return false;
+    if (activeCat && (it.category||'Other') !== activeCat) return false;
+    if (q) {
+      const hay = ((it.name||'') + ' ' + (it.name_en||'') + ' ' + (it.item_no||'')).toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
     return true;
   });
-  document.getElementById('resultInfo').textContent = `แสดง ${filtered.length} รายการ${activeCat?' ในหมวด '+activeCat:''}`;
-  const el = document.getElementById('items');
-  if (!filtered.length) { el.innerHTML = '<p style="color:var(--muted);padding:20px">ไม่พบสินค้า</p>'; return; }
-  el.innerHTML = filtered.map(it => `
-    <div class="item-card">
-      <span class="badge">${it.category||'-'}</span>
-      <h3>${it.name}</h3>
-      <div class="meta">${it.item_no}</div>
-      <div class="price">฿${it.unit_price.toLocaleString()}<span style="font-size:12px;color:var(--muted)"> /${it.uom}</span></div>
-      <div class="meta">คงเหลือ: <span class="badge ${it.inventory>0?'ok':'low'}">${it.inventory} ${it.uom}</span></div>
-      <button class="btn sm" style="width:100%;margin-top:10px" onclick='openModal(${JSON.stringify(it)})' ${it.inventory<=0?'disabled':''}>${it.inventory>0?'เพิ่มลงตะกร้า':'สินค้าหมด'}</button>
-    </div>`).join('');
+  document.getElementById('resultInfo').textContent = activeCat
+    ? t('shop.showing_cat', { n: filtered.length, cat: catName(activeCat) })
+    : t('shop.showing', { n: filtered.length });
+  const el = document.getElementById('itemBody');
+  if (!filtered.length) { el.innerHTML = `<tr><td colspan="${isAdminView?7:6}" style="color:var(--muted);padding:20px;text-align:center">${t('shop.no_items')}</td></tr>`; return; }
+
+  const noPriceLabel = t('shop.no_price');
+  const priceCell = it => (it.unit_price > 0)
+    ? `฿${it.unit_price.toLocaleString()}`
+    : `<span style="color:var(--muted);font-size:12px">${noPriceLabel}</span>`;
+
+  if (isAdminView) {
+    const never = t('shop.never_ordered');
+    const histBtn = t('shop.btn_history');
+    el.innerHTML = filtered.map(it => {
+      const lo = it.last_order;
+      const lastCell = lo ? `
+        <div style="font-weight:600">${lo.branch_code||'-'}</div>
+        <div style="color:var(--muted);font-size:11px">${fmtRelDate(lo.created_at)} · ${lo.quantity} ${it.uom||''}</div>
+        <div style="color:var(--muted);font-size:11px">${lo.bc_po_no||lo.order_number}</div>
+      ` : `<span style="color:var(--muted)">${never}</span>`;
+      return `
+      <tr onclick='openHistory("${it.item_no}", ${JSON.stringify(it).replace(/'/g,"&#39;")})' style="cursor:pointer">
+        <td class="col-no">${it.item_no}</td>
+        <td class="col-name">${itemName(it)}</td>
+        <td class="col-price">${priceCell(it)}</td>
+        <td class="col-stock"><span class="stock-badge ${it.inventory<=0?'low':'ok'}">${it.inventory}</span></td>
+        <td class="col-uom">${it.uom}</td>
+        <td style="font-size:12px">${lastCell}</td>
+        <td class="col-action"><button class="btn sm ghost" onclick='event.stopPropagation();openHistory("${it.item_no}", ${JSON.stringify(it).replace(/'/g,"&#39;")})'>${histBtn}</button></td>
+      </tr>`;
+    }).join('');
+    return;
+  }
+
+  const oosLabel = t('shop.out_of_stock');
+  const orderLabel = t('shop.btn_order');
+  const noPriceBtn = t('shop.no_price_btn');
+  el.innerHTML = filtered.map(it => {
+    const oos = it.inventory <= 0;
+    const noPrice = !oos && (!it.unit_price || it.unit_price <= 0);
+    const disabled = oos || noPrice;
+    const rowClick = oos ? "alertOutOfStock()" : noPrice ? "alertNoPrice()" : "openModal("+JSON.stringify(it).replace(/'/g,"&#39;")+")";
+    const btnLabel = oos ? oosLabel : noPrice ? noPriceBtn : orderLabel;
+    const btnColor = disabled ? 'var(--err)' : 'var(--ok)';
+    return `
+    <tr onclick='${rowClick}' style="${disabled?'opacity:.6;cursor:not-allowed':'cursor:pointer'}">
+      <td class="col-no">${it.item_no}</td>
+      <td class="col-name">${itemName(it)}</td>
+      <td class="col-price">${priceCell(it)}</td>
+      <td class="col-stock"><span class="stock-badge ${oos?'low':'ok'}">${it.inventory}</span></td>
+      <td class="col-uom">${it.uom}</td>
+      <td class="col-action"><button class="btn sm" style="background:${btnColor};color:#fff" onclick='event.stopPropagation();${rowClick}'>${btnLabel}</button></td>
+    </tr>`;
+  }).join('');
+}
+
+// ─── Admin: open history modal ───
+async function openHistory(itemNo, item) {
+  try {
+    document.getElementById('hName').textContent = itemName(item);
+    const priceTxt = (item.unit_price > 0) ? `฿${item.unit_price.toLocaleString()}` : t('shop.no_price');
+    document.getElementById('hMeta').textContent = `${item.item_no} | ${catName(item.category)} | ${priceTxt} / ${item.uom||''}`;
+    document.getElementById('hBody').innerHTML = `<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--muted)">${t('common.loading')}</td></tr>`;
+    document.getElementById('historyModal').style.display = 'flex';
+    const rows = await api('/api/admin/items/' + encodeURIComponent(itemNo) + '/history');
+    document.getElementById('hTotal').textContent = t('history.total_orders', { n: rows.length });
+    if (!rows.length) {
+      document.getElementById('hBody').innerHTML = `<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--muted)">${t('history.none')}</td></tr>`;
+      return;
+    }
+    const payLabel = s => ({pending:'รอชำระ',paid:'รอตรวจ',verified:'ชำระแล้ว',failed:'ไม่ผ่าน',cancelled:'ยกเลิก'}[s] || s);
+    const payLabelEn = s => ({pending:'Pending',paid:'To Review',verified:'Paid',failed:'Failed',cancelled:'Cancelled'}[s] || s);
+    const fmt = getLang() === 'th' ? payLabel : payLabelEn;
+    const locale = getLang() === 'th' ? 'th-TH' : 'en-US';
+    document.getElementById('hBody').innerHTML = rows.map(r => `
+      <tr style="${r.payment_status==='cancelled'?'opacity:.6':''}">
+        <td><strong>${r.bc_po_no||r.order_number}</strong><br><span style="color:var(--muted);font-size:11px">${r.order_number}</span></td>
+        <td><strong>${r.branch_code||'-'}</strong><br><span style="color:var(--muted);font-size:11px">${r.branch_name||''}</span></td>
+        <td style="text-align:center;font-weight:600">${r.quantity}</td>
+        <td style="text-align:right">฿${(r.unit_price||0).toLocaleString()}</td>
+        <td style="text-align:right;color:var(--gold-dark);font-weight:600">฿${(r.line_total||0).toLocaleString()}</td>
+        <td>${fmt(r.payment_status)}</td>
+        <td style="color:var(--muted);font-size:12px">${new Date(r.created_at).toLocaleString(locale,{year:'2-digit',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</td>
+      </tr>
+    `).join('');
+  } catch (e) { toast(e.message); }
+}
+
+function closeHistory() { document.getElementById('historyModal').style.display = 'none'; }
+document.addEventListener('click', (e) => {
+  const m = document.getElementById('historyModal');
+  if (e.target === m) closeHistory();
+});
+
+function alertOutOfStock() {
+  toast(t('shop.oos_alert'));
+}
+
+function alertNoPrice() {
+  toast(t('shop.no_price_alert'));
 }
 
 function openModal(item) {
   selectedItem = item;
-  document.getElementById('mName').textContent = item.name;
-  document.getElementById('mMeta').textContent = `${item.item_no} | ${item.category}`;
+  document.getElementById('mName').textContent = itemName(item);
+  document.getElementById('mMeta').textContent = `${item.item_no} | ${catName(item.category)}`;
   document.getElementById('mPrice').textContent = `฿${item.unit_price.toLocaleString()} /${item.uom}`;
-  document.getElementById('mStock').textContent = `คงเหลือ ${item.inventory} ${item.uom}`;
+  document.getElementById('mStock').textContent = t('shop.modal.remaining', { n: item.inventory, uom: item.uom });
   const qtyInput = document.getElementById('mQty');
   qtyInput.value = 1;
   qtyInput.max = item.inventory;
@@ -147,7 +339,7 @@ function updateModalStock() {
   const qty = parseInt(document.getElementById('mQty').value) || 1;
   const remaining = Math.max(0, selectedItem.inventory - qty);
   const el = document.getElementById('mStock');
-  el.textContent = `คงเหลือ ${remaining} ${selectedItem.uom}`;
+  el.textContent = t('shop.modal.remaining', { n: remaining, uom: selectedItem.uom });
   el.style.color = remaining <= 0 ? 'var(--err)' : 'var(--muted)';
 }
 
@@ -156,7 +348,7 @@ async function addToCart() {
   const qty = parseInt(document.getElementById('mQty').value) || 1;
   try {
     await api('/api/cart/add', { method:'POST', body: JSON.stringify({ item_no: selectedItem.item_no, quantity: qty }) });
-    toast(`เพิ่ม ${selectedItem.name} x${qty} ลงตะกร้าแล้ว`);
+    toast(t('shop.added', { name: itemName(selectedItem), qty }));
     closeModal();
     updateCartBadge();
   } catch (e) {
@@ -167,9 +359,18 @@ async function addToCart() {
 async function loadSyncInfo() {
   try {
     const s = await api('/api/sync/status');
-    if (s) document.getElementById('syncInfo').textContent = `Sync: ${s.created_at}\n${s.count} items`;
+    if (s) document.getElementById('syncInfo').textContent = t('sync.info', { at: s.created_at, n: s.count });
   } catch {}
 }
+
+// Re-render on language change
+window.onLangChange = () => {
+  document.getElementById('nav').innerHTML = renderNav('index.html');
+  renderCats();
+  renderItems();
+  loadSyncInfo();
+  if (selectedItem) updateModalStock();
+};
 
 document.getElementById('q').oninput = () => { clearTimeout(window._t); window._t=setTimeout(renderItems,200); };
 document.getElementById('modal').onclick = (e) => { if(e.target.id==='modal') closeModal(); };

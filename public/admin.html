@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="th"><head>
+<meta charset="utf-8"><title>Admin Dashboard — JC-Market</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<style>
+.dash-grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));margin-bottom:24px}
+.stat-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;text-align:center;transition:.2s}
+.stat-card:hover{border-color:var(--gold);box-shadow:0 4px 12px rgba(0,0,0,.06)}
+.stat-card .icon{font-size:28px;margin-bottom:8px}
+.stat-card .num{font-size:28px;font-weight:700;color:var(--primary)}
+.stat-card .num.gold{color:var(--gold-dark)}
+.stat-card .num.green{color:var(--ok)}
+.stat-card .num.red{color:var(--err)}
+.stat-card .label{font-size:12px;color:var(--muted);margin-top:4px}
+
+.section{margin-bottom:28px}
+.section h3{font-size:16px;font-weight:700;margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid var(--gold);display:inline-block}
+
+.dash-layout{display:grid;gap:20px;grid-template-columns:1fr 1fr}
+.dash-full{grid-column:1/-1}
+
+.dtable{width:100%;border-collapse:collapse;font-size:13px}
+.dtable thead th{background:var(--primary);color:var(--gold);padding:8px 10px;text-align:left;font-size:12px;font-weight:600}
+.dtable tbody td{padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
+.dtable tbody tr:hover{background:rgba(173,156,130,.08)}
+.dtable tbody tr:nth-child(even){background:var(--beige)}
+
+.pay-badge{display:inline-block;padding:2px 10px;border-radius:99px;font-size:11px;font-weight:600}
+.pay-pending{background:#fff3e0;color:#e65100}
+.pay-paid{background:#e3f2fd;color:#1565c0}
+.pay-verified{background:#e8f5e9;color:#2e7d32}
+.pay-failed{background:#ffebee;color:#c62828}
+.pay-cancelled{background:#f5f5f5;color:#999}
+
+.ful-badge{display:inline-block;padding:2px 10px;border-radius:99px;font-size:11px;font-weight:600}
+.ful-pending{background:var(--beige);color:var(--muted)}
+.ful-shipped{background:#e3f2fd;color:#1565c0}
+.ful-partial{background:#fff3e0;color:#e65100}
+.ful-received{background:#e8f5e9;color:#2e7d32}
+
+.slip-thumb{width:40px;height:40px;border-radius:6px;object-fit:cover;cursor:pointer;border:1px solid var(--border)}
+.action-btns{display:flex;gap:6px}
+.btn-approve{background:var(--ok);color:#fff;border:none;padding:4px 10px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600}
+.btn-reject{background:var(--err);color:#fff;border:none;padding:4px 10px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600}
+.btn-approve:hover{opacity:.85}
+.btn-reject:hover{opacity:.85}
+
+.bar-chart{display:flex;align-items:flex-end;gap:8px;height:120px;padding:10px 0}
+.bar-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px}
+.bar-fill{width:100%;min-width:30px;background:var(--gold);border-radius:6px 6px 0 0;transition:.3s;min-height:4px}
+.bar-label{font-size:10px;color:var(--muted);white-space:nowrap}
+.bar-value{font-size:11px;font-weight:700;color:var(--primary)}
+
+.fulfill-row{display:flex;gap:12px;flex-wrap:wrap}
+.fulfill-item{flex:1;min-width:100px;text-align:center;padding:12px;border-radius:10px}
+.fulfill-item .num{font-size:24px;font-weight:700}
+.fulfill-item .label{font-size:11px;margin-top:2px}
+
+/* Slip preview modal */
+.slip-modal{position:fixed;inset:0;background:rgba(24,24,24,.5);backdrop-filter:blur(4px);z-index:1000;display:none;align-items:center;justify-content:center}
+.slip-modal img{max-width:90vw;max-height:80vh;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.3)}
+
+@media(max-width:1024px){.dash-layout{grid-template-columns:1fr}}
+@media(max-width:768px){
+  .dash-grid{grid-template-columns:repeat(2,1fr);gap:10px}
+  .stat-card{padding:14px}
+  .stat-card .num{font-size:22px}
+  .fulfill-row{gap:8px}
+  .dtable{font-size:12px}
+  .dtable thead th,.dtable tbody td{padding:6px 6px}
+}
+@media(max-width:480px){
+  .dash-grid{grid-template-columns:1fr 1fr;gap:8px}
+  .stat-card{padding:10px}
+  .stat-card .num{font-size:20px}
+  .stat-card .icon{font-size:22px;margin-bottom:4px}
+  .bar-chart{height:80px}
+}
+</style>
+</head><body data-i18n-title="admin.page_title">
+<div id="nav"></div>
+<div class="container">
+  <h2 style="margin-bottom:4px" data-i18n="admin.title">Admin Dashboard</h2>
+  <p style="color:var(--muted);font-size:13px;margin-bottom:20px" id="lastUpdate"></p>
+
+  <!-- Summary Cards -->
+  <div class="dash-grid" id="summaryCards"></div>
+
+  <!-- Fulfillment Summary -->
+  <div class="section">
+    <h3 data-i18n="admin.fulfill">สถานะจัดส่ง</h3>
+    <div class="card">
+      <div class="fulfill-row" id="fulfillRow"></div>
+    </div>
+  </div>
+
+  <!-- BC Sync ค้าง — เต็มความกว้าง อยู่บนสุดเพราะต้อง action ก่อน -->
+  <div class="section" id="bcSyncSection" style="display:none;border-left:4px solid #c4291a;padding-left:14px">
+    <h3 style="color:#c4291a;margin-bottom:4px">⚠️ BC Sync ค้างต้องแก้ <span id="bcSyncCount" style="font-size:13px;background:#c4291a;color:#fff;padding:2px 8px;border-radius:10px;margin-left:8px"></span></h3>
+    <p style="margin:0 0 10px;color:var(--muted);font-size:13px">สาขารับของแล้ว แต่ post Sales Invoice ใน BC ไม่ผ่าน — แก้สาเหตุใน BC (เช่น เติม stock, แก้ permission) แล้วกด Retry</p>
+    <div class="card" style="padding:0;overflow-x:auto">
+      <table class="dtable" style="table-layout:fixed;width:100%">
+        <colgroup>
+          <col style="width:170px"><col style="width:130px"><col style="width:100px">
+          <col style="width:140px"><col><col style="width:130px"><col style="width:90px">
+        </colgroup>
+        <thead><tr>
+          <th>Order</th><th>สาขา</th><th>ยอด</th><th>BC SO</th><th>เหตุผล</th><th>รับเมื่อ</th><th></th>
+        </tr></thead>
+        <tbody id="bcSyncBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="dash-layout">
+    <!-- Pending Slips -->
+    <div class="section">
+      <h3 data-i18n="admin.pending_slips">รอตรวจสอบสลิป</h3>
+      <div class="card" style="padding:0;overflow-x:auto">
+        <table class="dtable">
+          <thead><tr><th data-i18n="admin.col.order_no">เลขที่</th><th data-i18n="admin.col.branch">สาขา</th><th data-i18n="admin.col.amount">ยอด</th><th data-i18n="admin.col.slip">สลิป</th><th data-i18n="admin.col.action">จัดการ</th></tr></thead>
+          <tbody id="slipBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+
+    <!-- Recent Orders -->
+    <div class="section">
+      <h3 data-i18n="admin.recent_orders">คำสั่งซื้อล่าสุด</h3>
+      <div class="card" style="padding:0;overflow-x:auto">
+        <table class="dtable">
+          <thead><tr><th data-i18n="admin.col.order_no">เลขที่</th><th data-i18n="admin.col.branch">สาขา</th><th data-i18n="admin.col.amount">ยอด</th><th data-i18n="admin.col.payment">ชำระ</th><th data-i18n="admin.col.fulfill">จัดส่ง</th><th data-i18n="admin.col.date">วันที่</th></tr></thead>
+          <tbody id="recentBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Daily Chart -->
+    <div class="section">
+      <h3 data-i18n="admin.daily_chart">ออเดอร์ 7 วันล่าสุด</h3>
+      <div class="card">
+        <div class="bar-chart" id="dailyChart"></div>
+      </div>
+    </div>
+
+    <!-- Top Items -->
+    <div class="section">
+      <h3 data-i18n="admin.top_items">สินค้าขายดี Top 10</h3>
+      <div class="card" style="padding:0;overflow-x:auto">
+        <table class="dtable">
+          <thead><tr><th data-i18n="admin.col.no">#</th><th data-i18n="admin.col.item">สินค้า</th><th data-i18n="admin.col.code">รหัส</th><th data-i18n="admin.col.qty">จำนวน</th><th data-i18n="admin.col.sales">ยอดขาย</th><th data-i18n="admin.col.order_count">ออเดอร์</th></tr></thead>
+          <tbody id="topBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Orders by Branch -->
+    <div class="section dash-full">
+      <h3 data-i18n="admin.branch_orders">ยอดสั่งซื้อตามสาขา</h3>
+      <div class="card" style="padding:0;overflow-x:auto">
+        <table class="dtable">
+          <thead><tr><th data-i18n="admin.col.branch">สาขา</th><th data-i18n="admin.col.order_sum">จำนวนออเดอร์</th><th data-i18n="admin.col.total">ยอดรวม</th></tr></thead>
+          <tbody id="branchBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Fraud Log -->
+    <div class="section dash-full">
+      <h3 style="border-color:#c62828;color:#c62828" data-i18n="admin.fraud_log">🛡️ บันทึกการพยายามใช้สลิปน่าสงสัย</h3>
+      <div class="card" style="padding:16px;margin-bottom:8px" id="fraudSummary" style="display:none">
+        <div style="display:flex;gap:16px;flex-wrap:wrap">
+          <div><span style="color:var(--muted);font-size:12px" data-i18n="admin.fraud.24h">24 ชม.ล่าสุด:</span> <strong id="fraud24h" style="color:#c62828">0</strong></div>
+          <div><span style="color:var(--muted);font-size:12px" data-i18n="admin.fraud.7d">7 วันล่าสุด:</span> <strong id="fraud7d">0</strong></div>
+          <div><span style="color:var(--muted);font-size:12px" data-i18n="admin.fraud.all">รวมทั้งหมด:</span> <strong id="fraudAll">0</strong></div>
+          <div id="abusersBox" style="margin-left:auto"></div>
+        </div>
+      </div>
+      <div class="card" style="padding:0;overflow-x:auto">
+        <table class="dtable">
+          <thead><tr><th data-i18n="admin.fraud.col.time">เวลา</th><th data-i18n="admin.fraud.col.user">ผู้ใช้</th><th data-i18n="admin.fraud.col.order">Order</th><th data-i18n="admin.fraud.col.reason">เหตุผลที่ถูกปฏิเสธ</th><th data-i18n="admin.fraud.col.slip_amt">ยอดบนสลิป</th><th data-i18n="admin.fraud.col.ref">Ref</th><th data-i18n="admin.fraud.col.ip">IP</th></tr></thead>
+          <tbody id="fraudBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Slip Preview Modal -->
+<div class="slip-modal" id="slipModal" onclick="this.style.display='none'">
+  <img id="slipImg" src="">
+</div>
+
+<script src="/js/app.js"></script>
+<script>
+if(!requireLogin()) throw '';
+const u = getUser();
+if(u.role !== 'super_admin' && u.role !== 'admin_scm'){ location.href='/index.html'; throw ''; }
+document.getElementById('nav').innerHTML = renderNav('admin.html');
+
+let dashData = null;
+
+async function loadDashboard() {
+  try {
+    dashData = await api('/api/admin/dashboard');
+    renderAll();
+    loadFraudLog();
+    const locale = getLang() === 'th' ? 'th-TH' : 'en-US';
+    document.getElementById('lastUpdate').textContent = t('admin.last_update', { t: new Date().toLocaleString(locale) });
+  } catch(e) {
+    console.error(e);
+    toast(t('admin.load_err', { err: e.message }));
+  }
+}
+
+function renderAll() {
+  if (!dashData) return;
+  renderSummary();
+  renderFulfillment();
+  renderPendingSlips();
+  renderBcSyncPending();
+  renderRecentOrders();
+  renderDailyChart();
+  renderTopItems();
+  renderBranches();
+  renderFraudSummary();
+}
+
+function renderBcSyncPending() {
+  const list = dashData.pending_bc_sync || [];
+  const sec = document.getElementById('bcSyncSection');
+  const body = document.getElementById('bcSyncBody');
+  const badge = document.getElementById('bcSyncCount');
+  if (!list.length) { sec.style.display = 'none'; return; }
+  sec.style.display = '';
+  badge.textContent = list.length;
+  // Drop "CorrelationId: ..." tail from BC errors so the table column stays clean.
+  // For orders that failed BEFORE we started saving the error column, gently
+  // tell admin to click Retry — that'll trigger a fresh attempt and capture the
+  // real reason if it still fails.
+  const cleanErr = (e) => {
+    const x = (e || '').replace(/\s*CorrelationId:.*$/i, '').trim();
+    return x || '⏳ ยังไม่เคยลอง post (order เก่าก่อนระบบบันทึก error) — กด Retry เพื่อดูสาเหตุจริง';
+  };
+  body.innerHTML = list.map(o => {
+    const err = cleanErr(o.bc_sync_error);
+    return `
+    <tr>
+      <td style="overflow:hidden;text-overflow:ellipsis"><a href="/orders.html?id=${o.id}" style="color:var(--gold-dark);text-decoration:underline;font-weight:700">${o.order_number}</a></td>
+      <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(o.branch_name||o.user_name||'').replace(/"/g,'&quot;')}">${o.branch_name||o.user_name||'-'}</td>
+      <td style="font-weight:700;color:var(--gold-dark);white-space:nowrap">฿${(o.total||0).toLocaleString()}</td>
+      <td style="font-family:monospace;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${o.bc_so_no||'-'}</td>
+      <td style="color:#c4291a;font-size:12px;line-height:1.4" title="${err.replace(/"/g,'&quot;')}">${err}</td>
+      <td style="font-size:12px;color:var(--muted);white-space:nowrap">${o.fully_received_at||''}</td>
+      <td><button class="btn-approve" style="white-space:nowrap" onclick="retryBcPost('${o.id}', this)">Retry</button></td>
+    </tr>`;
+  }).join('');
+}
+
+async function retryBcPost(orderId, btn) {
+  if (!confirm('ลอง post Sales Invoice ใน BC อีกครั้ง? (ต้องแก้ปัญหาใน BC ก่อน เช่น เติม stock)')) return;
+  btn.disabled = true; btn.textContent = '...';
+  try {
+    const r = await api(`/api/orders/${orderId}/retry-bc-post`, { method: 'POST' });
+    toast(r.message || 'OK');
+    await load();
+  } catch (e) {
+    toast('Retry ไม่สำเร็จ: ' + e.message);
+    btn.disabled = false; btn.textContent = 'Retry';
+  }
+}
+
+function renderSummary() {
+  const s = dashData.summary;
+  const cards = [
+    { icon:'📦', num:s.total_orders, label:t('admin.stat.orders'), cls:'' },
+    { icon:'💰', num:'฿'+s.total_revenue.toLocaleString(), label:t('admin.stat.revenue'), cls:'gold' },
+    { icon:'⏳', num:s.pending_payments, label:t('admin.stat.pending'), cls: s.pending_payments>0?'red':'' },
+    { icon:'✅', num:s.verified_orders, label:t('admin.stat.verified'), cls:'green' },
+    { icon:'🏪', num:s.total_users, label:t('admin.stat.users'), cls:'' },
+    { icon:'📋', num:s.total_items, label:t('admin.stat.items'), cls:'' },
+    { icon:'🚫', num:s.out_of_stock, label:t('admin.stat.oos'), cls: s.out_of_stock>0?'red':'' },
+    { icon:'📄', num:s.total_gr, label:t('admin.stat.gr'), cls:'' },
+  ];
+  document.getElementById('summaryCards').innerHTML = cards.map(c => `
+    <div class="stat-card">
+      <div class="icon">${c.icon}</div>
+      <div class="num ${c.cls}">${c.num}</div>
+      <div class="label">${c.label}</div>
+    </div>
+  `).join('');
+}
+
+function renderFulfillment() {
+  const f = dashData.fulfillment;
+  const items = [
+    { num:f.pending, label:t('admin.ful.pending'), bg:'var(--beige)', color:'var(--muted)' },
+    { num:f.shipped, label:t('admin.ful.shipped'), bg:'#e3f2fd', color:'#1565c0' },
+    { num:f.partial, label:t('admin.ful.partial'), bg:'#fff3e0', color:'#e65100' },
+    { num:f.received, label:t('admin.ful.received'), bg:'#e8f5e9', color:'#2e7d32' },
+  ];
+  document.getElementById('fulfillRow').innerHTML = items.map(i => `
+    <div class="fulfill-item" style="background:${i.bg}">
+      <div class="num" style="color:${i.color}">${i.num}</div>
+      <div class="label" style="color:${i.color}">${i.label}</div>
+    </div>
+  `).join('');
+}
+
+function renderPendingSlips() {
+  const slips = dashData.pending_slips;
+  const el = document.getElementById('slipBody');
+  if(!slips.length){ el.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:16px">${t('admin.no_pending')}</td></tr>`; return; }
+  el.innerHTML = slips.map(s => `
+    <tr>
+      <td><a href="/orders.html?id=${s.id}" style="color:var(--gold-dark);text-decoration:underline;font-weight:700">${s.order_number}</a></td>
+      <td>${s.branch_name||s.user_name}</td>
+      <td style="font-weight:700;color:var(--gold-dark)">฿${s.total.toLocaleString()}</td>
+      <td>${s.slip_path ? `<img src="${s.slip_path}" class="slip-thumb" onclick="viewSlip('${s.slip_path}')">` : '<span style="color:var(--muted)">-</span>'}</td>
+      <td>
+        <div class="action-btns">
+          <button class="btn-approve" onclick="verifyOrder('${s.id}','approve')">${t('admin.approve')}</button>
+          <button class="btn-reject" onclick="verifyOrder('${s.id}','reject')">${t('admin.reject')}</button>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function renderDailyChart() {
+  const days = dashData.daily_orders;
+  if(!days.length){ document.getElementById('dailyChart').innerHTML = `<span style="color:var(--muted)">${t('admin.no_data')}</span>`; return; }
+  const maxCount = Math.max(...days.map(d=>d.count), 1);
+  document.getElementById('dailyChart').innerHTML = days.map(d => {
+    const pct = (d.count / maxCount) * 100;
+    const dayStr = d.date.slice(5); // MM-DD
+    return `<div class="bar-item">
+      <div class="bar-value">${d.count}</div>
+      <div class="bar-fill" style="height:${Math.max(pct,5)}%"></div>
+      <div class="bar-label">${dayStr}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderTopItems() {
+  const items = dashData.top_items;
+  const el = document.getElementById('topBody');
+  if(!items.length){ el.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:16px">${t('admin.no_data')}</td></tr>`; return; }
+  el.innerHTML = items.map((it,i) => `
+    <tr>
+      <td style="font-weight:700;color:var(--gold-dark)">${i+1}</td>
+      <td><strong>${itemName(it)}</strong></td>
+      <td style="color:var(--muted)">${it.item_no}</td>
+      <td style="font-weight:600">${it.total_qty.toLocaleString()}</td>
+      <td style="color:var(--gold-dark);font-weight:600">฿${it.total_amount.toLocaleString()}</td>
+      <td>${it.order_count}</td>
+    </tr>
+  `).join('');
+}
+
+function renderBranches() {
+  const branches = dashData.orders_by_branch;
+  document.getElementById('branchBody').innerHTML = branches.map(b => `
+    <tr>
+      <td><strong>${b.branch_name||'-'}</strong></td>
+      <td>${b.order_count}</td>
+      <td style="font-weight:700;color:var(--gold-dark)">฿${b.total_amount.toLocaleString()}</td>
+    </tr>
+  `).join('');
+}
+
+function renderRecentOrders() {
+  const orders = dashData.recent_orders;
+  document.getElementById('recentBody').innerHTML = orders.map(o => `
+    <tr>
+      <td><a href="/orders.html?id=${o.id}" style="color:var(--gold-dark);text-decoration:underline;font-weight:700">${o.order_number}</a></td>
+      <td>${o.branch_name||o.user_name}</td>
+      <td style="font-weight:600">฿${o.total.toLocaleString()}</td>
+      <td><span class="pay-badge pay-${o.payment_status}">${payLabel(o.payment_status)}</span></td>
+      <td><span class="ful-badge ful-${o.fulfillment_status}">${fulLabel(o.fulfillment_status)}</span></td>
+      <td style="color:var(--muted);font-size:12px">${fmtDate(o.created_at)}</td>
+    </tr>
+  `).join('');
+}
+
+function payLabel(s) {
+  return {pending:t('admin.pay.pending'),paid:t('admin.pay.paid'),verified:t('admin.pay.verified'),failed:t('admin.pay.failed'),cancelled:t('admin.pay.cancelled')}[s]||s;
+}
+function fulLabel(s) {
+  return {pending:t('admin.ful.pending'),shipped:t('admin.ful.shipped'),partial:t('admin.ful.partial'),received:t('admin.ful.received')}[s]||s;
+}
+function fmtDate(d) {
+  if(!d) return '-';
+  const locale = getLang() === 'th' ? 'th-TH' : 'en-US';
+  return new Date(d).toLocaleDateString(locale,{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});
+}
+
+function viewSlip(path) {
+  document.getElementById('slipImg').src = path;
+  document.getElementById('slipModal').style.display = 'flex';
+}
+
+async function verifyOrder(id, action) {
+  if(!confirm(action==='approve'?t('admin.confirm_approve'):t('admin.confirm_reject'))) return;
+  try {
+    await api(`/api/orders/${id}/verify`, { method:'POST', body: JSON.stringify({action}) });
+    toast(action==='approve'?t('admin.verify_ok'):t('admin.verify_reject_ok'));
+    loadDashboard();
+  } catch(e) { toast(t('admin.verify_err', { err: e.message })); }
+}
+
+function renderFraudSummary() {
+  const f = dashData.fraud_summary || {};
+  document.getElementById('fraud24h').textContent = f.total_24h || 0;
+  document.getElementById('fraud7d').textContent = f.total_7d || 0;
+  document.getElementById('fraudAll').textContent = f.total_all || 0;
+}
+
+let fraudCache = null;
+async function loadFraudLog() {
+  try {
+    const r = await api('/api/admin/fraud-log?limit=50');
+    fraudCache = r;
+    renderFraudLog();
+  } catch (e) { console.error('fraud log:', e.message); }
+}
+
+function renderFraudLog() {
+  if (!fraudCache) return;
+  const r = fraudCache;
+  const body = document.getElementById('fraudBody');
+  if (!r.logs.length) {
+    body.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:16px">${t('admin.fraud.none')}</td></tr>`;
+  } else {
+    body.innerHTML = r.logs.map(log => `
+      <tr>
+        <td style="font-size:11px;color:var(--muted)">${log.created_at}</td>
+        <td>${log.username || '-'}</td>
+        <td>${log.order_number || '-'}</td>
+        <td style="color:#c62828">${log.reason}</td>
+        <td>${log.slip_amount > 0 ? '฿'+log.slip_amount.toLocaleString() : '-'} <span style="color:var(--muted);font-size:11px">/${log.expected_amount ? '฿'+log.expected_amount.toLocaleString() : '-'}</span></td>
+        <td style="font-size:11px;font-family:monospace">${log.qr_ref || '-'}</td>
+        <td style="font-size:11px;color:var(--muted)">${log.ip || '-'}</td>
+      </tr>
+    `).join('');
+  }
+  const abox = document.getElementById('abusersBox');
+  if (r.abusers && r.abusers.length) {
+    abox.innerHTML = t('admin.fraud.abusers') + r.abusers.map(a =>
+      `<span style="background:#ffebee;color:#c62828;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600;margin-right:4px">${a.username} (${a.count})</span>`
+    ).join('');
+  } else {
+    abox.innerHTML = '';
+  }
+}
+
+window.onLangChange = () => {
+  document.getElementById('nav').innerHTML = renderNav('admin.html');
+  renderAll();
+  renderFraudLog();
+  const locale = getLang() === 'th' ? 'th-TH' : 'en-US';
+  document.getElementById('lastUpdate').textContent = t('admin.last_update', { t: new Date().toLocaleString(locale) });
+};
+
+loadDashboard();
+// Auto refresh every 30s
+setInterval(loadDashboard, 30000);
+</script>
+</body></html>

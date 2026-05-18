@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="th"><head>
+<meta charset="utf-8"><title>จัดการผู้ใช้ — JC-Market</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<style>
+.tabs{display:flex;gap:4px;border-bottom:2px solid var(--border);margin-bottom:16px}
+.tabs button{background:none;border:none;padding:10px 18px;cursor:pointer;font-family:inherit;font-size:14px;color:var(--muted);border-bottom:3px solid transparent;margin-bottom:-2px}
+.tabs button.active{color:var(--gold-dark);border-bottom-color:var(--gold);font-weight:600}
+
+.dtable{width:100%;border-collapse:collapse;font-size:13px}
+.dtable thead th{background:var(--primary);color:var(--gold);padding:10px;text-align:left;font-size:12px;font-weight:600}
+.dtable tbody td{padding:10px;border-bottom:1px solid var(--border);vertical-align:middle}
+.dtable tbody tr:nth-child(even){background:var(--beige)}
+
+.role-badge{display:inline-block;padding:2px 10px;border-radius:99px;font-size:11px;font-weight:600}
+.role-super_admin{background:#fee2e2;color:#991b1b}
+.role-admin_scm, .role-admin{background:#e0e7ff;color:#3730a3}
+.role-branch_owner, .role-branch_admin{background:#dbeafe;color:#1d4ed8}
+.role-store_manager, .role-manager{background:#fef3c7;color:#92400e}
+.role-cashier{background:#fce7f3;color:#9f1239}
+.role-fc{background:#f3f4f6;color:#4b5563}
+
+.pill-on{display:inline-block;padding:2px 10px;border-radius:99px;font-size:11px;font-weight:600;background:#d1fae5;color:#065f46}
+.pill-off{display:inline-block;padding:2px 10px;border-radius:99px;font-size:11px;font-weight:600;background:#f3f4f6;color:#6b7280}
+
+.modal{position:fixed;inset:0;background:rgba(24,24,24,.5);backdrop-filter:blur(4px);z-index:1000;display:none;align-items:flex-start;justify-content:center;overflow-y:auto;padding:30px 16px}
+.modal .box{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:24px;max-width:520px;width:100%;position:relative}
+.modal .box h3{margin-bottom:16px}
+.modal .close{position:absolute;top:12px;right:16px;background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer}
+.form-row{margin-bottom:10px}
+.form-row label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+.form-grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+
+@media(max-width:640px){.form-grid2{grid-template-columns:1fr}}
+</style>
+</head><body data-i18n-title="nav.team">
+<div id="nav"></div>
+<div class="container">
+  <div class="tabs">
+    <button class="active" id="tBranches" onclick="switchTab('branches')" data-i18n="branches.title">สาขา</button>
+    <button id="tUsers" onclick="switchTab('users')" data-i18n="users.title">ผู้ใช้</button>
+  </div>
+
+  <!-- Branches Tab -->
+  <div id="panelBranches">
+    <div class="toolbar">
+      <h3 style="margin:0;color:var(--gold-dark)" data-i18n="branches.title">สาขา</h3>
+      <div class="spacer" style="flex:1"></div>
+      <button id="btnAddBranch" class="btn sm" onclick="openBranchModal()" data-i18n="branches.add">+ เพิ่มสาขา</button>
+    </div>
+    <div class="card" style="padding:0;overflow-x:auto">
+      <table class="dtable">
+        <thead>
+          <tr>
+            <th data-i18n="branches.code">รหัสสาขา</th>
+            <th data-i18n="branches.name">ชื่อสาขา</th>
+            <th data-i18n="branches.bc_customer_no">Customer No. (BC)</th>
+            <th data-i18n="branches.phone">เบอร์โทร</th>
+            <th data-i18n="branches.users">ผู้ใช้</th>
+            <th data-i18n="branches.status">สถานะ</th>
+            <th data-i18n="branches.actions">จัดการ</th>
+          </tr>
+        </thead>
+        <tbody id="branchBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Users Tab -->
+  <div id="panelUsers" style="display:none">
+    <div class="toolbar">
+      <h3 style="margin:0;color:var(--gold-dark)" data-i18n="users.title">ผู้ใช้</h3>
+      <select id="userBranchFilter" style="width:auto;padding:6px 10px" onchange="loadUsers()"></select>
+      <div class="spacer" style="flex:1"></div>
+      <button class="btn sm" onclick="openUserModal()" data-i18n="users.add">+ เพิ่มผู้ใช้</button>
+    </div>
+    <div class="card" style="padding:0;overflow-x:auto">
+      <table class="dtable">
+        <thead>
+          <tr>
+            <th data-i18n="users.username">Username</th>
+            <th data-i18n="users.full_name">ชื่อเต็ม</th>
+            <th data-i18n="users.role">Role</th>
+            <th data-i18n="users.branch">สาขา</th>
+            <th data-i18n="users.can_order">สั่งซื้อได้</th>
+            <th data-i18n="users.active">เปิดใช้งาน</th>
+            <th data-i18n="users.actions">จัดการ</th>
+          </tr>
+        </thead>
+        <tbody id="userBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Branch modal -->
+<div id="branchModal" class="modal" onclick="if(event.target===this)closeBranch()">
+  <div class="box">
+    <button class="close" onclick="closeBranch()">&times;</button>
+    <h3 id="branchModalTitle" data-i18n="branches.add">+ เพิ่มสาขา</h3>
+    <form id="branchForm" onsubmit="return saveBranch(event)">
+      <div class="form-grid2">
+        <div class="form-row"><label data-i18n="branches.code">รหัสสาขา</label><input name="code" required></div>
+        <div class="form-row"><label data-i18n="branches.name">ชื่อสาขา</label><input name="name" required></div>
+      </div>
+      <div class="form-grid2">
+        <div class="form-row"><label data-i18n="branches.bc_customer_no">Customer No. (BC)</label><input name="bc_customer_no"></div>
+        <div class="form-row"><label data-i18n="branches.phone">เบอร์โทร</label><input name="phone"></div>
+      </div>
+      <div class="form-row"><label data-i18n="branches.address">ที่อยู่</label><textarea name="address" rows="2"></textarea></div>
+      <div class="form-grid2">
+        <div class="form-row"><label data-i18n="branches.manager_email">อีเมลผู้จัดการ</label><input name="manager_email" type="email"></div>
+        <div class="form-row"><label data-i18n="branches.tax_id">เลขผู้เสียภาษี</label><input name="tax_id"></div>
+      </div>
+      <div class="form-row">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" name="show_tax_id" checked style="width:auto;margin:0">
+          <span data-i18n="branches.show_tax_id">แสดงเลขผู้เสียภาษี</span>
+        </label>
+      </div>
+      <div id="branchAdminSection">
+        <hr style="border-color:var(--border);margin:12px 0">
+        <h4 style="margin-bottom:8px;color:var(--gold-dark)" data-i18n="branches.admin_section">บัญชี Branch Admin ของสาขา</h4>
+        <div class="form-grid2">
+          <div class="form-row"><label data-i18n="branches.admin_username">Username ของ Branch Admin</label><input name="admin_username" required></div>
+          <div class="form-row"><label data-i18n="branches.admin_password">Password</label><input name="admin_password" type="password" required minlength="6"></div>
+        </div>
+        <div class="form-row"><label data-i18n="branches.admin_full_name">ชื่อผู้ดูแลสาขา</label><input name="admin_full_name" required></div>
+      </div>
+      <div class="err" id="branchErr"></div>
+      <button class="btn" style="width:100%;margin-top:12px" type="submit" data-i18n="common.save">บันทึก</button>
+    </form>
+  </div>
+</div>
+
+<!-- User modal -->
+<div id="userModal" class="modal" onclick="if(event.target===this)closeUser()">
+  <div class="box">
+    <button class="close" onclick="closeUser()">&times;</button>
+    <h3 id="userModalTitle" data-i18n="users.add">+ เพิ่มผู้ใช้</h3>
+    <form id="userForm" onsubmit="return saveUser(event)">
+      <input type="hidden" name="id">
+      <div class="form-grid2">
+        <div class="form-row"><label data-i18n="users.username">Username</label><input name="username" required></div>
+        <div class="form-row">
+          <label><span id="pwdLabel" data-i18n="users.password">Password</span>
+            <span id="pwdHint" style="color:var(--muted);font-size:11px;display:none" data-i18n="users.leave_blank">(เว้นว่างถ้าไม่เปลี่ยน)</span>
+          </label>
+          <input name="password" type="password" minlength="6">
+        </div>
+      </div>
+      <div class="form-row"><label data-i18n="users.full_name">ชื่อเต็ม</label><input name="full_name" required></div>
+      <div class="form-grid2">
+        <div class="form-row">
+          <label data-i18n="users.role">Role</label>
+          <select name="role" id="userRoleSel" onchange="onRoleChange()"></select>
+        </div>
+        <div class="form-row">
+          <label data-i18n="users.branch">สาขา</label>
+          <select name="branch_code" id="userBranchSel"></select>
+        </div>
+      </div>
+      <div class="form-row"><label data-i18n="users.phone">เบอร์โทร</label><input name="phone"></div>
+      <div class="form-grid2">
+        <div class="form-row">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" name="can_order" style="width:auto;margin:0">
+            <span data-i18n="users.can_order">สั่งซื้อได้</span>
+          </label>
+        </div>
+        <div class="form-row">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" name="active" checked style="width:auto;margin:0">
+            <span data-i18n="users.active">เปิดใช้งาน</span>
+          </label>
+        </div>
+      </div>
+      <div class="err" id="userErr"></div>
+      <button class="btn" style="width:100%;margin-top:12px" type="submit" data-i18n="common.save">บันทึก</button>
+    </form>
+  </div>
+</div>
+
+<script src="/js/app.js"></script>
+<script>
+if(!requireLogin()) throw '';
+const me = getUser();
+const HQ_ROLES = ['super_admin','admin_scm'];
+if (!me || (!HQ_ROLES.includes(me.role) && me.role !== 'branch_owner')) {
+  location.href = '/index.html'; throw '';
+}
+document.getElementById('nav').innerHTML = renderNav('team.html');
+
+const isSuper = me.role === 'super_admin';
+const isHq = HQ_ROLES.includes(me.role);
+let branchesCache = [];
+let usersCache = [];
+
+function switchTab(tab) {
+  document.getElementById('panelBranches').style.display = tab === 'branches' ? 'block' : 'none';
+  document.getElementById('panelUsers').style.display = tab === 'users' ? 'block' : 'none';
+  document.getElementById('tBranches').classList.toggle('active', tab === 'branches');
+  document.getElementById('tUsers').classList.toggle('active', tab === 'users');
+  if (tab === 'users' && !usersCache.length) loadUsers();
+}
+
+// Only Super Admin can add/deactivate branches; admin_scm + branch_owner = read-only (branch_owner can edit own contact)
+if (!isSuper) {
+  const addBtn = document.getElementById('btnAddBranch');
+  if (addBtn) addBtn.style.display = 'none';
+}
+
+// admin_scm: ซ่อนแถบ "สาขา" + dropdown filter สาขา (ไม่เห็น/ไม่ยุ่งกับสาขา)
+if (me.role === 'admin_scm') {
+  const bTab = document.getElementById('tBranches');
+  if (bTab) bTab.style.display = 'none';
+  const brFilter = document.getElementById('userBranchFilter');
+  if (brFilter) brFilter.style.display = 'none';
+  setTimeout(() => switchTab('users'), 0);
+}
+
+
+async function loadBranches() {
+  try {
+    branchesCache = await api('/api/branches');
+    renderBranches();
+    // Populate filter dropdowns
+    const allOpt = `<option value="">${t('users.filter_all')}</option>`;
+    const opts = branchesCache.map(b => `<option value="${b.code}">${b.code} - ${b.name}</option>`).join('');
+    const filter = document.getElementById('userBranchFilter');
+    filter.innerHTML = (isHq ? allOpt : '') + opts;
+    if (!isHq) filter.value = me.branch_code;
+    const sel = document.getElementById('userBranchSel');
+    sel.innerHTML = opts;
+  } catch (e) { toast(e.message); }
+}
+
+function renderBranches() {
+  const el = document.getElementById('branchBody');
+  if (!branchesCache.length) { el.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:20px">-</td></tr>`; return; }
+  el.innerHTML = branchesCache.map(b => `
+    <tr style="${b.active?'':'opacity:.5'}">
+      <td><strong>${b.code}</strong></td>
+      <td>${b.name}</td>
+      <td style="color:var(--muted)">${b.bc_customer_no || '-'}</td>
+      <td>${b.phone || '-'}</td>
+      <td>${b.user_count}</td>
+      <td>${b.active ? `<span class="pill-on">${t('branches.active')}</span>` : `<span class="pill-off">${t('branches.inactive')}</span>`}</td>
+      <td>
+        ${(isSuper || (me.role === 'branch_owner' && me.branch_code === b.code)) ? `<button class="btn sm ghost" onclick='openBranchModal(${JSON.stringify(b).replace(/'/g,"&#39;")})'>${t('branches.edit')}</button>` : ''}
+        ${isSuper && b.active ? `<button class="btn sm ghost" style="color:var(--err);border-color:var(--err);margin-left:4px" onclick="deactivateBranch('${b.code}')">${t('branches.deactivate')}</button>` : ''}
+      </td>
+    </tr>
+  `).join('');
+}
+
+function openBranchModal(b) {
+  const form = document.getElementById('branchForm');
+  form.reset();
+  document.getElementById('branchErr').textContent = '';
+  const isEdit = !!b;
+  document.getElementById('branchModalTitle').textContent = isEdit ? t('branches.edit') : t('branches.add');
+  // Hide admin account section when editing (admin already exists)
+  document.getElementById('branchAdminSection').style.display = isEdit ? 'none' : 'block';
+  // Disable admin inputs when editing so they don't submit
+  form.querySelectorAll('#branchAdminSection input').forEach(i => i.required = !isEdit);
+
+  if (isEdit) {
+    form.code.value = b.code;
+    form.code.readOnly = true;
+    form.name.value = b.name || '';
+    form.bc_customer_no.value = b.bc_customer_no || '';
+    form.phone.value = b.phone || '';
+    form.address.value = b.address || '';
+    form.manager_email.value = b.manager_email || '';
+    form.tax_id.value = b.tax_id || '';
+    form.show_tax_id.checked = !!b.show_tax_id;
+    // Non-HQ can only edit a few fields
+    if (!isHq) {
+      ['code','name','bc_customer_no','tax_id'].forEach(n => form[n].readOnly = true);
+    }
+  } else {
+    form.code.readOnly = false;
+    ['name','bc_customer_no','tax_id'].forEach(n => form[n].readOnly = false);
+  }
+  document.getElementById('branchModal').style.display = 'flex';
+}
+function closeBranch() { document.getElementById('branchModal').style.display = 'none'; }
+
+async function saveBranch(e) {
+  e.preventDefault();
+  const form = e.target;
+  const fd = new FormData(form);
+  const body = Object.fromEntries(fd.entries());
+  body.show_tax_id = form.show_tax_id.checked ? 1 : 0;
+  const code = body.code;
+  const isEdit = form.code.readOnly;
+  try {
+    if (isEdit) {
+      delete body.admin_username; delete body.admin_password; delete body.admin_full_name;
+      await api('/api/branches/' + encodeURIComponent(code), { method:'PUT', body: JSON.stringify(body) });
+    } else {
+      await api('/api/branches', { method:'POST', body: JSON.stringify(body) });
+    }
+    toast('OK');
+    closeBranch();
+    loadBranches();
+  } catch (err) {
+    document.getElementById('branchErr').textContent = err.message;
+  }
+  return false;
+}
+
+async function deactivateBranch(code) {
+  if (!confirm(t('branches.confirm_deactivate'))) return;
+  try {
+    await api('/api/branches/' + encodeURIComponent(code), { method: 'DELETE' });
+    toast('OK');
+    loadBranches();
+    loadUsers();
+  } catch (e) { toast(e.message); }
+}
+
+// ─── Users ───
+
+async function loadUsers() {
+  const br = document.getElementById('userBranchFilter').value;
+  try {
+    const q = br ? '?branch_code=' + encodeURIComponent(br) : '';
+    usersCache = await api('/api/users' + q);
+    renderUsers();
+  } catch (e) { toast(e.message); }
+}
+
+function renderUsers() {
+  const el = document.getElementById('userBody');
+  if (!usersCache.length) { el.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:20px">-</td></tr>`; return; }
+  el.innerHTML = usersCache.map(u => `
+    <tr style="${u.active?'':'opacity:.5'}">
+      <td><strong>${u.username}</strong></td>
+      <td>${u.full_name}</td>
+      <td><span class="role-badge role-${u.role}">${roleName(u.role)}</span></td>
+      <td>${u.branch_code ? u.branch_code + (u.branch_name?' - '+u.branch_name:'') : '-'}</td>
+      <td>${u.can_order ? '<span class="pill-on">✓</span>' : '<span class="pill-off">✕</span>'}</td>
+      <td>${u.active ? `<span class="pill-on">${t('branches.active')}</span>` : `<span class="pill-off">${t('branches.inactive')}</span>`}</td>
+      <td style="white-space:nowrap">
+        <button class="btn sm ghost" onclick='openUserModal(${JSON.stringify(u).replace(/'/g,"&#39;")})'>${t('users.edit')}</button>
+        <button class="btn sm ghost" onclick="resetPwd('${u.id}', '${u.username}')">${t('users.reset_pwd')}</button>
+        ${u.active && u.id !== me.id ? `<button class="btn sm ghost" style="color:var(--err);border-color:var(--err)" onclick="deactivateUser('${u.id}')">${t('users.deactivate')}</button>` : ''}
+      </td>
+    </tr>
+  `).join('');
+}
+
+function rolesForUI() {
+  // super_admin: any role; admin_scm: only admin_scm (SCM dept); branch_owner: branch-level non-owner
+  if (isSuper) return ['super_admin','admin_scm','branch_owner','store_manager','cashier','fc'];
+  if (me.role === 'admin_scm') return ['admin_scm'];
+  return ['store_manager','cashier','fc'];
+}
+
+function openUserModal(u) {
+  const form = document.getElementById('userForm');
+  form.reset();
+  document.getElementById('userErr').textContent = '';
+  const isEdit = !!u;
+
+  // Populate role options
+  const roleSel = document.getElementById('userRoleSel');
+  roleSel.innerHTML = rolesForUI().map(r => `<option value="${r}">${roleName(r)}</option>`).join('');
+  document.getElementById('userModalTitle').textContent = isEdit ? t('users.edit') : t('users.add');
+
+  if (isEdit) {
+    form.id.value = u.id;
+    form.username.value = u.username;
+    form.username.readOnly = true;
+    form.password.required = false;
+    form.password.placeholder = '(ไม่เปลี่ยน)';
+    document.getElementById('pwdLabel').textContent = t('users.new_password');
+    document.getElementById('pwdHint').style.display = 'inline';
+    form.full_name.value = u.full_name;
+    form.role.value = u.role;
+    form.branch_code.value = u.branch_code || '';
+    form.phone.value = u.phone || '';
+    form.can_order.checked = !!u.can_order;
+    form.active.checked = !!u.active;
+    // admin_scm cannot edit HQ-level users' role; branch_owner limited to branch roles
+    if (!isSuper && HQ_ROLES.includes(u.role)) {
+      form.role.disabled = true;
+    } else if (!isHq) {
+      form.role.disabled = !['store_manager','cashier','fc'].includes(u.role);
+      form.branch_code.disabled = true;
+    }
+  } else {
+    form.id.value = '';
+    form.username.readOnly = false;
+    form.password.required = true;
+    form.password.placeholder = '';
+    document.getElementById('pwdLabel').textContent = t('users.password');
+    document.getElementById('pwdHint').style.display = 'none';
+    if (!isHq) {
+      form.branch_code.value = me.branch_code;
+      form.branch_code.disabled = true;
+    }
+    form.role.disabled = false;
+    onRoleChange();
+  }
+  document.getElementById('userModal').style.display = 'flex';
+}
+function closeUser() { document.getElementById('userModal').style.display = 'none'; }
+
+function onRoleChange() {
+  const form = document.getElementById('userForm');
+  const role = form.role.value;
+  // HQ roles don't have branch
+  const isHqRole = HQ_ROLES.includes(role);
+  form.branch_code.disabled = isHqRole || !isHq;
+  if (isHqRole) form.branch_code.value = '';
+  // default can_order: branch_owner + store_manager = true, HQ & others = false
+  if (!form.id.value) {
+    form.can_order.checked = (role === 'branch_owner' || role === 'store_manager');
+  }
+}
+
+async function saveUser(e) {
+  e.preventDefault();
+  const form = e.target;
+  const fd = new FormData(form);
+  const body = Object.fromEntries(fd.entries());
+  body.can_order = form.can_order.checked;
+  body.active = form.active.checked;
+  if (!body.password) delete body.password;
+  if (HQ_ROLES.includes(body.role)) body.branch_code = '';
+  const id = body.id;
+  delete body.id;
+  try {
+    if (id) {
+      delete body.username; // immutable
+      await api('/api/users/' + id, { method: 'PUT', body: JSON.stringify(body) });
+    } else {
+      await api('/api/users', { method: 'POST', body: JSON.stringify(body) });
+    }
+    toast('OK');
+    closeUser();
+    loadUsers();
+    loadBranches(); // user counts
+  } catch (err) {
+    document.getElementById('userErr').textContent = err.message;
+  }
+  return false;
+}
+
+async function resetPwd(id, username) {
+  const p = prompt(`${t('users.reset_pwd')} (${username})`);
+  if (!p) return;
+  try {
+    await api('/api/users/' + id + '/reset-password', { method: 'POST', body: JSON.stringify({ password: p }) });
+    toast('OK');
+  } catch (e) { toast(e.message); }
+}
+
+async function deactivateUser(id) {
+  if (!confirm(t('users.confirm_deactivate'))) return;
+  try {
+    await api('/api/users/' + id, { method: 'DELETE' });
+    toast('OK');
+    loadUsers();
+    loadBranches();
+  } catch (e) { toast(e.message); }
+}
+
+function rebuildSelects() {
+  const allOpt = `<option value="">${t('users.filter_all')}</option>`;
+  const opts = branchesCache.map(b => `<option value="${b.code}">${b.code} - ${b.name}</option>`).join('');
+  const filter = document.getElementById('userBranchFilter');
+  const prev = filter.value;
+  filter.innerHTML = (isHq ? allOpt : '') + opts;
+  filter.value = prev;
+  const sel = document.getElementById('userBranchSel');
+  if (sel) sel.innerHTML = opts;
+}
+
+window.onLangChange = () => {
+  document.getElementById('nav').innerHTML = renderNav('team.html');
+  rebuildSelects();
+  renderBranches();
+  renderUsers();
+};
+
+loadBranches();
+</script>
+</body></html>

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="th"><head>
-<meta charset="utf-8"><title>คำสั่งซื้อ — JC-Stock Market</title>
+<meta charset="utf-8"><title>คำสั่งซื้อ — JC-Market</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/css/style.css">
@@ -8,17 +8,29 @@
 .order-card{cursor:pointer;transition:.2s}
 .order-card:hover{border-color:var(--gold)}
 .status-badge{display:inline-block;padding:3px 12px;border-radius:99px;font-size:12px;font-weight:600}
-.status-pending{background:#3d3015;color:#f59e0b}
-.status-paid{background:#1e3a5f;color:#3b82f6}
-.status-verified{background:#0f3d24;color:#22c55e}
-.status-failed{background:#3d1515;color:#ef4444}
-.detail-modal{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:999;display:none;align-items:center;justify-content:center;overflow-y:auto;padding:20px}
+.status-pending{background:#fff3e0;color:#e65100}
+.status-paid{background:#e3f2fd;color:#1565c0}
+.status-verified{background:#e8f5e9;color:#2e7d32}
+.status-failed{background:#ffebee;color:#c62828}
+.status-cancelled{background:#f5f5f5;color:#999}
+.countdown{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;background:#fff3e0;color:#e65100}
+.countdown.urgent{background:#ffebee;color:#c62828;animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
+.fulfill-badge{display:inline-block;padding:3px 10px;border-radius:99px;font-size:11px;font-weight:600;margin-left:6px}
+.fulfill-pending{background:var(--beige);color:var(--muted)}
+.fulfill-shipped{background:#e3f2fd;color:#1565c0}
+.fulfill-partial{background:#fff3e0;color:#e65100}
+.fulfill-received{background:#e8f5e9;color:#2e7d32}
+.receive-line{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);font-size:14px}
+.receive-line .name{flex:1}
+.receive-line input[type=number]{width:80px;text-align:center}
+.detail-modal{position:fixed;inset:0;background:rgba(24,24,24,.5);backdrop-filter:blur(4px);z-index:999;display:none;align-items:center;justify-content:center;overflow-y:auto;padding:20px}
 .detail-box{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:24px;max-width:600px;width:100%;max-height:90vh;overflow-y:auto;position:relative}
 </style>
-</head><body>
+</head><body data-i18n-title="orders.page_title">
 <div id="nav"></div>
 <div class="container">
-  <h2 style="margin-bottom:16px">คำสั่งซื้อ</h2>
+  <h2 style="margin-bottom:16px" data-i18n="orders.title">คำสั่งซื้อ</h2>
   <div id="orderList"></div>
 </div>
 
@@ -36,84 +48,228 @@ if(!requireLogin()) throw '';
 document.getElementById('nav').innerHTML = renderNav('orders.html');
 
 const user = getUser();
-const isAdmin = user && user.role === 'admin';
+const isAdmin = user && (user.role === 'super_admin' || user.role === 'admin_scm');
 
-const statusMap = {
-  pending: {label:'รอชำระเงิน', cls:'status-pending'},
-  paid: {label:'ส่งสลิปแล้ว', cls:'status-paid'},
-  verified: {label:'อนุมัติแล้ว', cls:'status-verified'},
-  failed: {label:'ปฏิเสธ', cls:'status-failed'},
-};
+const CANCEL_TIMEOUT_MIN = 30;
+function statusMap(){
+  return {
+    pending: {label:t('orders.status.pending'), cls:'status-pending'},
+    paid: {label:t('orders.status.paid'), cls:'status-paid'},
+    verified: {label:t('orders.status.verified'), cls:'status-verified'},
+    failed: {label:t('orders.status.failed'), cls:'status-failed'},
+    cancelled: {label:t('orders.status.cancelled'), cls:'status-cancelled'},
+  };
+}
+function fulfillMap(){
+  return {
+    pending: {label:t('orders.fulfill.pending'), cls:'fulfill-pending'},
+    shipped: {label:t('orders.fulfill.shipped'), cls:'fulfill-shipped'},
+    partial: {label:t('orders.fulfill.partial'), cls:'fulfill-partial'},
+    received: {label:t('orders.fulfill.received'), cls:'fulfill-received'},
+  };
+}
+
+let currentDetailId = null;
 
 async function load() {
   const orders = await api('/api/orders');
   if (!orders.length) {
-    document.getElementById('orderList').innerHTML = '<div class="card" style="text-align:center;padding:40px;color:var(--muted)"><p style="font-size:48px">📋</p><p>ยังไม่มีคำสั่งซื้อ</p></div>';
+    document.getElementById('orderList').innerHTML = `<div class="card" style="text-align:center;padding:40px;color:var(--muted)"><p style="font-size:48px">📋</p><p>${t('orders.empty')}</p></div>`;
     return;
   }
+  const sMap = statusMap();
+  const fMap = fulfillMap();
   document.getElementById('orderList').innerHTML = orders.map(o => {
-    const st = statusMap[o.payment_status] || {label:o.payment_status,cls:''};
-    return `<div class="card order-card" onclick="showDetail('${o.id}')">
+    const st = sMap[o.payment_status] || {label:o.payment_status,cls:''};
+    const fl = o.payment_status === 'verified' ? (fMap[o.fulfillment_status] || {label:'',cls:''}) : {label:'',cls:''};
+    const isCancelled = o.payment_status === 'cancelled';
+    let countdownHtml = '';
+    if (o.payment_status === 'pending') {
+      const remaining = getRemaining(o.created_at);
+      if (remaining > 0) {
+        const urgent = remaining < 5 * 60 * 1000;
+        countdownHtml = `<span class="countdown ${urgent?'urgent':''}" data-expire="${new Date(o.created_at).getTime() + CANCEL_TIMEOUT_MIN*60*1000}">⏱ ${fmtCountdown(remaining)}</span>`;
+      }
+    }
+    return `<div class="card order-card" style="${isCancelled?'opacity:.6':''}" onclick="showDetail('${o.id}')">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
         <div>
-          <strong style="font-size:16px">${o.order_number}</strong>
+          <strong style="font-size:16px">${o.bc_po_no || o.order_number}</strong>
+          <span style="color:var(--muted);font-size:12px;margin-left:6px">${o.order_number}</span>
           ${isAdmin ? `<span style="color:var(--muted);font-size:13px;margin-left:8px">${o.branch_name||o.user_name||''}</span>` : ''}
         </div>
-        <span class="status-badge ${st.cls}">${st.label}</span>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          ${countdownHtml}
+          <span class="status-badge ${st.cls}">${st.label}</span>
+          ${fl.label ? `<span class="fulfill-badge ${fl.cls}">${fl.label}</span>` : ''}
+        </div>
       </div>
       <div style="display:flex;justify-content:space-between;margin-top:8px;color:var(--muted);font-size:13px">
         <span>${o.created_at}</span>
-        <span style="color:var(--gold);font-weight:700;font-size:16px">฿${o.total.toLocaleString()}</span>
+        <span style="color:${isCancelled?'var(--muted)':'var(--gold)'};font-weight:700;font-size:16px;${isCancelled?'text-decoration:line-through':''}">฿${o.total.toLocaleString()}</span>
       </div>
     </div>`;
   }).join('');
+  startCountdownTimer();
 }
 
 async function showDetail(id) {
+  currentDetailId = id;
   const o = await api('/api/orders/' + id);
-  const st = statusMap[o.payment_status] || {label:o.payment_status,cls:''};
+  const sMap = statusMap();
+  const fMap = fulfillMap();
+  const st = sMap[o.payment_status] || {label:o.payment_status,cls:''};
   let html = `
-    <h3 style="margin-bottom:4px">${o.order_number}</h3>
+    <h3 style="margin-bottom:4px">${o.bc_po_no || o.order_number}</h3>
+    ${o.bc_po_no ? `<div style="color:var(--muted);font-size:12px;margin-bottom:4px">Ref: ${o.order_number}</div>` : ''}
     <span class="status-badge ${st.cls}">${st.label}</span>
     <div style="color:var(--muted);font-size:13px;margin:8px 0">${o.created_at}${o.branch_code?' | '+o.branch_code:''}</div>
     <hr style="border-color:var(--border);margin:12px 0">
-    <h4 style="margin-bottom:8px">รายการสินค้า</h4>
+    <h4 style="margin-bottom:8px">${t('orders.items')}</h4>
     <table style="width:100%;font-size:14px">
-      <tr style="color:var(--muted)"><th style="text-align:left">สินค้า</th><th>จำนวน</th><th style="text-align:right">รวม</th></tr>
-      ${o.lines.map(l => `<tr><td>${l.item_name}<br><span style="color:var(--muted);font-size:11px">${l.item_no}</span></td><td style="text-align:center">${l.quantity}</td><td style="text-align:right;color:var(--gold)">฿${l.line_total.toLocaleString()}</td></tr>`).join('')}
+      <tr style="color:var(--muted)"><th style="text-align:left">${t('common.item')}</th><th>${t('common.qty')}</th><th style="text-align:right">${t('common.total')}</th></tr>
+      ${o.lines.map(l => `<tr><td>${itemName(l)}<br><span style="color:var(--muted);font-size:11px">${l.item_no}</span></td><td style="text-align:center">${l.quantity}</td><td style="text-align:right;color:var(--gold)">฿${l.line_total.toLocaleString()}</td></tr>`).join('')}
     </table>
     <hr style="border-color:var(--border);margin:12px 0">
-    <div style="display:flex;justify-content:flex-end;font-size:20px;font-weight:700;color:var(--gold)">฿${o.total.toLocaleString()}</div>`;
+    <div style="display:flex;justify-content:space-between;font-size:14px;color:var(--muted)"><span>${t('orders.subtotal')}</span><span>฿${o.subtotal.toLocaleString()}</span></div>
+    ${o.vat_amount > 0 ? `<div style="display:flex;justify-content:space-between;font-size:14px;color:var(--muted);margin-top:4px"><span>${t('orders.vat')}</span><span>฿${o.vat_amount.toLocaleString()}</span></div>` : ''}
+    <div style="display:flex;justify-content:space-between;font-size:20px;font-weight:700;margin-top:8px"><span>${t('orders.grand')}</span><span style="color:var(--gold)">฿${o.total.toLocaleString()}</span></div>`;
 
-  if (o.note) html += `<div style="margin-top:12px;color:var(--muted);font-size:13px">หมายเหตุ: ${o.note}</div>`;
+  if (o.note) html += `<div style="margin-top:12px;color:var(--muted);font-size:13px">${t('orders.note_prefix', { note: o.note })}</div>`;
 
-  // Slip
+  // Payment section for pending orders
+  if (o.payment_status === 'pending') {
+    const remaining = getRemaining(o.created_at);
+    const urgent = remaining > 0 && remaining < 5 * 60 * 1000;
+    html += `<hr style="border-color:var(--border);margin:12px 0">
+      <h4 style="margin-bottom:12px">${t('orders.pay')}</h4>`;
+    if (remaining > 0) {
+      html += `<div style="text-align:center;margin-bottom:12px">
+        <div class="countdown ${urgent?'urgent':''}" style="font-size:18px;display:inline-flex" id="modalCountdown" data-expire="${new Date(o.created_at).getTime() + CANCEL_TIMEOUT_MIN*60*1000}">⏱ ${fmtCountdown(remaining)}</div>
+        <p style="font-size:12px;color:var(--muted);margin-top:4px">${t('orders.pay_hint')}</p>
+      </div>`;
+    } else {
+      html += `<div style="text-align:center;padding:16px;color:var(--err)"><p style="font-size:24px">⏰</p><p>${t('orders.pay_timeout')}</p></div>`;
+    }
+    html += `<div style="text-align:center;margin-bottom:16px">
+        <div style="font-size:24px;font-weight:700;color:var(--gold);margin-bottom:8px">฿${o.total.toLocaleString()}</div>
+        <img id="payQr_${o.id}" src="" style="max-width:240px;border-radius:12px;background:#fff;padding:10px;display:none">
+        <p style="font-size:12px;color:var(--muted);margin-top:8px">${t('orders.scan_qr')}</p>
+        <div class="row" style="gap:8px;margin-top:8px;justify-content:center">
+          <button class="btn ghost sm" onclick="saveOrderQR('${o.id}','${o.order_number}')">${t('checkout.save_qr')}</button>
+          <button class="btn ghost sm" onclick="downloadOrderPDF('${o.id}')">${t('checkout.download_pdf')}</button>
+        </div>
+      </div>
+      <div style="border:2px dashed var(--border);border-radius:12px;padding:20px;text-align:center;cursor:pointer" id="dropPay_${o.id}" onclick="document.getElementById('slipPay_${o.id}').click()">
+        <input type="file" id="slipPay_${o.id}" accept="image/*,.pdf" style="display:none" onchange="previewPaySlip('${o.id}',this)">
+        <p style="color:var(--muted)">${t('orders.upload_click')}</p>
+        <p style="font-size:12px;color:var(--muted)">${t('orders.upload_types')}</p>
+      </div>
+      <img id="slipPrev_${o.id}" style="max-width:200px;border-radius:8px;margin:12px auto;display:none">
+      <button class="btn" style="width:100%;margin-top:12px" id="payBtn_${o.id}" onclick="submitPaySlip('${o.id}')" disabled>${t('orders.send_slip')}</button>
+      <div class="err" id="payErr_${o.id}"></div>`;
+    // Cancel button
+    html += `<button class="btn ghost" style="width:100%;margin-top:8px;color:var(--err);border-color:var(--err)" onclick="cancelOrder('${o.id}')">${t('orders.cancel_order')}</button>`;
+    loadPayQR(o.id);
+    setTimeout(() => startCountdownTimer(), 100);
+  }
+
+  // Cancelled order info
+  if (o.payment_status === 'cancelled') {
+    html += `<hr style="border-color:var(--border);margin:12px 0">
+      <div style="text-align:center;padding:16px;background:#f5f5f5;border-radius:8px">
+        <p style="font-size:28px">🚫</p>
+        <p style="font-weight:700;color:#999;margin:4px 0">${t('orders.cancelled_title')}</p>
+        <p style="font-size:12px;color:var(--muted)">${o.cancel_reason || ''}</p>
+        <p style="font-size:12px;color:var(--muted)">${o.cancelled_at || ''}</p>
+      </div>
+      <button class="btn" style="width:100%;margin-top:12px;background:var(--gold)" onclick="reorder('${o.id}')">${t('orders.reorder')}</button>`;
+  }
+
+  // Slip (already uploaded)
   if (o.payment && o.payment.slip_path) {
-    html += `<hr style="border-color:var(--border);margin:12px 0"><h4>สลิปการโอน</h4>
+    html += `<hr style="border-color:var(--border);margin:12px 0"><h4>${t('orders.slip')}</h4>
       <img src="${o.payment.slip_path}" style="max-width:280px;border-radius:8px;margin-top:8px">`;
-    if (o.payment.verified) html += `<p style="color:var(--ok);font-size:13px;margin-top:4px">ตรวจสอบแล้ว ${o.payment.verified_at}</p>`;
+    if (o.payment.verified) html += `<p style="color:var(--ok);font-size:13px;margin-top:4px">${t('orders.verified_at', { at: o.payment.verified_at })}</p>`;
+  }
+
+  // FC cancel button for paid orders
+  if (o.payment_status === 'paid') {
+    html += `<button class="btn ghost" style="width:100%;margin-top:8px;color:var(--err);border-color:var(--err)" onclick="cancelOrder('${o.id}')">${t('orders.cancel_order')}</button>`;
   }
 
   // Admin verify buttons
   if (isAdmin && o.payment_status === 'paid') {
     html += `<hr style="border-color:var(--border);margin:12px 0">
-      <h4>ตรวจสอบการชำระเงิน</h4>
+      <h4>${t('orders.admin.verify')}</h4>
       <div class="row" style="margin-top:8px">
-        <button class="btn" onclick="verify('${o.id}','approve')">อนุมัติ</button>
-        <button class="btn ghost" style="color:var(--err);border-color:var(--err)" onclick="verify('${o.id}','reject')">ปฏิเสธ</button>
+        <button class="btn" onclick="verify('${o.id}','approve')">${t('orders.admin.approve')}</button>
+        <button class="btn ghost" style="color:var(--err);border-color:var(--err)" onclick="verify('${o.id}','reject')">${t('orders.admin.reject')}</button>
       </div>`;
   }
 
+  // ─── Fulfillment section (for verified orders) ───
+  if (o.payment_status === 'verified') {
+    const fl = fMap[o.fulfillment_status] || {label:o.fulfillment_status,cls:''};
+    html += `<hr style="border-color:var(--border);margin:12px 0">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h4>${t('orders.fulfill_title')}</h4>
+        <span class="fulfill-badge ${fl.cls}">${fl.label}</span>
+      </div>`;
+
+    if (o.fulfillment_status === 'pending' || o.fulfillment_status === 'shipped' || o.fulfillment_status === 'partial') {
+      html += `<div id="receiveSection_${o.id}"><button class="btn" style="width:100%" onclick="loadReceiveForm('${o.id}')">${t('orders.receive')}</button></div>`;
+    } else if (o.fulfillment_status === 'received') {
+      html += `<div style="text-align:center;padding:12px;color:var(--ok)"><p style="font-size:24px">✅</p><p>${t('orders.received_ok')}</p>
+        ${o.fully_received_at ? `<p style="font-size:12px;color:var(--muted)">${o.fully_received_at}</p>` : ''}</div>`;
+    }
+
+    // Show receipt history
+    if (o.receipts && o.receipts.length) {
+      html += `<div style="margin-top:12px"><h5 style="margin-bottom:8px;color:var(--muted)">${t('orders.history')}</h5>`;
+      for (const r of o.receipts) {
+        html += `<div class="card" style="padding:10px;margin-bottom:6px;font-size:13px">
+          <div style="display:flex;justify-content:space-between"><strong>${r.receipt_number}</strong><span style="color:var(--muted)">${r.created_at}</span></div>
+          <div style="color:var(--muted)">${t('orders.received_by')}: ${r.received_by_name||''}${r.note ? ' | '+r.note : ''}</div>
+        </div>`;
+      }
+      html += `</div>`;
+    }
+  }
+
+  // Receipt button (for verified orders)
+  if (o.payment_status === 'verified') {
+    html += `<hr style="border-color:var(--border);margin:12px 0">
+      <button class="btn" style="width:100%;background:var(--ok);color:#fff" onclick="showReceipt('${o.id}')">${t('orders.view_receipt')}</button>`;
+  }
+
   // BC info
+  if (o.bc_po_no) {
+    html += `<div style="margin-top:12px;color:var(--ok);font-size:13px">${t('orders.bc.po')}: ${o.bc_po_no}</div>`;
+  }
+  if (o.bc_so_no) {
+    html += `<div style="margin-top:4px;color:var(--ok);font-size:13px">${t('orders.bc.so')}: ${o.bc_so_no}</div>`;
+  }
   if (o.bc_invoice_no) {
-    html += `<div style="margin-top:12px;color:var(--ok);font-size:13px">BC Invoice: ${o.bc_invoice_no} ${o.bc_posted?'(Posted)':''}</div>`;
+    html += `<div style="margin-top:4px;color:var(--ok);font-size:13px">${t('orders.bc.invoice')}: ${o.bc_invoice_no} ${o.bc_posted?t('orders.bc.posted'):''}</div>`;
   }
 
   document.getElementById('detailContent').innerHTML = html;
   document.getElementById('detailModal').style.display = 'flex';
 }
 
-function closeDetail() { document.getElementById('detailModal').style.display = 'none'; }
+function closeDetail() {
+  document.getElementById('detailModal').style.display = 'none';
+  currentDetailId = null;
+  // ถ้ามาจาก deep-link (?id=...) → กลับหน้าเดิม (เช่น admin.html) แทนที่จะแสดงรายการ orders ทั้งหมด
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('id')) {
+    const ref = document.referrer;
+    if (ref && ref.includes('/admin.html')) { history.back(); return; }
+    // referrer ไม่มี → ล้าง ?id ออกจาก URL เฉยๆ
+    history.replaceState({}, '', '/orders.html');
+  }
+}
 
 async function verify(id, action) {
   try {
@@ -124,6 +280,484 @@ async function verify(id, action) {
   } catch (e) { toast(e.message); }
 }
 
-load();
+async function loadPayQR(id) {
+  try {
+    const r = await api('/api/orders/' + id + '/qr');
+    const img = document.getElementById('payQr_' + id);
+    if (img && r.qr_data_url) { img.src = r.qr_data_url; img.style.display = 'inline-block'; }
+  } catch (e) { console.log('QR load error:', e.message); }
+}
+
+function previewPaySlip(id, input) {
+  const file = input.files[0];
+  if (!file) return;
+  document.getElementById('dropPay_' + id).style.borderColor = 'var(--ok)';
+  document.getElementById('payBtn_' + id).disabled = false;
+  if (file.type.startsWith('image/')) {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = document.getElementById('slipPrev_' + id);
+      img.src = e.target.result; img.style.display = 'block';
+    };
+    reader.readAsDataURL(file);
+  }
+}
+
+async function submitPaySlip(id) {
+  const file = document.getElementById('slipPay_' + id).files[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('slip', file);
+  try {
+    document.getElementById('payBtn_' + id).disabled = true;
+    document.getElementById('payBtn_' + id).textContent = t('orders.uploading');
+    const r = await fetch('/api/orders/' + id + '/slip', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + getToken() },
+      body: fd,
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error);
+    toast(j.auto_verified ? t('orders.auto_ok') : t('orders.pending_review'));
+    closeDetail();
+    load();
+  } catch (e) {
+    document.getElementById('payErr_' + id).textContent = e.message;
+    document.getElementById('payBtn_' + id).disabled = false;
+    document.getElementById('payBtn_' + id).textContent = t('orders.send_slip');
+  }
+}
+
+async function syncOneOrder(id) {
+  try {
+    toast(t('orders.checking_bc'));
+    const r = await api('/api/orders/' + id + '/sync-fulfillment', { method:'POST' });
+    if (r.status === 'shipped' || r.status === 'partial') {
+      toast(t('orders.bc_shipped'));
+    } else {
+      toast(r.receipts > 0 ? t('orders.bc_checked') : t('orders.bc_not_found'));
+    }
+    closeDetail();
+    load();
+  } catch (e) { toast(e.message); }
+}
+
+async function syncFulfillment(id) {
+  try {
+    toast(t('orders.checking_bc'));
+    const r = await api('/api/sync/fulfillment', { method:'POST' });
+    toast(t('orders.bc_synced', { n: r.synced }));
+    closeDetail();
+    load();
+  } catch (e) { toast(e.message); }
+}
+
+async function loadReceiveForm(id) {
+  const section = document.getElementById('receiveSection_' + id);
+  if (!section) return;
+  section.innerHTML = `<p style="color:var(--muted);text-align:center">${t('common.loading')}</p>`;
+  try {
+    const data = await api('/api/orders/' + id + '/receivable');
+    let html = `<div style="margin-bottom:12px">
+      <h5 style="margin-bottom:8px">${t('orders.rcv.item')}</h5>
+      <table style="width:100%;font-size:13px;margin-bottom:8px">
+        <tr style="color:var(--muted);font-size:11px;text-align:center">
+          <th style="text-align:left">${t('orders.rcv.item')}</th>
+          <th>${t('orders.rcv.order')}</th>
+          <th>${t('orders.rcv.fc_rcv')}</th>
+          <th>${t('orders.rcv.this_time')}</th>
+        </tr>`;
+    for (const l of data.lines) {
+      if (l.remaining <= 0) {
+        html += `<tr style="opacity:0.5">
+          <td>${itemName(l)}<br><span style="color:var(--muted);font-size:11px">${l.item_no}</span></td>
+          <td style="text-align:center">${l.quantity}</td>
+          <td style="text-align:center;color:var(--ok)">${l.already_received}</td>
+          <td style="text-align:center;color:var(--ok)">✓</td>
+        </tr>`;
+      } else {
+        html += `<tr>
+          <td>${itemName(l)}<br><span style="color:var(--muted);font-size:11px">${l.item_no}</span></td>
+          <td style="text-align:center">${l.quantity}</td>
+          <td style="text-align:center">${l.already_received}</td>
+          <td style="text-align:center"><input type="number" id="rcv_${l.id}" min="0" max="${l.remaining}" value="${l.remaining}" step="1" style="width:60px;text-align:center"></td>
+        </tr>`;
+      }
+    }
+    html += `</table>`;
+    html += `</div>
+      <textarea id="rcvNote_${id}" rows="2" placeholder="${t('orders.rcv.note_placeholder')}" style="margin-bottom:8px"></textarea>
+      <button class="btn" style="width:100%" onclick="confirmReceive('${id}', ${JSON.stringify(data.lines.filter(l=>l.remaining>0).map(l=>l.id))})">${t('orders.rcv.confirm')}</button>
+      <div class="err" id="rcvErr_${id}"></div>`;
+    section.innerHTML = html;
+  } catch (e) {
+    section.innerHTML = `<p style="color:var(--err)">${e.message}</p>`;
+  }
+}
+
+async function confirmReceive(orderId, lineIds) {
+  const lines = [];
+  for (const lid of lineIds) {
+    const input = document.getElementById('rcv_' + lid);
+    if (input && parseFloat(input.value) > 0) {
+      lines.push({ order_line_id: lid, received_qty: parseFloat(input.value) });
+    }
+  }
+  if (!lines.length) { toast(t('orders.rcv.no_items')); return; }
+  const note = document.getElementById('rcvNote_' + orderId)?.value || '';
+  try {
+    const r = await api('/api/orders/' + orderId + '/receive', {
+      method: 'POST',
+      body: JSON.stringify({ lines, note }),
+    });
+    toast(r.message);
+    // Show GR document instead of closing
+    await showGRDocument(r.receipt_id);
+    load();
+  } catch (e) {
+    const errEl = document.getElementById('rcvErr_' + orderId);
+    if (errEl) errEl.textContent = e.message;
+    else toast(e.message);
+  }
+}
+
+async function showGRDocument(receiptId) {
+  try {
+    const gr = await api('/api/receipts/' + receiptId);
+    let html = `
+      <div style="text-align:center;margin-bottom:16px">
+        <div style="font-size:40px;margin-bottom:8px">📦</div>
+        <h3 style="color:var(--ok)">${t('orders.gr.title')}</h3>
+      </div>
+      <div class="card" style="padding:16px;margin-bottom:12px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+          <h4>${t('orders.gr.doc')}</h4>
+          <span style="color:var(--gold);font-weight:700">${gr.receipt_number}</span>
+        </div>
+        <div style="font-size:13px;color:var(--muted);margin-bottom:4px">${t('orders.gr.order')}: ${gr.order_number || ''} ${gr.bc_po_no ? '| BC PO: ' + gr.bc_po_no : ''}</div>
+        <div style="font-size:13px;color:var(--muted);margin-bottom:12px">${t('orders.gr.date')}: ${gr.created_at} | ${t('orders.received_by')}: ${gr.received_by_name || ''}</div>
+        <table style="width:100%;font-size:13px">
+          <tr style="color:var(--muted);font-size:11px"><th style="text-align:left">${t('common.item')}</th><th>${t('orders.rcv.order')}</th><th style="color:var(--ok)">${t('stock.gr.col.received')}</th></tr>
+          ${gr.lines.map(l => `<tr>
+            <td>${itemName(l)}<br><span style="color:var(--muted);font-size:11px">${l.item_no}</span></td>
+            <td style="text-align:center">${l.ordered_qty}</td>
+            <td style="text-align:center;color:var(--ok);font-weight:600">${l.received_qty}</td>
+          </tr>`).join('')}
+        </table>
+        ${gr.note ? `<div style="margin-top:8px;font-size:13px;color:var(--muted)">${t('common.note')}: ${gr.note}</div>` : ''}
+      </div>
+      <div class="row" style="gap:8px">
+        <button class="btn" style="flex:1" onclick="closeDetail();showDetail('${gr.order_id}')">${t('orders.gr.back')}</button>
+        <a href="/stock-balance.html" class="btn ghost" style="flex:1;text-align:center">${t('orders.gr.stock')}</a>
+      </div>`;
+    document.getElementById('detailContent').innerHTML = html;
+    document.getElementById('detailModal').style.display = 'flex';
+  } catch (e) {
+    toast(t('orders.gr.load_err', { err: e.message }));
+    closeDetail();
+  }
+}
+
+function getRemaining(createdAt) {
+  const created = new Date(createdAt).getTime();
+  const expireAt = created + CANCEL_TIMEOUT_MIN * 60 * 1000;
+  return Math.max(0, expireAt - Date.now());
+}
+
+function fmtCountdown(ms) {
+  if (ms <= 0) return '00:00';
+  const min = Math.floor(ms / 60000);
+  const sec = Math.floor((ms % 60000) / 1000);
+  return `${String(min).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+}
+
+let countdownInterval = null;
+function startCountdownTimer() {
+  if (countdownInterval) clearInterval(countdownInterval);
+  countdownInterval = setInterval(() => {
+    const els = document.querySelectorAll('[data-expire]');
+    if (!els.length) { clearInterval(countdownInterval); return; }
+    let needReload = false;
+    els.forEach(el => {
+      const expire = parseInt(el.dataset.expire);
+      const remaining = Math.max(0, expire - Date.now());
+      el.textContent = '⏱ ' + fmtCountdown(remaining);
+      if (remaining < 5 * 60 * 1000) el.classList.add('urgent');
+      if (remaining <= 0) {
+        el.textContent = t('orders.expired');
+        needReload = true;
+      }
+    });
+    if (needReload) {
+      clearInterval(countdownInterval);
+      setTimeout(() => { closeDetail(); load(); }, 2000);
+    }
+  }, 1000);
+}
+
+async function cancelOrder(id) {
+  const reason = prompt(t('orders.cancel_reason_prompt'));
+  if (reason === null) return; // User pressed cancel
+  try {
+    const r = await api('/api/orders/' + id + '/cancel', {
+      method: 'POST',
+      body: JSON.stringify({ reason: reason || t('orders.cancel_default_reason') }),
+    });
+    toast(r.message);
+    closeDetail();
+    load();
+  } catch (e) { toast(e.message); }
+}
+
+async function reorder(id) {
+  if (!confirm(t('orders.reorder_confirm'))) return;
+  try {
+    toast(t('orders.reorder_loading'));
+    const r = await api('/api/orders/' + id + '/reorder', { method: 'POST' });
+    toast(r.message);
+    closeDetail();
+    load();
+    // Open new order detail
+    setTimeout(() => showDetail(r.order_id), 500);
+  } catch (e) { toast(e.message); }
+}
+
+async function showReceipt(orderId) {
+  try {
+    const rc = await api('/api/orders/' + orderId + '/receipt');
+    const buyer = rc.buyer || {};
+    let html = `
+      <div id="receiptDoc">
+        <div style="text-align:center;margin-bottom:20px;border-bottom:2px solid var(--primary);padding-bottom:16px">
+          <h2 style="margin-bottom:2px">${t('orders.receipt.title')}</h2>
+          <p style="color:var(--muted);font-size:13px">${t('orders.receipt.subtitle')}</p>
+          <p style="color:var(--gold-dark);font-weight:700;font-size:18px;margin-top:8px">${rc.receipt_number}</p>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:16px;font-size:13px">
+          <div>
+            <div style="color:var(--muted);font-size:11px;margin-bottom:2px">${t('orders.receipt.seller')}</div>
+            <div style="font-weight:600">Jiancha International Co., Ltd. (HQ)</div>
+          </div>
+          <div style="text-align:right">
+            <div style="color:var(--muted);font-size:11px;margin-bottom:2px">${t('orders.receipt.issue_date')}</div>
+            <div style="font-weight:600">${fmtDateFull(rc.created_at)}</div>
+          </div>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:16px;font-size:13px;background:var(--beige,#f5f3f0);padding:12px;border-radius:8px">
+          <div>
+            <div style="color:var(--muted);font-size:11px;margin-bottom:2px">${t('orders.receipt.buyer')}</div>
+            <div style="font-weight:600">${buyer.full_name || '-'}</div>
+            <div style="color:var(--muted)">${buyer.branch_name || ''} ${buyer.branch_code ? '(' + buyer.branch_code + ')' : ''}</div>
+          </div>
+          <div style="text-align:right">
+            <div style="color:var(--muted);font-size:11px;margin-bottom:2px">${t('orders.receipt.order_no')}</div>
+            <div style="font-weight:600">${rc.order_number}</div>
+            ${rc.bc_po_no ? `<div style="color:var(--muted);font-size:12px">BC PO: ${rc.bc_po_no}</div>` : ''}
+          </div>
+        </div>
+
+        <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px">
+          <thead>
+            <tr style="border-bottom:2px solid var(--primary)">
+              <th style="text-align:left;padding:8px 6px;font-size:12px;color:var(--muted)">${t('orders.receipt.no')}</th>
+              <th style="text-align:left;padding:8px 6px;font-size:12px;color:var(--muted)">${t('orders.receipt.code')}</th>
+              <th style="text-align:left;padding:8px 6px;font-size:12px;color:var(--muted)">${t('orders.receipt.item')}</th>
+              <th style="text-align:center;padding:8px 6px;font-size:12px;color:var(--muted)">${t('orders.receipt.qty')}</th>
+              <th style="text-align:right;padding:8px 6px;font-size:12px;color:var(--muted)">${t('orders.receipt.price')}</th>
+              <th style="text-align:right;padding:8px 6px;font-size:12px;color:var(--muted)">${t('orders.receipt.line_total')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rc.lines.map((l,i) => `<tr style="border-bottom:1px solid var(--border)">
+              <td style="padding:8px 6px">${i+1}</td>
+              <td style="padding:8px 6px;color:var(--muted)">${l.item_no}</td>
+              <td style="padding:8px 6px;font-weight:600">${itemName(l)}</td>
+              <td style="padding:8px 6px;text-align:center">${l.quantity}</td>
+              <td style="padding:8px 6px;text-align:right">฿${l.unit_price.toLocaleString()}</td>
+              <td style="padding:8px 6px;text-align:right;font-weight:600">฿${l.line_total.toLocaleString()}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+
+        <div style="display:flex;justify-content:flex-end">
+          <div style="width:250px">
+            <div style="display:flex;justify-content:space-between;font-size:14px;color:var(--muted);margin-bottom:4px">
+              <span>${t('orders.receipt.subtotal')}</span><span>฿${rc.subtotal.toLocaleString()}</span>
+            </div>
+            ${rc.vat_amount > 0 ? `<div style="display:flex;justify-content:space-between;font-size:14px;color:var(--muted);margin-bottom:4px">
+              <span>${t('orders.receipt.vat')}</span><span>฿${rc.vat_amount.toLocaleString()}</span>
+            </div>` : ''}
+            <div style="display:flex;justify-content:space-between;font-size:18px;font-weight:700;border-top:2px solid var(--primary);padding-top:8px;margin-top:4px">
+              <span>${t('orders.receipt.grand')}</span><span style="color:var(--gold-dark)">฿${rc.total.toLocaleString()}</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top:16px;padding:12px;border-radius:8px;background:#e8f5e9;font-size:13px;display:flex;align-items:center;gap:8px">
+          <span style="font-size:18px">✅</span>
+          <div>
+            <div style="font-weight:600;color:#2e7d32">${t('orders.receipt.paid')}</div>
+            <div style="color:#2e7d32;font-size:12px">${t('orders.receipt.via', { d: fmtDateFull(rc.paid_at) })}</div>
+            <div style="color:#2e7d32;font-size:12px">${t('orders.receipt.issued_by', { name: rc.issued_by_name || 'Admin' })}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:16px;gap:8px" id="receiptActions">
+        <button class="btn" style="flex:1" onclick="printReceipt()">${t('orders.receipt.print')}</button>
+        <button class="btn ghost" style="flex:1" onclick="closeDetail()">${t('common.close')}</button>
+      </div>`;
+
+    document.getElementById('detailContent').innerHTML = html;
+    document.getElementById('detailModal').style.display = 'flex';
+  } catch (e) {
+    if (e.message === t('orders.receipt.not_found') || (e.message && e.message.includes('ยังไม่มีใบเสร็จ'))) {
+      toast(t('orders.receipt.not_found'));
+    } else {
+      toast(t('orders.receipt.load_err', { err: e.message }));
+    }
+  }
+}
+
+function saveOrderQR(orderId, orderNo) {
+  const img = document.getElementById('payQr_' + orderId);
+  if (!img || !img.src || img.src === window.location.href) { toast('QR not ready'); return; }
+  const a = document.createElement('a');
+  a.href = img.src;
+  a.download = `QR_${orderNo}.png`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+async function downloadOrderPDF(orderId) {
+  try {
+    const o = await api('/api/orders/' + orderId);
+    const qr = await api('/api/orders/' + orderId + '/qr').catch(() => null);
+    const qrData = qr ? qr.qr_data_url : '';
+    const user = getUser() || {};
+    const locale = getLang() === 'th' ? 'th-TH' : 'en-US';
+    const dateStr = new Date(o.created_at).toLocaleString(locale);
+    const itemsRows = (o.lines||[]).map((l,i) => `
+      <tr>
+        <td style="padding:6px;border-bottom:1px solid #eee">${i+1}</td>
+        <td style="padding:6px;border-bottom:1px solid #eee;color:#777;font-family:monospace;font-size:12px">${l.item_no}</td>
+        <td style="padding:6px;border-bottom:1px solid #eee;font-weight:600">${itemName(l)}</td>
+        <td style="padding:6px;border-bottom:1px solid #eee;text-align:center">${l.quantity}</td>
+        <td style="padding:6px;border-bottom:1px solid #eee;text-align:right">฿${(l.unit_price||0).toLocaleString()}</td>
+        <td style="padding:6px;border-bottom:1px solid #eee;text-align:right;font-weight:600">฿${l.line_total.toLocaleString()}</td>
+      </tr>`).join('');
+    const vatRow = (o.vat_amount > 0) ? `
+      <div style="display:flex;justify-content:space-between;font-size:13px;color:#666;margin-bottom:4px">
+        <span>${t('checkout.pdf_vat')}</span><span>฿${o.vat_amount.toLocaleString()}</span>
+      </div>` : '';
+    const bcRow = [
+      o.bc_po_no ? `<div>${t('orders.bc.po')}: <strong>${o.bc_po_no}</strong></div>` : '',
+      o.bc_so_no ? `<div>${t('orders.bc.so')}: <strong>${o.bc_so_no}</strong></div>` : '',
+    ].filter(Boolean).join('');
+    const qrPanel = qrData ? `
+      <div style="text-align:center;padding:16px;border:1px dashed #AD9C82;border-radius:10px;margin-top:12px">
+        <div style="font-weight:600;margin-bottom:8px">PromptPay QR</div>
+        <div style="font-size:24px;font-weight:700;color:#8B7355;margin:8px 0">฿${o.total.toLocaleString()}</div>
+        <img src="${qrData}" alt="QR" style="max-width:220px;background:#fff;padding:8px">
+        <p style="font-size:12px;color:#777;margin-top:8px">${t('checkout.pdf_scan')}</p>
+      </div>` : '';
+
+    const win = window.open('', '_blank', 'width=800,height=1000');
+    win.document.write(`<!DOCTYPE html><html><head>
+      <meta charset="utf-8"><title>${t('checkout.pdf_title')} ${o.order_number}</title>
+      <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+      <style>
+        *{box-sizing:border-box;margin:0;padding:0}
+        body{font-family:'Sarabun',sans-serif;padding:32px;color:#181818;max-width:800px;margin:0 auto;background:#fff}
+        .hdr{text-align:center;border-bottom:2px solid #AD9C82;padding-bottom:16px;margin-bottom:16px}
+        .hdr h1{font-size:22px}.hdr .sub{color:#777;font-size:13px;margin-top:4px}
+        .meta{display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px;background:#f5f3f0;padding:12px;border-radius:8px;margin-bottom:16px;font-size:13px}
+        .meta .lbl{color:#777;font-size:11px;margin-bottom:2px}.meta .val{font-weight:600}
+        table{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:12px}
+        thead th{background:#181818;color:#AD9C82;padding:8px 6px;text-align:left;font-size:12px}
+        .totals{display:flex;justify-content:flex-end}.totals .box{width:260px}
+        .totals .grand{display:flex;justify-content:space-between;font-size:18px;font-weight:700;border-top:2px solid #181818;padding-top:8px;margin-top:4px}
+        .bc{margin-top:12px;font-size:12px;color:#2e7d32}
+        .actions{text-align:center;margin-top:24px}
+        .actions button{padding:10px 24px;font-size:14px;cursor:pointer;background:#AD9C82;color:#fff;border:none;border-radius:8px;font-family:inherit;font-weight:600}
+        @media print{body{padding:20px}.actions{display:none!important}}
+      </style>
+    </head><body>
+      <div class="hdr"><h1>JC-Market</h1><div class="sub">${t('checkout.pdf_title')}</div></div>
+      <div class="meta">
+        <div><div class="lbl">${t('checkout.pdf_order_no')}</div><div class="val">${o.order_number}</div>
+        ${o.bc_po_no ? `<div style="color:#777;font-size:11px">BC PO: ${o.bc_po_no}</div>` : ''}</div>
+        <div><div class="lbl">${t('checkout.pdf_date')}</div><div class="val">${dateStr}</div></div>
+        <div><div class="lbl">${t('checkout.pdf_branch')}</div><div class="val">${user.full_name||''}</div>
+        <div style="color:#777;font-size:11px">${user.branch_name||''}</div></div>
+      </div>
+      <h3 style="margin-bottom:8px;color:#AD9C82">${t('checkout.pdf_items')}</h3>
+      <table>
+        <thead><tr><th>#</th><th>${t('common.code')}</th><th>${t('common.item')}</th>
+        <th style="text-align:center">${t('common.qty')}</th>
+        <th style="text-align:right">${t('common.price')}</th>
+        <th style="text-align:right">${t('common.total')}</th></tr></thead>
+        <tbody>${itemsRows}</tbody>
+      </table>
+      <div class="totals"><div class="box">
+        <div style="display:flex;justify-content:space-between;font-size:13px;color:#666;margin-bottom:4px">
+          <span>${t('checkout.pdf_subtotal')}</span><span>฿${(o.subtotal||0).toLocaleString()}</span>
+        </div>
+        ${vatRow}
+        <div class="grand"><span>${t('checkout.pdf_total')}</span><span style="color:#8B7355">฿${o.total.toLocaleString()}</span></div>
+      </div></div>
+      ${qrPanel}
+      ${bcRow ? `<div class="bc">${bcRow}</div>` : ''}
+      <div class="actions"><button onclick="window.print()">${t('checkout.pdf_print')}</button></div>
+    </body></html>`);
+    win.document.close();
+  } catch (e) { toast('PDF error: ' + e.message); }
+}
+
+function fmtDateFull(d) {
+  if (!d) return '-';
+  const locale = getLang() === 'th' ? 'th-TH' : 'en-US';
+  return new Date(d).toLocaleDateString(locale, { year:'numeric', month:'long', day:'numeric', hour:'2-digit', minute:'2-digit' });
+}
+
+function printReceipt() {
+  const content = document.getElementById('receiptDoc');
+  if (!content) return;
+  const win = window.open('', '_blank', 'width=800,height=900');
+  win.document.write(`<!DOCTYPE html><html><head>
+    <meta charset="utf-8"><title>${t('orders.receipt.title')}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+      *{box-sizing:border-box;margin:0;padding:0}
+      body{font-family:'Sarabun',sans-serif;padding:40px;color:#181818;max-width:800px;margin:0 auto}
+      table{width:100%;border-collapse:collapse}
+      th,td{padding:8px 6px}
+      @media print{body{padding:20px}button{display:none!important}}
+    </style>
+  </head><body>
+    ${content.innerHTML}
+    <div style="text-align:center;margin-top:24px">
+      <button onclick="window.print()" style="padding:10px 24px;font-size:14px;cursor:pointer;background:#AD9C82;color:#fff;border:none;border-radius:8px;font-family:inherit;font-weight:600">${t('orders.receipt.print_btn')}</button>
+    </div>
+  </body></html>`);
+  win.document.close();
+}
+
+window.onLangChange = () => {
+  document.getElementById('nav').innerHTML = renderNav('orders.html');
+  load();
+  if (currentDetailId && document.getElementById('detailModal').style.display === 'flex') {
+    showDetail(currentDetailId);
+  }
+};
+
+load().then(() => {
+  // ถ้ามี ?id=<order_id> ใน URL → เปิด detail modal อัตโนมัติ (สำหรับ deep-link จาก admin.html)
+  const orderId = new URLSearchParams(window.location.search).get('id');
+  if (orderId) showDetail(orderId);
+});
 </script>
 </body></html>

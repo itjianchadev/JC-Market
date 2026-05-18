@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="th"><head>
-<meta charset="utf-8"><title>ชำระเงิน — JC-Stock Market</title>
+<meta charset="utf-8"><title>ชำระเงิน — JC-Market</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/css/style.css">
@@ -23,35 +23,41 @@
 .step .num{width:32px;height:32px;border-radius:50%;background:var(--gold);color:#000;display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0}
 .step.done .num{background:var(--ok)}
 .step .label{font-size:14px}
+.pay-timer{display:flex;align-items:center;justify-content:center;gap:8px;padding:14px 20px;border-radius:12px;font-size:22px;font-weight:700;background:#fff3e0;color:#e65100;margin-bottom:16px;letter-spacing:1px}
+.pay-timer.urgent{background:#ffebee;color:#c62828;animation:pulse 1s infinite}
+.pay-timer.expired{background:#f5f5f5;color:#999;animation:none}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
+.pay-timer-sub{text-align:center;font-size:12px;color:var(--muted);margin-top:-8px;margin-bottom:12px}
 @media(max-width:768px){.checkout-right{width:100%}}
 </style>
-</head><body>
+</head><body data-i18n-title="checkout.page_title">
 <div id="nav"></div>
 <div class="container">
   <!-- Step 1: Review & Confirm -->
   <div id="step1">
-    <h2 style="margin-bottom:16px">ยืนยันคำสั่งซื้อ</h2>
+    <h2 style="margin-bottom:16px" data-i18n="checkout.confirm">ยืนยันคำสั่งซื้อ</h2>
     <div class="checkout-layout">
       <div class="checkout-left">
         <div class="card">
-          <h4 style="margin-bottom:12px">รายการสินค้า</h4>
+          <h4 style="margin-bottom:12px" data-i18n="checkout.items">รายการสินค้า</h4>
           <ul id="orderItems" class="order-items"></ul>
           <div style="display:flex;justify-content:flex-end;margin-top:16px;font-size:13px;color:var(--muted)">
             <span id="itemCount"></span>
           </div>
         </div>
         <div class="card" style="margin-top:12px">
-          <label>หมายเหตุ (ถ้ามี)</label>
-          <textarea id="note" rows="2" placeholder="ระบุหมายเหตุเพิ่มเติม..."></textarea>
+          <label data-i18n="checkout.note_label">หมายเหตุ (ถ้ามี)</label>
+          <textarea id="note" rows="2" data-i18n-placeholder="checkout.note_placeholder" placeholder="ระบุหมายเหตุเพิ่มเติม..."></textarea>
         </div>
       </div>
       <div class="checkout-right">
         <div class="card">
-          <h4 style="margin-bottom:16px">สรุปคำสั่งซื้อ</h4>
-          <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span>ยอดรวม</span><span id="subtotal" style="font-weight:600"></span></div>
+          <h4 style="margin-bottom:16px" data-i18n="checkout.summary">สรุปคำสั่งซื้อ</h4>
+          <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span data-i18n="checkout.subtotal">ยอดรวมสินค้า</span><span id="subtotal" style="font-weight:600"></span></div>
           <hr style="border-color:var(--border);margin:12px 0">
-          <div style="display:flex;justify-content:space-between;font-size:24px;font-weight:700"><span>รวมทั้งสิ้น</span><span id="grandTotal" style="color:var(--gold)"></span></div>
-          <button class="btn" style="width:100%;margin-top:20px;font-size:16px;padding:14px" onclick="placeOrder()">ยืนยันสั่งซื้อ</button>
+          <div style="display:flex;justify-content:space-between;font-size:24px;font-weight:700"><span data-i18n="checkout.grand">รวม</span><span id="grandTotal" style="color:var(--gold)"></span></div>
+          <div style="color:var(--muted);font-size:12px;margin-top:4px;text-align:right" data-i18n="checkout.vat_note">VAT คำนวณจาก D365 BC เมื่อยืนยันสั่งซื้อ</div>
+          <button class="btn" style="width:100%;margin-top:20px;font-size:16px;padding:14px" onclick="placeOrder()" data-i18n="checkout.place">ยืนยันสั่งซื้อ</button>
           <div class="err" id="orderErr"></div>
         </div>
       </div>
@@ -60,32 +66,40 @@
 
   <!-- Step 2: Payment -->
   <div id="step2" style="display:none">
-    <h2 style="margin-bottom:16px">ชำระเงิน</h2>
+    <h2 style="margin-bottom:16px" data-i18n="checkout.pay">ชำระเงิน</h2>
+    <div id="payTimer" class="pay-timer" style="display:none">⏱ <span id="payTimerText">30:00</span></div>
+    <div id="payTimerSub" class="pay-timer-sub" style="display:none" data-i18n="checkout.pay_timeout_sub">กรุณาชำระเงินภายในเวลาที่กำหนด มิฉะนั้นระบบจะยกเลิกคำสั่งซื้ออัตโนมัติ</div>
     <div class="checkout-layout">
       <div class="checkout-left">
         <div class="card">
-          <div class="step"><div class="num done">1</div><div class="label">สร้างคำสั่งซื้อ <strong id="orderNo"></strong> สำเร็จ</div></div>
-          <div class="step" id="stepScan"><div class="num">2</div><div class="label">สแกน QR PromptPay ชำระเงิน</div></div>
-          <div class="step" id="stepSlip"><div class="num">3</div><div class="label">อัพโหลดสลิปการโอน</div></div>
+          <div class="step"><div class="num done">1</div><div class="label" id="step1Label"></div></div>
+          <div class="step" id="stepScan"><div class="num">2</div><div class="label" data-i18n="checkout.step2">สแกน QR PromptPay ชำระเงิน</div></div>
+          <div class="step" id="stepSlip"><div class="num">3</div><div class="label" data-i18n="checkout.step3">อัพโหลดสลิปการโอน</div></div>
         </div>
         <div class="card" style="margin-top:12px">
-          <h4 style="margin-bottom:8px">อัพโหลดสลิป</h4>
+          <h4 style="margin-bottom:8px" data-i18n="checkout.upload_slip">อัพโหลดสลิป</h4>
           <div class="upload-area" id="dropArea" onclick="document.getElementById('slipFile').click()">
             <input type="file" id="slipFile" accept="image/*,.pdf" style="display:none" onchange="previewSlip(this)">
-            <p style="color:var(--muted)">คลิกหรือลากไฟล์สลิปมาวางที่นี่</p>
-            <p style="font-size:12px;color:var(--muted)">รองรับ JPG, PNG, PDF (สูงสุด 10MB)</p>
+            <p style="color:var(--muted)" data-i18n="checkout.upload_hint">คลิกหรือลากไฟล์สลิปมาวางที่นี่</p>
+            <p style="font-size:12px;color:var(--muted)" data-i18n="checkout.upload_types">รองรับ JPG, PNG, PDF (สูงสุด 10MB)</p>
           </div>
           <img id="slipPreview" class="slip-preview" style="display:none">
-          <button class="btn" style="width:100%;margin-top:12px" id="uploadBtn" onclick="uploadSlip()" disabled>ส่งสลิป</button>
+          <button class="btn" style="width:100%;margin-top:12px" id="uploadBtn" onclick="uploadSlip()" disabled data-i18n="checkout.upload_btn">ส่งสลิป</button>
           <div class="err" id="slipErr"></div>
         </div>
       </div>
       <div class="checkout-right">
         <div class="card qr-box">
-          <h4>PromptPay QR</h4>
+          <h4 data-i18n="checkout.qr_title">PromptPay QR</h4>
           <div class="amount" id="qrAmount"></div>
           <img id="qrImg" src="" alt="QR Code">
-          <p style="font-size:12px;color:var(--muted);margin-top:12px">สแกน QR ด้วยแอปธนาคาร</p>
+          <div id="vatInfo"></div>
+          <div id="bcSoInfo"></div>
+          <p style="font-size:12px;color:var(--muted);margin-top:12px" data-i18n="checkout.qr_hint">สแกน QR ด้วยแอปธนาคาร</p>
+          <div class="row" style="gap:8px;margin-top:12px">
+            <button class="btn ghost sm" style="flex:1" onclick="saveQR()" data-i18n="checkout.save_qr">💾 บันทึก QR</button>
+            <button class="btn ghost sm" style="flex:1" onclick="downloadPDF()" data-i18n="checkout.download_pdf">📄 ดาวน์โหลด PDF</button>
+          </div>
         </div>
       </div>
     </div>
@@ -96,14 +110,14 @@
     <div class="card" style="text-align:center;padding:60px 20px">
       <div id="doneIcon" style="font-size:64px;margin-bottom:16px">✅</div>
       <h2 id="doneTitle" style="margin-bottom:8px"></h2>
-      <p style="color:var(--muted);margin-bottom:8px">คำสั่งซื้อ <strong id="doneOrderNo"></strong></p>
+      <p style="color:var(--muted);margin-bottom:8px"><span data-i18n="checkout.order_no_label">คำสั่งซื้อ</span> <strong id="doneOrderNo"></strong></p>
       <p id="doneMsg" style="color:var(--muted);margin-bottom:8px"></p>
       <div id="verifyDetail" style="margin:16px auto;max-width:320px;text-align:left;display:none">
         <div class="card" style="font-size:13px;padding:14px"></div>
       </div>
       <div class="row" style="justify-content:center;margin-top:16px">
-        <a href="orders.html" class="btn">ดูคำสั่งซื้อ</a>
-        <a href="index.html" class="btn ghost">กลับหน้าร้านค้า</a>
+        <a href="orders.html" class="btn" data-i18n="checkout.view_orders">ดูคำสั่งซื้อ</a>
+        <a href="index.html" class="btn ghost" data-i18n="checkout.back_shop">กลับหน้าร้านค้า</a>
       </div>
     </div>
   </div>
@@ -116,39 +130,123 @@ document.getElementById('nav').innerHTML = renderNav('');
 
 let currentOrderId = null;
 let cartData = null;
+let payTimerInterval = null;
+let payExpireAt = 0;
+const CANCEL_TIMEOUT_MIN = 30;
+
+function fmtCountdown(ms) {
+  if (ms <= 0) return '00:00';
+  const min = Math.floor(ms / 60000);
+  const sec = Math.floor((ms % 60000) / 1000);
+  return `${String(min).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+}
+
+function startPayCountdown(createdAtStr, timeoutMin) {
+  const createdMs = createdAtStr ? new Date(createdAtStr).getTime() : Date.now();
+  const validCreated = isNaN(createdMs) ? Date.now() : createdMs;
+  payExpireAt = validCreated + (timeoutMin || CANCEL_TIMEOUT_MIN) * 60 * 1000;
+  const timerEl = document.getElementById('payTimer');
+  const subEl = document.getElementById('payTimerSub');
+  const textEl = document.getElementById('payTimerText');
+  timerEl.style.display = 'flex';
+  subEl.style.display = 'block';
+  if (payTimerInterval) clearInterval(payTimerInterval);
+  const tick = () => {
+    const remaining = Math.max(0, payExpireAt - Date.now());
+    textEl.textContent = fmtCountdown(remaining);
+    timerEl.classList.toggle('urgent', remaining > 0 && remaining < 5 * 60 * 1000);
+    if (remaining <= 0) {
+      clearInterval(payTimerInterval);
+      payTimerInterval = null;
+      timerEl.classList.remove('urgent');
+      timerEl.classList.add('expired');
+      timerEl.innerHTML = t('checkout.pay_expired');
+      subEl.textContent = t('checkout.pay_cancelled_sub');
+      // Disable upload controls
+      const uploadArea = document.getElementById('dropArea');
+      const uploadBtn = document.getElementById('uploadBtn');
+      if (uploadArea) uploadArea.style.pointerEvents = 'none', uploadArea.style.opacity = '0.5';
+      if (uploadBtn) uploadBtn.disabled = true;
+      setTimeout(() => { location.href = '/orders.html'; }, 2500);
+    }
+  };
+  tick();
+  payTimerInterval = setInterval(tick, 1000);
+}
+
 
 async function init() {
   try {
     cartData = await api('/api/cart');
     if (!cartData.items.length) { location.href = '/cart.html'; return; }
-    document.getElementById('orderItems').innerHTML = cartData.items.map(it => `
-      <li>
-        <span class="name">${it.item_name} <span style="color:var(--muted);font-size:12px">(${it.item_no})</span></span>
-        <span class="qty">${it.quantity} ${it.uom||''}</span>
-        <span style="color:var(--gold);font-weight:600">฿${(it.quantity*it.unit_price).toLocaleString()}</span>
-      </li>`).join('');
-    document.getElementById('itemCount').textContent = `${cartData.count} รายการ`;
-    document.getElementById('subtotal').textContent = `฿${cartData.total.toLocaleString()}`;
-    document.getElementById('grandTotal').textContent = `฿${cartData.total.toLocaleString()}`;
+    renderCartItems();
+    document.getElementById('subtotal').textContent = `฿${cartData.subtotal.toLocaleString()}`;
+    document.getElementById('grandTotal').textContent = `฿${cartData.subtotal.toLocaleString()}`;
   } catch (e) { alert(e.message); }
 }
 
+function renderCartItems() {
+  if (!cartData) return;
+  document.getElementById('orderItems').innerHTML = cartData.items.map(it => `
+    <li>
+      <span class="name">${itemName(it)} <span style="color:var(--muted);font-size:12px">(${it.item_no})</span></span>
+      <span class="qty">${it.quantity} ${it.uom||''}</span>
+      <span style="color:var(--gold);font-weight:600">฿${(it.quantity*it.unit_price).toLocaleString()}</span>
+    </li>`).join('');
+  document.getElementById('itemCount').textContent = t('cart.items_count', { n: cartData.count });
+}
+
+let lastOrderResp = null;
+let savedItems = null; // snapshot ของ items ก่อน cart ถูกล้าง ใช้สำหรับ PDF
 async function placeOrder() {
   const note = document.getElementById('note').value;
   try {
+    // snapshot items ก่อน server ล้าง cart
+    savedItems = cartData ? cartData.items.map(it => ({
+      item_no: it.item_no, item_name: it.item_name, item_name_en: it.item_name_en,
+      quantity: it.quantity, uom: it.uom, unit_price: it.unit_price,
+    })) : [];
     const r = await api('/api/orders/checkout', { method:'POST', body: JSON.stringify({ note }) });
     currentOrderId = r.order_id;
+    lastOrderResp = r;
     // Show step 2
     document.getElementById('step1').style.display = 'none';
     document.getElementById('step2').style.display = 'block';
-    document.getElementById('orderNo').textContent = r.order_number;
+    renderStep1Label();
+    // Start 30-min payment countdown
+    startPayCountdown(r.created_at, r.cancel_timeout_min);
     document.getElementById('qrAmount').textContent = `฿${r.total.toLocaleString()}`;
     document.getElementById('qrImg').src = r.qr_data_url;
     document.getElementById('doneOrderNo').textContent = r.order_number;
+    renderVatInfo();
+    renderBcSoInfo();
     updateCartBadge();
   } catch (e) {
     document.getElementById('orderErr').textContent = e.message;
   }
+}
+
+function renderStep1Label() {
+  if (!lastOrderResp) return;
+  const el = document.getElementById('step1Label');
+  if (el) el.innerHTML = t('checkout.step1_done', { no: `<strong id="orderNo">${lastOrderResp.order_number}</strong>` });
+}
+function renderVatInfo() {
+  const vatInfo = document.getElementById('vatInfo');
+  if (!vatInfo || !lastOrderResp) return;
+  if (lastOrderResp.vat_amount > 0) {
+    vatInfo.innerHTML = `<div style="font-size:13px;color:var(--muted);margin-top:8px">${t('checkout.vat_breakdown', { sub: lastOrderResp.subtotal.toLocaleString(), vat: lastOrderResp.vat_amount.toLocaleString() })}</div>`;
+  } else {
+    vatInfo.innerHTML = '';
+  }
+}
+function renderBcSoInfo() {
+  const soInfo = document.getElementById('bcSoInfo');
+  if (!soInfo || !lastOrderResp || !lastOrderResp.bc_so) return;
+  let bcHtml = '';
+  if (lastOrderResp.bc_so.bc_po_no) bcHtml += `<div style="font-size:12px;color:var(--ok);margin-top:4px">${t('checkout.bc_po')}: ${lastOrderResp.bc_so.bc_po_no}</div>`;
+  if (lastOrderResp.bc_so.bc_so_no) bcHtml += `<div style="font-size:12px;color:var(--ok);margin-top:4px">${t('checkout.bc_so')}: ${lastOrderResp.bc_so.bc_so_no}</div>`;
+  soInfo.innerHTML = bcHtml;
 }
 
 function previewSlip(input) {
@@ -178,7 +276,7 @@ async function uploadSlip() {
   fd.append('slip', file);
   try {
     document.getElementById('uploadBtn').disabled = true;
-    document.getElementById('uploadBtn').textContent = 'กำลังอัพโหลด...';
+    document.getElementById('uploadBtn').textContent = t('checkout.uploading');
     const r = await fetch(`/api/orders/${currentOrderId}/slip`, {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + getToken() },
@@ -186,6 +284,8 @@ async function uploadSlip() {
     });
     const j = await r.json();
     if (!r.ok) throw new Error(j.error);
+    // Stop countdown — slip submitted
+    if (payTimerInterval) { clearInterval(payTimerInterval); payTimerInterval = null; }
     // Show step 3
     document.getElementById('step2').style.display = 'none';
     document.getElementById('step3').style.display = 'block';
@@ -194,32 +294,175 @@ async function uploadSlip() {
       // Auto-approved!
       document.getElementById('doneIcon').textContent = '✅';
       document.getElementById('doneTitle').style.color = 'var(--ok)';
-      document.getElementById('doneTitle').textContent = 'ตรวจสอบสลิปผ่าน — อนุมัติอัตโนมัติ!';
-      document.getElementById('doneMsg').textContent = 'คำสั่งซื้อได้รับการอนุมัติแล้ว';
+      document.getElementById('doneTitle').textContent = t('checkout.auto_ok');
+      document.getElementById('doneMsg').textContent = t('checkout.order_approved');
       const vr = j.verify_result || {};
-      if (vr.amount || vr.sender) {
-        const detail = document.getElementById('verifyDetail');
-        detail.style.display = 'block';
-        detail.querySelector('.card').innerHTML = `
-          <div style="margin-bottom:6px"><strong>ยอดโอน:</strong> ฿${(vr.amount||0).toLocaleString()}</div>
-          ${vr.sender ? `<div style="margin-bottom:6px"><strong>ผู้โอน:</strong> ${vr.sender}</div>` : ''}
-          ${vr.receiver ? `<div style="margin-bottom:6px"><strong>ผู้รับ:</strong> ${vr.receiver}</div>` : ''}
-          ${vr.ref ? `<div style="margin-bottom:6px"><strong>Ref:</strong> ${vr.ref}</div>` : ''}
-          <div style="color:var(--ok)">✓ ${vr.reason}</div>`;
-      }
+      const bcSo = j.bc_so || {};
+      const detail = document.getElementById('verifyDetail');
+      detail.style.display = 'block';
+      detail.querySelector('.card').innerHTML = `
+        ${vr.amount || vr.sender ? `
+          <div style="margin-bottom:6px"><strong>${t('checkout.transfer_amount')}:</strong> ฿${(vr.amount||0).toLocaleString()}</div>
+          ${vr.sender ? `<div style="margin-bottom:6px"><strong>${t('checkout.sender')}:</strong> ${vr.sender}</div>` : ''}
+          ${vr.receiver ? `<div style="margin-bottom:6px"><strong>${t('checkout.receiver')}:</strong> ${vr.receiver}</div>` : ''}
+          ${vr.ref ? `<div style="margin-bottom:6px"><strong>${t('checkout.ref')}:</strong> ${vr.ref}</div>` : ''}
+          <div style="color:var(--ok);margin-bottom:8px">✓ ${vr.reason}</div>
+        ` : ''}
+        ${bcSo.bc_po_no || bcSo.bc_so_no ? `
+          <hr style="border-color:var(--border);margin:8px 0">
+          ${bcSo.bc_po_no ? `<div style="color:var(--ok);font-weight:600"><strong>${t('checkout.bc_po')}:</strong> ${bcSo.bc_po_no}</div>` : ''}
+          ${bcSo.bc_so_no ? `<div style="color:var(--ok);font-weight:600"><strong>${t('checkout.bc_so')}:</strong> ${bcSo.bc_so_no}</div>` : ''}
+          <div style="font-size:12px;color:var(--muted)">${t('checkout.bc_created_note')}</div>
+        ` : bcSo.error ? `
+          <hr style="border-color:var(--border);margin:8px 0">
+          <div style="color:var(--err)"><strong>BC:</strong> ${bcSo.error}</div>
+        ` : ''}`;
     } else {
       // Manual review needed
       document.getElementById('doneIcon').textContent = '⏳';
       document.getElementById('doneTitle').style.color = '#f59e0b';
-      document.getElementById('doneTitle').textContent = 'ส่งสลิปแล้ว — รอตรวจสอบ';
-      document.getElementById('doneMsg').innerHTML = `ตรวจอัตโนมัติไม่ผ่าน: <span style="color:var(--err)">${(j.verify_result||{}).reason||''}</span><br>รอ Admin ตรวจสอบสลิปและอนุมัติ`;
+      document.getElementById('doneTitle').textContent = t('checkout.manual_title');
+      document.getElementById('doneMsg').innerHTML = t('checkout.manual_msg', { reason: `<span style="color:var(--err)">${(j.verify_result||{}).reason||''}</span>` });
     }
   } catch (e) {
     document.getElementById('slipErr').textContent = e.message;
     document.getElementById('uploadBtn').disabled = false;
-    document.getElementById('uploadBtn').textContent = 'ส่งสลิป';
+    document.getElementById('uploadBtn').textContent = t('checkout.upload_btn');
   }
 }
+
+function saveQR() {
+  if (!lastOrderResp || !lastOrderResp.qr_data_url) { toast('QR not ready'); return; }
+  const a = document.createElement('a');
+  a.href = lastOrderResp.qr_data_url;
+  a.download = `QR_${lastOrderResp.order_number}.png`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+function downloadPDF() {
+  if (!lastOrderResp) { toast('Order not ready'); return; }
+  const r = lastOrderResp;
+  const items = (savedItems && savedItems.length) ? savedItems : [];
+  const user = getUser() || {};
+  const locale = getLang() === 'th' ? 'th-TH' : 'en-US';
+  const dateStr = new Date(r.created_at || Date.now()).toLocaleString(locale);
+  const itemsRows = items.map((it, i) => `
+    <tr>
+      <td style="padding:6px;border-bottom:1px solid #eee">${i+1}</td>
+      <td style="padding:6px;border-bottom:1px solid #eee;color:#777;font-family:monospace;font-size:12px">${it.item_no}</td>
+      <td style="padding:6px;border-bottom:1px solid #eee;font-weight:600">${itemName(it)}</td>
+      <td style="padding:6px;border-bottom:1px solid #eee;text-align:center">${it.quantity} ${it.uom||''}</td>
+      <td style="padding:6px;border-bottom:1px solid #eee;text-align:right">฿${(it.unit_price||0).toLocaleString()}</td>
+      <td style="padding:6px;border-bottom:1px solid #eee;text-align:right;font-weight:600">฿${((it.quantity||0)*(it.unit_price||0)).toLocaleString()}</td>
+    </tr>`).join('');
+  const vatRow = (r.vat_amount > 0) ? `
+    <div style="display:flex;justify-content:space-between;font-size:13px;color:#666;margin-bottom:4px">
+      <span>${t('checkout.pdf_vat')}</span><span>฿${r.vat_amount.toLocaleString()}</span>
+    </div>` : '';
+  const bcRow = [
+    r.bc_so && r.bc_so.bc_po_no ? `<div>${t('checkout.bc_po')}: <strong>${r.bc_so.bc_po_no}</strong></div>` : '',
+    r.bc_so && r.bc_so.bc_so_no ? `<div>${t('checkout.bc_so')}: <strong>${r.bc_so.bc_so_no}</strong></div>` : '',
+  ].filter(Boolean).join('');
+
+  const win = window.open('', '_blank', 'width=800,height=1000');
+  win.document.write(`<!DOCTYPE html><html><head>
+    <meta charset="utf-8"><title>${t('checkout.pdf_title')} ${r.order_number}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+      *{box-sizing:border-box;margin:0;padding:0}
+      body{font-family:'Sarabun',sans-serif;padding:32px;color:#181818;max-width:800px;margin:0 auto;background:#fff}
+      .hdr{text-align:center;border-bottom:2px solid #AD9C82;padding-bottom:16px;margin-bottom:16px}
+      .hdr h1{font-size:22px;color:#181818}
+      .hdr .sub{color:#777;font-size:13px;margin-top:4px}
+      .meta{display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px;background:#f5f3f0;padding:12px;border-radius:8px;margin-bottom:16px;font-size:13px}
+      .meta .lbl{color:#777;font-size:11px;margin-bottom:2px}
+      .meta .val{font-weight:600}
+      table{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:12px}
+      thead th{background:#181818;color:#AD9C82;padding:8px 6px;text-align:left;font-size:12px}
+      .qr-panel{text-align:center;padding:16px;border:1px dashed #AD9C82;border-radius:10px;margin-top:12px}
+      .qr-panel img{max-width:220px;background:#fff;padding:8px}
+      .qr-panel .amt{font-size:24px;font-weight:700;color:#8B7355;margin:8px 0}
+      .totals{display:flex;justify-content:flex-end}
+      .totals .box{width:260px}
+      .totals .grand{display:flex;justify-content:space-between;font-size:18px;font-weight:700;border-top:2px solid #181818;padding-top:8px;margin-top:4px}
+      .bc{margin-top:12px;font-size:12px;color:#2e7d32}
+      .actions{text-align:center;margin-top:24px}
+      .actions button{padding:10px 24px;font-size:14px;cursor:pointer;background:#AD9C82;color:#fff;border:none;border-radius:8px;font-family:inherit;font-weight:600}
+      @media print{body{padding:20px}.actions{display:none!important}}
+    </style>
+  </head><body>
+    <div class="hdr">
+      <h1>JC-Market</h1>
+      <div class="sub">${t('checkout.pdf_title')}</div>
+    </div>
+
+    <div class="meta">
+      <div>
+        <div class="lbl">${t('checkout.pdf_order_no')}</div>
+        <div class="val">${r.order_number}</div>
+        ${r.bc_so && r.bc_so.bc_po_no ? `<div style="color:#777;font-size:11px">BC PO: ${r.bc_so.bc_po_no}</div>` : ''}
+      </div>
+      <div>
+        <div class="lbl">${t('checkout.pdf_date')}</div>
+        <div class="val">${dateStr}</div>
+      </div>
+      <div>
+        <div class="lbl">${t('checkout.pdf_branch')}</div>
+        <div class="val">${user.full_name || ''}</div>
+        <div style="color:#777;font-size:11px">${user.branch_name || ''}</div>
+      </div>
+    </div>
+
+    <h3 style="margin-bottom:8px;color:#AD9C82">${t('checkout.pdf_items')}</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>#</th><th>${t('common.code')}</th><th>${t('common.item')}</th>
+          <th style="text-align:center">${t('common.qty')}</th>
+          <th style="text-align:right">${t('common.price')}</th>
+          <th style="text-align:right">${t('common.total')}</th>
+        </tr>
+      </thead>
+      <tbody>${itemsRows || `<tr><td colspan="6" style="padding:12px;text-align:center;color:#999">-</td></tr>`}</tbody>
+    </table>
+
+    <div class="totals">
+      <div class="box">
+        <div style="display:flex;justify-content:space-between;font-size:13px;color:#666;margin-bottom:4px">
+          <span>${t('checkout.pdf_subtotal')}</span><span>฿${(r.subtotal||0).toLocaleString()}</span>
+        </div>
+        ${vatRow}
+        <div class="grand">
+          <span>${t('checkout.pdf_total')}</span><span style="color:#8B7355">฿${r.total.toLocaleString()}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="qr-panel">
+      <div style="font-weight:600;margin-bottom:8px">PromptPay QR</div>
+      <div class="amt">฿${r.total.toLocaleString()}</div>
+      <img src="${r.qr_data_url}" alt="QR">
+      <p style="font-size:12px;color:#777;margin-top:8px">${t('checkout.pdf_scan')}</p>
+    </div>
+
+    ${bcRow ? `<div class="bc">${bcRow}</div>` : ''}
+
+    <div class="actions">
+      <button onclick="window.print()">${t('checkout.pdf_print')}</button>
+    </div>
+  </body></html>`);
+  win.document.close();
+}
+
+window.onLangChange = () => {
+  document.getElementById('nav').innerHTML = renderNav('');
+  renderCartItems();
+  renderStep1Label();
+  renderVatInfo();
+  renderBcSoInfo();
+};
 
 // Drag & drop
 const drop = document.getElementById('dropArea');

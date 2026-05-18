@@ -1,7 +1,7 @@
 {
-  "name": "jc-stock-market",
+  "name": "jc-market",
   "version": "0.1.0",
-  "description": "JC-Stock Market — B2B FC Shopping with D365 BC integration",
+  "description": "JC-Market — B2B FC Shopping with D365 BC integration",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

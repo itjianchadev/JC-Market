@@ -16,8 +16,31 @@ function login(username, password) {
       id: user.id, username: user.username, full_name: user.full_name,
       role: user.role, branch_code: user.branch_code, branch_name: user.branch_name,
       bc_customer_no: user.bc_customer_no,
+      can_order: !!user.can_order,
     },
   };
+}
+
+// ─── Role helpers ───
+const HQ_ROLES = new Set(['super_admin', 'admin_scm']);        // HQ roles (no branch, admin-level)
+const ADMIN_ROLES = HQ_ROLES;                                   // กลุ่มที่ผ่าน requireAdmin
+const BRANCH_ROLES = new Set(['branch_owner', 'store_manager', 'cashier', 'fc']);
+
+function isHqAdmin(user) { return !!user && ADMIN_ROLES.has(user.role); }
+function isSuperAdmin(user) { return !!user && user.role === 'super_admin'; }
+
+// Can manage users in a given branch? (HQ admin for any, branch_owner for own)
+function canManageBranch(user, branchCode) {
+  if (!user) return false;
+  if (ADMIN_ROLES.has(user.role)) return true;
+  if (user.role === 'branch_owner' && user.branch_code === branchCode) return true;
+  return false;
+}
+
+function requireBranchManage(req, res, next) {
+  const code = req.params.code || req.body.branch_code || req.query.branch_code || req.user?.branch_code;
+  if (!canManageBranch(req.user, code)) return res.status(403).json({ error: 'Not allowed for this branch' });
+  next();
 }
 
 function requireAuth(req, res, next) {
@@ -33,8 +56,13 @@ function requireAuth(req, res, next) {
 }
 
 function requireAdmin(req, res, next) {
-  if (!req.user || req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+  if (!isHqAdmin(req.user)) return res.status(403).json({ error: 'Admin only' });
   next();
 }
 
-module.exports = { login, requireAuth, requireAdmin, SECRET };
+function requireSuperAdmin(req, res, next) {
+  if (!isSuperAdmin(req.user)) return res.status(403).json({ error: 'Super Admin only' });
+  next();
+}
+
+module.exports = { login, requireAuth, requireAdmin, requireSuperAdmin, canManageBranch, requireBranchManage, isHqAdmin, isSuperAdmin, HQ_ROLES, BRANCH_ROLES, SECRET };
