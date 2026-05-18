@@ -6,7 +6,7 @@
 <link rel="stylesheet" href="/css/style.css">
 <style>
 .page-layout{display:flex;gap:0;min-height:calc(100vh - 60px)}
-.sidebar{width:220px;flex-shrink:0;background:var(--card);border-right:1px solid var(--border);padding:16px 0}
+.sidebar{width:240px;flex-shrink:0;background:var(--card);border-right:1px solid var(--border);padding:16px 0}
 .sidebar h3{padding:0 16px;margin-bottom:12px;font-size:14px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
 .sidebar .branch-info{padding:0 16px 16px;font-size:13px;color:var(--muted);border-bottom:1px solid var(--border);margin-bottom:12px}
 .sidebar-item{display:flex;align-items:center;gap:10px;padding:10px 16px;cursor:pointer;transition:.15s;font-size:14px;color:var(--text);border-left:3px solid transparent}
@@ -19,24 +19,42 @@
 .stock-table th{text-align:left;color:var(--muted);font-size:12px;padding:8px;border-bottom:1px solid var(--border)}
 .stock-table td{padding:10px 8px;border-bottom:1px solid var(--border)}
 .stock-table tr:hover{background:rgba(173,156,130,.08)}
-.stock-qty{font-size:18px;font-weight:700;color:var(--gold)}
+.col-num{text-align:right;font-variant-numeric:tabular-nums}
+.col-num.recv{color:var(--ok);font-weight:600}
+.col-num.iss{color:var(--muted)}
+.col-num.onhand{font-size:17px;font-weight:700;color:var(--gold)}
 .cat-badge{display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;background:var(--beige);color:var(--muted)}
+.btn-sm{padding:4px 10px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid var(--border);background:var(--bg)}
+.btn-sm:hover{background:var(--gold);color:#fff;border-color:var(--gold)}
+.btn-sm:disabled{opacity:.4;cursor:not-allowed}
 .summary-cards{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px}
-.summary-card{flex:1;min-width:100px;padding:14px;text-align:center}
+.summary-card{flex:1;min-width:120px;padding:14px;text-align:center}
 .summary-card .num{font-size:22px;font-weight:700;color:var(--gold)}
 .summary-card .label{font-size:11px;color:var(--muted);margin-top:4px}
 .search-box{width:100%;padding:10px 14px;margin-bottom:12px;border-radius:10px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:14px}
 .gr-card{padding:14px;margin-bottom:8px;cursor:pointer;transition:.15s}
 .gr-card:hover{border-color:var(--gold)}
-.gr-detail{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px;margin-top:8px;display:none}
-@media(max-width:768px){
-  .page-layout{flex-direction:column}
-  .sidebar{width:100%;flex-direction:row;display:flex;overflow-x:auto;border-right:none;border-bottom:1px solid var(--border);padding:0}
-  .sidebar h3,.sidebar .branch-info{display:none}
-  .sidebar-item{white-space:nowrap;border-left:none;border-bottom:3px solid transparent;padding:12px 16px}
-  .sidebar-item.active{border-bottom-color:var(--gold);border-left:none}
-  .main-content{padding:16px}
-}
+.gr-detail{display:none;margin-top:10px;padding-top:10px;border-top:1px dashed var(--border)}
+.issue-reason{display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600}
+.reason-sale{background:#e8f5e9;color:#2e7d32}
+.reason-damage{background:#ffebee;color:#c62828}
+.reason-transfer{background:#e3f2fd;color:#1565c0}
+.reason-adjustment{background:#fff3e0;color:#e65100}
+.reason-other{background:#f5f5f5;color:#666}
+/* Modal */
+.modal-bg{position:fixed;inset:0;background:rgba(24,24,24,.5);backdrop-filter:blur(4px);z-index:999;display:none;align-items:center;justify-content:center;padding:20px}
+.modal-bg.open{display:flex}
+.modal-box{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:24px;max-width:480px;width:100%;max-height:90vh;overflow-y:auto;position:relative}
+.modal-box h3{margin-bottom:16px;color:var(--gold)}
+.modal-box .label{font-size:12px;color:var(--muted);margin-bottom:4px;display:block}
+.modal-box input,.modal-box select,.modal-box textarea{width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px;font-family:inherit;margin-bottom:12px}
+.modal-box textarea{resize:vertical;min-height:60px}
+.modal-actions{display:flex;gap:10px;margin-top:16px}
+.modal-actions .btn{flex:1}
+.item-meta{padding:10px 12px;background:var(--beige);border-radius:8px;margin-bottom:12px;font-size:13px}
+.item-meta .name{font-weight:700;color:var(--text);font-size:15px;margin-bottom:4px}
+.item-meta .stock-line{color:var(--muted);font-size:12px}
+.item-meta .stock-line strong{color:var(--gold);font-size:14px}
 </style>
 </head><body data-i18n-title="stock.page_title">
 <div id="nav"></div>
@@ -48,11 +66,14 @@
       <span class="icon">📦</span> <span data-i18n="stock.items">รายการสินค้าในคลัง</span> <span class="count" id="stockCount">0</span>
     </div>
     <div class="sidebar-item" onclick="switchTab('gr')" id="tabGR">
-      <span class="icon">📋</span> <span data-i18n="stock.gr_history">ประวัติการรับสินค้า</span> <span class="count" id="grCount">0</span>
+      <span class="icon">📋</span> <span data-i18n="stock.gr_history">ประวัติการรับ</span> <span class="count" id="grCount">0</span>
+    </div>
+    <div class="sidebar-item" onclick="switchTab('issue')" id="tabIssue">
+      <span class="icon">📤</span> <span data-i18n="stock.issue_history">ประวัติการเบิก</span> <span class="count" id="issueCount">0</span>
     </div>
   </div>
   <div class="main-content">
-    <!-- Stock Panel -->
+    <!-- Stock balance panel -->
     <div id="panelStock">
       <div id="summaryCards" class="summary-cards"></div>
       <input type="text" class="search-box" id="searchBox" data-i18n-placeholder="stock.search" placeholder="ค้นหาสินค้า..." oninput="filterStock()">
@@ -62,9 +83,12 @@
             <tr>
               <th data-i18n="stock.col.code">รหัส</th>
               <th data-i18n="stock.col.item">สินค้า</th>
-              <th style="text-align:right" data-i18n="stock.col.received">จำนวนรับ</th>
+              <th class="col-num" data-i18n="stock.col.received">รับมา</th>
+              <th class="col-num" data-i18n="stock.col.issued">เบิกแล้ว</th>
+              <th class="col-num" data-i18n="stock.col.onhand">คงเหลือ</th>
               <th data-i18n="stock.col.uom">หน่วย</th>
               <th data-i18n="stock.col.category">หมวด</th>
+              <th style="text-align:center">เบิก</th>
             </tr>
           </thead>
           <tbody id="stockBody"></tbody>
@@ -75,11 +99,51 @@
         <p style="color:var(--muted)" data-i18n="stock.empty">ยังไม่มีข้อมูล Stock — จะอัพเดทเมื่อรับของเข้าสาขา</p>
       </div>
     </div>
-    <!-- GR History Panel -->
+    <!-- GR history panel -->
     <div id="panelGR" style="display:none">
       <h3 style="margin-bottom:12px" data-i18n="stock.gr_history_full">ประวัติการรับสินค้า (GR)</h3>
       <div id="grHistory"></div>
     </div>
+    <!-- Issue history panel -->
+    <div id="panelIssue" style="display:none">
+      <h3 style="margin-bottom:12px">ประวัติการเบิกสินค้า</h3>
+      <div id="issueHistory"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Issue create modal -->
+<div id="issueModal" class="modal-bg" onclick="if(event.target===this)closeIssueModal()">
+  <div class="modal-box">
+    <button onclick="closeIssueModal()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer">&times;</button>
+    <h3>📤 เบิกสินค้าออกจากคลัง</h3>
+    <div id="issueItemMeta" class="item-meta"></div>
+
+    <label class="label">จำนวน (สูงสุดเท่าที่คงเหลือ)</label>
+    <input type="number" id="issueQty" min="0" step="0.01" value="1">
+
+    <label class="label">เหตุผล</label>
+    <select id="issueReason">
+      <option value="sale">เบิกเพื่อขาย</option>
+      <option value="damage">สินค้าเสียหาย</option>
+      <option value="transfer">โอนระหว่างสาขา</option>
+      <option value="adjustment">ปรับปรุงสต๊อก</option>
+      <option value="other">อื่นๆ</option>
+    </select>
+
+    <label class="label">หมายเหตุ (ถ้ามี)</label>
+    <textarea id="issueNote" placeholder="ระบุรายละเอียดเพิ่มเติม..."></textarea>
+
+    <div style="height:1px;background:var(--border);margin:12px 0"></div>
+    <label class="label">🔐 รหัสผ่าน (ใช้รหัสเดียวกับตอน login เพื่อยืนยันตัวตน)</label>
+    <input type="password" id="issuePassword" autocomplete="current-password" placeholder="ใส่รหัสผ่านยืนยัน">
+    <div style="font-size:11px;color:var(--muted);margin-top:-8px;margin-bottom:8px">รายการเบิกจะถูกบันทึกในชื่อ <strong id="issuerName"></strong></div>
+
+    <div class="modal-actions">
+      <button class="btn ghost" onclick="closeIssueModal()">ยกเลิก</button>
+      <button class="btn" onclick="submitIssue()" id="issueSubmit">ยืนยันเบิก</button>
+    </div>
+    <div class="err" id="issueErr"></div>
   </div>
 </div>
 
@@ -90,12 +154,16 @@ document.getElementById('nav').innerHTML = renderNav('stock-balance.html');
 
 let allItems = [];
 let grData = [];
+let issueData = [];
+let currentIssueItem = null;
 
 function switchTab(tab) {
   document.getElementById('panelStock').style.display = tab === 'stock' ? 'block' : 'none';
   document.getElementById('panelGR').style.display = tab === 'gr' ? 'block' : 'none';
+  document.getElementById('panelIssue').style.display = tab === 'issue' ? 'block' : 'none';
   document.getElementById('tabStock').classList.toggle('active', tab === 'stock');
   document.getElementById('tabGR').classList.toggle('active', tab === 'gr');
+  document.getElementById('tabIssue').classList.toggle('active', tab === 'issue');
 }
 
 async function loadStock() {
@@ -108,22 +176,24 @@ async function loadStock() {
     document.getElementById('stockCount').textContent = allItems.length;
     if (!allItems.length) {
       document.getElementById('emptyMsg').style.display = 'block';
-      return;
+    } else {
+      document.getElementById('emptyMsg').style.display = 'none';
+      renderSummary();
+      renderStock(allItems);
     }
-
-    renderSummary();
-    renderStock(allItems);
   } catch (e) { toast(e.message); }
 }
 
 function renderSummary() {
   const totalItems = allItems.length;
-  const totalQty = allItems.reduce((s, i) => s + i.total_received, 0);
-  const categories = [...new Set(allItems.map(i => i.category).filter(Boolean))];
+  const totalOnHand = allItems.reduce((s, i) => s + (i.on_hand || 0), 0);
+  const totalReceived = allItems.reduce((s, i) => s + (i.total_received || 0), 0);
+  const totalIssued = allItems.reduce((s, i) => s + (i.total_issued || 0), 0);
   document.getElementById('summaryCards').innerHTML = `
-    <div class="card summary-card"><div class="num">${totalItems}</div><div class="label">${t('stock.summary.items')}</div></div>
-    <div class="card summary-card"><div class="num">${totalQty.toLocaleString()}</div><div class="label">${t('stock.summary.qty')}</div></div>
-    <div class="card summary-card"><div class="num">${categories.length}</div><div class="label">${t('stock.summary.cats')}</div></div>
+    <div class="card summary-card"><div class="num">${totalItems}</div><div class="label">รายการ</div></div>
+    <div class="card summary-card"><div class="num" style="color:var(--ok)">${totalReceived.toLocaleString()}</div><div class="label">รับมาทั้งหมด</div></div>
+    <div class="card summary-card"><div class="num" style="color:var(--muted)">${totalIssued.toLocaleString()}</div><div class="label">เบิกออกแล้ว</div></div>
+    <div class="card summary-card"><div class="num">${totalOnHand.toLocaleString()}</div><div class="label">คงเหลือ</div></div>
   `;
 }
 
@@ -132,9 +202,14 @@ function renderStock(items) {
     <tr>
       <td style="font-family:monospace;font-size:13px">${i.item_no}</td>
       <td><strong>${itemName(i)}</strong></td>
-      <td style="text-align:right"><span class="stock-qty">${i.total_received.toLocaleString()}</span></td>
+      <td class="col-num recv">${(i.total_received || 0).toLocaleString()}</td>
+      <td class="col-num iss">${(i.total_issued || 0).toLocaleString()}</td>
+      <td class="col-num onhand">${(i.on_hand || 0).toLocaleString()}</td>
       <td>${i.uom || '-'}</td>
       <td>${i.category ? `<span class="cat-badge">${catName(i.category)}</span>` : '-'}</td>
+      <td style="text-align:center">
+        <button class="btn-sm" ${i.on_hand <= 0 ? 'disabled' : ''} onclick='openIssueModal(${JSON.stringify(i).replace(/'/g, "&apos;")})'>📤 เบิก</button>
+      </td>
     </tr>
   `).join('');
 }
@@ -148,6 +223,80 @@ function filterStock() {
   }));
 }
 
+// ─── Issue create modal ───
+function openIssueModal(item) {
+  currentIssueItem = item;
+  document.getElementById('issueItemMeta').innerHTML = `
+    <div class="name">${itemName(item)}</div>
+    <div class="stock-line">${item.item_no} | ${item.uom || ''}</div>
+    <div class="stock-line">คงเหลือ: <strong>${(item.on_hand || 0).toLocaleString()}</strong> ${item.uom || ''}</div>
+  `;
+  document.getElementById('issueQty').max = item.on_hand;
+  document.getElementById('issueQty').value = 1;
+  document.getElementById('issueReason').value = 'sale';
+  document.getElementById('issueNote').value = '';
+  document.getElementById('issuePassword').value = '';
+  document.getElementById('issueErr').textContent = '';
+  const u = getUser();
+  document.getElementById('issuerName').textContent = u ? `${u.full_name} (${u.branch_name || u.username})` : '';
+  document.getElementById('issueModal').classList.add('open');
+  // Focus password (qty is pre-filled, password is the new required field)
+  setTimeout(() => document.getElementById('issueQty').focus(), 50);
+}
+
+function closeIssueModal() {
+  document.getElementById('issueModal').classList.remove('open');
+  currentIssueItem = null;
+}
+
+async function submitIssue() {
+  if (!currentIssueItem) return;
+  const qty = parseFloat(document.getElementById('issueQty').value);
+  const reason = document.getElementById('issueReason').value;
+  const note = document.getElementById('issueNote').value.trim();
+  const password = document.getElementById('issuePassword').value;
+
+  if (!Number.isFinite(qty) || qty <= 0) {
+    document.getElementById('issueErr').textContent = 'จำนวนต้องมากกว่า 0';
+    return;
+  }
+  if (qty > currentIssueItem.on_hand) {
+    document.getElementById('issueErr').textContent = `เบิกได้ไม่เกินคงเหลือ (${currentIssueItem.on_hand})`;
+    return;
+  }
+  if (!password) {
+    document.getElementById('issueErr').textContent = 'ต้องใส่รหัสผ่านยืนยันก่อนเบิก';
+    document.getElementById('issuePassword').focus();
+    return;
+  }
+
+  const btn = document.getElementById('issueSubmit');
+  btn.disabled = true;
+  btn.textContent = 'กำลังบันทึก...';
+
+  try {
+    const res = await api('/api/stock/issue', {
+      method: 'POST',
+      body: JSON.stringify({ reason, note, password, lines: [{ item_no: currentIssueItem.item_no, qty, note }] }),
+    });
+    toast(res.message || 'เบิกสำเร็จ');
+    closeIssueModal();
+    await loadStock();
+    await loadIssues();
+  } catch (e) {
+    document.getElementById('issueErr').textContent = e.message;
+    // If password wrong, refocus password field so user can retry without redoing qty
+    if (/รหัสผ่าน/.test(e.message)) {
+      document.getElementById('issuePassword').value = '';
+      document.getElementById('issuePassword').focus();
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'ยืนยันเบิก';
+  }
+}
+
+// ─── GR history (unchanged) ───
 async function loadGRHistory() {
   try {
     const receipts = await api('/api/receipts');
@@ -160,7 +309,7 @@ async function loadGRHistory() {
 function renderGRHistory() {
   const el = document.getElementById('grHistory');
   if (!grData.length) {
-    el.innerHTML = `<div class="card" style="text-align:center;padding:30px;color:var(--muted)">${t('stock.gr.none')}</div>`;
+    el.innerHTML = `<div class="card" style="text-align:center;padding:30px;color:var(--muted)">ไม่มีประวัติการรับสินค้า</div>`;
     return;
   }
   el.innerHTML = grData.map((gr, idx) => `
@@ -172,10 +321,10 @@ function renderGRHistory() {
         </div>
         <span style="color:var(--muted);font-size:12px">${gr.created_at}</span>
       </div>
-      <div style="font-size:13px;color:var(--muted);margin-top:4px">${t('stock.gr.received_by')}: ${gr.received_by_name || '-'}${gr.note ? ' | ' + gr.note : ''}</div>
+      <div style="font-size:13px;color:var(--muted);margin-top:4px">รับโดย: ${gr.received_by_name || '-'}${gr.note ? ' | ' + gr.note : ''}</div>
       <div class="gr-detail" id="grDetail_${idx}">
         <table style="width:100%;font-size:13px">
-          <tr style="color:var(--muted);font-size:11px"><th style="text-align:left">${t('stock.gr.col.code')}</th><th style="text-align:left">${t('stock.gr.col.item')}</th><th style="text-align:center">${t('stock.gr.col.ordered')}</th><th style="text-align:center;color:var(--ok)">${t('stock.gr.col.received')}</th><th style="text-align:left">${t('stock.gr.col.uom')}</th></tr>
+          <tr style="color:var(--muted);font-size:11px"><th style="text-align:left">รหัส</th><th style="text-align:left">สินค้า</th><th style="text-align:center">สั่ง</th><th style="text-align:center;color:var(--ok)">รับ</th><th style="text-align:left">หน่วย</th></tr>
           ${gr.lines.map(l => `<tr>
             <td style="font-family:monospace">${l.item_no}</td>
             <td>${itemName(l)}</td>
@@ -184,9 +333,6 @@ function renderGRHistory() {
             <td>${l.uom || '-'}</td>
           </tr>`).join('')}
         </table>
-      </div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
-        ${gr.lines.map(l => `<span style="background:var(--border);padding:3px 8px;border-radius:6px;font-size:12px">${itemName(l)} <strong style="color:var(--gold)">x${l.received_qty}</strong></span>`).join('')}
       </div>
     </div>
   `).join('');
@@ -197,14 +343,85 @@ function toggleGR(idx) {
   if (el) el.style.display = el.style.display === 'block' ? 'none' : 'block';
 }
 
+// ─── Issue history ───
+async function loadIssues() {
+  try {
+    issueData = await api('/api/stock/issues');
+    document.getElementById('issueCount').textContent = issueData.length;
+    renderIssueHistory();
+  } catch (e) { console.error('Issues:', e.message); }
+}
+
+const reasonLabel = {
+  sale: 'เพื่อขาย',
+  damage: 'เสียหาย',
+  transfer: 'โอน',
+  adjustment: 'ปรับปรุง',
+  other: 'อื่นๆ',
+};
+
+async function renderIssueHistory() {
+  const el = document.getElementById('issueHistory');
+  if (!issueData.length) {
+    el.innerHTML = `<div class="card" style="text-align:center;padding:30px;color:var(--muted)">ยังไม่มีประวัติการเบิก<br><span style="font-size:12px">กดปุ่ม 📤 เบิก ที่แถวสินค้าในแท็บ "รายการสินค้าในคลัง" เพื่อเริ่มเบิก</span></div>`;
+    return;
+  }
+  // Render summary cards then list
+  el.innerHTML = issueData.map((is, idx) => `
+    <div class="card gr-card" onclick="toggleIssue('${is.id}')">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <div>
+          <strong style="color:var(--gold);font-size:15px">${is.issue_number}</strong>
+          <span class="issue-reason reason-${is.reason}" style="margin-left:8px">${reasonLabel[is.reason] || is.reason}</span>
+          <span style="color:var(--muted);font-size:12px;margin-left:8px">${is.line_count} รายการ · รวม ${(is.total_qty||0).toLocaleString()}</span>
+        </div>
+        <span style="color:var(--muted);font-size:12px">${is.created_at}</span>
+      </div>
+      <div style="font-size:13px;color:var(--muted);margin-top:4px">โดย: ${is.issued_by_name || '-'}${is.note ? ' | ' + is.note : ''}</div>
+      <div class="gr-detail" id="issueDetail_${is.id}" data-loaded="0">
+        <div style="color:var(--muted);font-size:12px">กำลังโหลด...</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function toggleIssue(id) {
+  const el = document.getElementById('issueDetail_' + id);
+  if (!el) return;
+  if (el.style.display === 'block') { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+
+  if (el.dataset.loaded === '1') return;
+  try {
+    const det = await api('/api/stock/issues/' + id);
+    el.innerHTML = `
+      <table style="width:100%;font-size:13px">
+        <tr style="color:var(--muted);font-size:11px"><th style="text-align:left">รหัส</th><th style="text-align:left">สินค้า</th><th style="text-align:center">จำนวน</th><th style="text-align:left">หน่วย</th><th style="text-align:left">หมายเหตุ</th></tr>
+        ${det.lines.map(l => `<tr>
+          <td style="font-family:monospace">${l.item_no}</td>
+          <td>${itemName(l)}</td>
+          <td style="text-align:center;font-weight:700">${l.qty}</td>
+          <td>${l.uom || '-'}</td>
+          <td style="color:var(--muted)">${l.note || '-'}</td>
+        </tr>`).join('')}
+      </table>
+    `;
+    el.dataset.loaded = '1';
+  } catch (e) {
+    el.innerHTML = `<div style="color:var(--err);font-size:12px">โหลดไม่สำเร็จ: ${e.message}</div>`;
+  }
+}
+
 window.onLangChange = () => {
   document.getElementById('nav').innerHTML = renderNav('stock-balance.html');
   if (allItems.length) renderSummary();
   renderStock(allItems);
   renderGRHistory();
+  renderIssueHistory();
 };
 
 loadStock();
 loadGRHistory();
+loadIssues();
 </script>
 </body></html>

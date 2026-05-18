@@ -154,6 +154,34 @@ CREATE TABLE IF NOT EXISTS goods_receipt_lines (
 );
 `);
 
+// ─── Stock issues (FC consumes stock from branch on-hand) ───
+// goods_receipts → stock IN (received from HQ).
+// stock_issues  → stock OUT (issued by FC to sell / damage / transfer /
+// adjustment). on_hand = SUM(received) − SUM(issued) per item per branch.
+db.exec(`
+CREATE TABLE IF NOT EXISTS stock_issues (
+  id TEXT PRIMARY KEY,
+  issue_number TEXT UNIQUE NOT NULL,
+  branch_code TEXT NOT NULL,
+  issued_by TEXT NOT NULL REFERENCES users(id),
+  reason TEXT NOT NULL DEFAULT 'sale',  -- sale / damage / transfer / adjustment / other
+  note TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS stock_issue_lines (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  issue_id TEXT NOT NULL REFERENCES stock_issues(id) ON DELETE CASCADE,
+  item_no TEXT NOT NULL,
+  item_name TEXT NOT NULL,
+  qty REAL NOT NULL CHECK(qty > 0),
+  note TEXT DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_stock_issues_branch ON stock_issues(branch_code, created_at);
+CREATE INDEX IF NOT EXISTS idx_stock_issue_lines_item ON stock_issue_lines(item_no);
+`);
+
 // ─── Migrate: cancel fields ───
 try { db.exec("ALTER TABLE orders ADD COLUMN cancelled_at TEXT"); } catch (e) {}
 try { db.exec("ALTER TABLE orders ADD COLUMN cancelled_by TEXT DEFAULT ''"); } catch (e) {}
