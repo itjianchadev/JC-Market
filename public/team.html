@@ -61,6 +61,7 @@
             <th data-i18n="branches.phone">เบอร์โทร</th>
             <th data-i18n="branches.users">ผู้ใช้</th>
             <th data-i18n="branches.status">สถานะ</th>
+            <th data-i18n="branches.license">License</th>
             <th data-i18n="branches.actions">จัดการ</th>
           </tr>
         </thead>
@@ -120,6 +121,17 @@
           <input type="checkbox" name="show_tax_id" checked style="width:auto;margin:0">
           <span data-i18n="branches.show_tax_id">แสดงเลขผู้เสียภาษี</span>
         </label>
+      </div>
+      <!-- License section (super_admin only — fields are inert for branch_owner
+           but server already rejects writes from them, so no harm if shown). -->
+      <div id="branchLicenseSection" style="display:none">
+        <hr style="border-color:var(--border);margin:12px 0">
+        <h4 style="margin-bottom:8px;color:var(--gold-dark)">🔐 License ของสาขา</h4>
+        <div class="form-row"><label>License key</label><input name="license_key" placeholder="เช่น JF039-2026-..." style="font-family:monospace"></div>
+        <div class="form-grid2">
+          <div class="form-row"><label>วันที่ออก</label><input name="license_issued_at" type="date"></div>
+          <div class="form-row"><label>หมดอายุ</label><input name="license_expires_at" type="date"></div>
+        </div>
       </div>
       <div id="branchAdminSection">
         <hr style="border-color:var(--border);margin:12px 0">
@@ -238,9 +250,24 @@ async function loadBranches() {
   } catch (e) { toast(e.message); }
 }
 
+// Render a small license-status pill for each branch row. Colour matches
+// the global license banner palette so HQ sees one consistent language.
+function licensePill(b) {
+  if (!b.license_expires_at) {
+    return `<span style="background:#f5f5f5;color:#666;padding:2px 8px;border-radius:10px;font-size:11px">—</span>`;
+  }
+  const days = b.days_remaining;
+  let bg = '#e8f5e9', fg = '#2e7d32', icon = '✅';
+  if (b.license_status === 'expired') { bg = '#ffebee'; fg = '#c62828'; icon = '🔴'; }
+  else if (b.license_status === 'expiring_soon') { bg = '#fff3e0'; fg = '#e65100'; icon = '⚠️'; }
+  const text = days >= 0 ? `${days} วัน` : `หมด ${Math.abs(days)} วัน`;
+  const title = `License: ${b.license_key || '(no key)'} · หมดอายุ ${b.license_expires_at}`;
+  return `<span title="${title}" style="background:${bg};color:${fg};padding:2px 10px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap">${icon} ${text}</span>`;
+}
+
 function renderBranches() {
   const el = document.getElementById('branchBody');
-  if (!branchesCache.length) { el.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:20px">-</td></tr>`; return; }
+  if (!branchesCache.length) { el.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:20px">-</td></tr>`; return; }
   el.innerHTML = branchesCache.map(b => `
     <tr style="${b.active?'':'opacity:.5'}">
       <td><strong>${b.code}</strong></td>
@@ -249,6 +276,7 @@ function renderBranches() {
       <td>${b.phone || '-'}</td>
       <td>${b.user_count}</td>
       <td>${b.active ? `<span class="pill-on">${t('branches.active')}</span>` : `<span class="pill-off">${t('branches.inactive')}</span>`}</td>
+      <td>${licensePill(b)}</td>
       <td>
         ${(isSuper || (me.role === 'branch_owner' && me.branch_code === b.code)) ? `<button class="btn sm ghost" onclick='openBranchModal(${JSON.stringify(b).replace(/'/g,"&#39;")})'>${t('branches.edit')}</button>` : ''}
         ${isSuper && b.active ? `<button class="btn sm ghost" style="color:var(--err);border-color:var(--err);margin-left:4px" onclick="deactivateBranch('${b.code}')">${t('branches.deactivate')}</button>` : ''}
@@ -267,6 +295,8 @@ function openBranchModal(b) {
   document.getElementById('branchAdminSection').style.display = isEdit ? 'none' : 'block';
   // Disable admin inputs when editing so they don't submit
   form.querySelectorAll('#branchAdminSection input').forEach(i => i.required = !isEdit);
+  // License section is super_admin-only (server-side already enforces this)
+  document.getElementById('branchLicenseSection').style.display = (isEdit && isSuper) ? 'block' : 'none';
 
   if (isEdit) {
     form.code.value = b.code;
@@ -278,6 +308,11 @@ function openBranchModal(b) {
     form.manager_email.value = b.manager_email || '';
     form.tax_id.value = b.tax_id || '';
     form.show_tax_id.checked = !!b.show_tax_id;
+    if (isSuper) {
+      form.license_key.value = b.license_key || '';
+      form.license_issued_at.value = b.license_issued_at || '';
+      form.license_expires_at.value = b.license_expires_at || '';
+    }
     // Non-HQ can only edit a few fields
     if (!isHq) {
       ['code','name','bc_customer_no','tax_id'].forEach(n => form[n].readOnly = true);

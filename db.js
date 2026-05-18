@@ -216,6 +216,14 @@ CREATE TABLE IF NOT EXISTS license_info (
 INSERT OR IGNORE INTO license_info (id, product_name) VALUES (1, 'JC-Market');
 `);
 
+// ─── Per-branch license fields ─────────────────────────────────────────────
+// Each FC has its own software-licence expiry (franchise contract / SaaS
+// subscription). Stored directly on branches so the branches grid can show
+// status without a join.
+try { db.exec("ALTER TABLE branches ADD COLUMN license_key TEXT DEFAULT ''"); } catch (e) {}
+try { db.exec("ALTER TABLE branches ADD COLUMN license_issued_at TEXT"); } catch (e) {}
+try { db.exec("ALTER TABLE branches ADD COLUMN license_expires_at TEXT"); } catch (e) {}
+
 // ─── Migrate: cancel fields ───
 try { db.exec("ALTER TABLE orders ADD COLUMN cancelled_at TEXT"); } catch (e) {}
 try { db.exec("ALTER TABLE orders ADD COLUMN cancelled_by TEXT DEFAULT ''"); } catch (e) {}
