@@ -134,6 +134,11 @@
     <label class="label">หมายเหตุ (ถ้ามี)</label>
     <textarea id="issueNote" placeholder="ระบุรายละเอียดเพิ่มเติม..."></textarea>
 
+    <div style="height:1px;background:var(--border);margin:12px 0"></div>
+    <label class="label">🔐 รหัสผ่าน (ใช้รหัสเดียวกับตอน login เพื่อยืนยันตัวตน)</label>
+    <input type="password" id="issuePassword" autocomplete="current-password" placeholder="ใส่รหัสผ่านยืนยัน">
+    <div style="font-size:11px;color:var(--muted);margin-top:-8px;margin-bottom:8px">รายการเบิกจะถูกบันทึกในชื่อ <strong id="issuerName"></strong></div>
+
     <div class="modal-actions">
       <button class="btn ghost" onclick="closeIssueModal()">ยกเลิก</button>
       <button class="btn" onclick="submitIssue()" id="issueSubmit">ยืนยันเบิก</button>
@@ -230,8 +235,13 @@ function openIssueModal(item) {
   document.getElementById('issueQty').value = 1;
   document.getElementById('issueReason').value = 'sale';
   document.getElementById('issueNote').value = '';
+  document.getElementById('issuePassword').value = '';
   document.getElementById('issueErr').textContent = '';
+  const u = getUser();
+  document.getElementById('issuerName').textContent = u ? `${u.full_name} (${u.branch_name || u.username})` : '';
   document.getElementById('issueModal').classList.add('open');
+  // Focus password (qty is pre-filled, password is the new required field)
+  setTimeout(() => document.getElementById('issueQty').focus(), 50);
 }
 
 function closeIssueModal() {
@@ -244,6 +254,7 @@ async function submitIssue() {
   const qty = parseFloat(document.getElementById('issueQty').value);
   const reason = document.getElementById('issueReason').value;
   const note = document.getElementById('issueNote').value.trim();
+  const password = document.getElementById('issuePassword').value;
 
   if (!Number.isFinite(qty) || qty <= 0) {
     document.getElementById('issueErr').textContent = 'จำนวนต้องมากกว่า 0';
@@ -251,6 +262,11 @@ async function submitIssue() {
   }
   if (qty > currentIssueItem.on_hand) {
     document.getElementById('issueErr').textContent = `เบิกได้ไม่เกินคงเหลือ (${currentIssueItem.on_hand})`;
+    return;
+  }
+  if (!password) {
+    document.getElementById('issueErr').textContent = 'ต้องใส่รหัสผ่านยืนยันก่อนเบิก';
+    document.getElementById('issuePassword').focus();
     return;
   }
 
@@ -261,7 +277,7 @@ async function submitIssue() {
   try {
     const res = await api('/api/stock/issue', {
       method: 'POST',
-      body: JSON.stringify({ reason, note, lines: [{ item_no: currentIssueItem.item_no, qty, note }] }),
+      body: JSON.stringify({ reason, note, password, lines: [{ item_no: currentIssueItem.item_no, qty, note }] }),
     });
     toast(res.message || 'เบิกสำเร็จ');
     closeIssueModal();
@@ -269,6 +285,11 @@ async function submitIssue() {
     await loadIssues();
   } catch (e) {
     document.getElementById('issueErr').textContent = e.message;
+    // If password wrong, refocus password field so user can retry without redoing qty
+    if (/รหัสผ่าน/.test(e.message)) {
+      document.getElementById('issuePassword').value = '';
+      document.getElementById('issuePassword').focus();
+    }
   } finally {
     btn.disabled = false;
     btn.textContent = 'ยืนยันเบิก';

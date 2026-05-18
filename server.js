@@ -1406,7 +1406,21 @@ function onHandForItem(branchUserId, branchCode, itemNo) {
 }
 
 app.post('/api/stock/issue', requireAuth, (req, res) => {
-  const { lines = [], reason = 'sale', note = '' } = req.body || {};
+  const { lines = [], reason = 'sale', note = '', password = '' } = req.body || {};
+
+  // Password re-confirm — same password the user logs in with. Prevents
+  // someone at a left-open computer from issuing stock under the
+  // signed-in user's name. The stamp on the issue (issued_by) is now
+  // backed by a fresh credential verification, which is what makes it
+  // legally / audit-defensibly "their" issue.
+  if (!password) {
+    return res.status(400).json({ error: 'ต้องใส่รหัสผ่านยืนยันตัวตน' });
+  }
+  const userRow = db.prepare('SELECT password FROM users WHERE id=?').get(req.user.id);
+  if (!userRow || !bcrypt.compareSync(password, userRow.password)) {
+    return res.status(401).json({ error: 'รหัสผ่านไม่ถูกต้อง — ไม่บันทึกการเบิก' });
+  }
+
   if (!Array.isArray(lines) || lines.length === 0) {
     return res.status(400).json({ error: 'ต้องระบุรายการสินค้าที่เบิก' });
   }
