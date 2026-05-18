@@ -23,6 +23,23 @@
 .col-num.recv{color:var(--ok);font-weight:600}
 .col-num.iss{color:var(--muted)}
 .col-num.onhand{font-size:17px;font-weight:700;color:var(--gold)}
+/* Low-stock row treatment: red-tinted background + bold red on_hand */
+.low-stock-row{background:#fef2f2}
+.low-stock-row:hover{background:#fee2e2}
+.low-stock-row .col-num.onhand{color:#dc2626}
+.low-stock-row::before{content:'🚨';position:absolute;left:-2px}
+.reorder-input{width:64px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;text-align:right;font-variant-numeric:tabular-nums}
+.reorder-input:focus{outline:none;border-color:var(--gold);background:#fff}
+.low-stock-pill{display:inline-block;padding:2px 8px;border-radius:10px;background:#fee2e2;color:#dc2626;font-size:11px;font-weight:700;margin-left:6px}
+/* Toggle filter "show only low-stock" */
+.filter-row{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.filter-row .search-box{flex:1;min-width:200px;margin-bottom:0}
+.switch-mini{position:relative;display:inline-block;width:36px;height:20px;flex-shrink:0}
+.switch-mini input{opacity:0;width:0;height:0}
+.switch-mini .slider{position:absolute;cursor:pointer;inset:0;background:#ccc;transition:.25s;border-radius:20px}
+.switch-mini .slider:before{position:absolute;content:'';height:14px;width:14px;left:3px;bottom:3px;background:#fff;transition:.25s;border-radius:50%}
+.switch-mini input:checked + .slider{background:#dc2626}
+.switch-mini input:checked + .slider:before{transform:translateX(16px)}
 .cat-badge{display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;background:var(--beige);color:var(--muted)}
 .btn-sm{padding:4px 10px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid var(--border);background:var(--bg)}
 .btn-sm:hover{background:var(--gold);color:#fff;border-color:var(--gold)}
@@ -76,7 +93,13 @@
     <!-- Stock balance panel -->
     <div id="panelStock">
       <div id="summaryCards" class="summary-cards"></div>
-      <input type="text" class="search-box" id="searchBox" data-i18n-placeholder="stock.search" placeholder="ค้นหาสินค้า..." oninput="filterStock()">
+      <div class="filter-row">
+        <input type="text" class="search-box" id="searchBox" data-i18n-placeholder="stock.search" placeholder="ค้นหาสินค้า..." oninput="filterStock()">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;font-size:13px;color:var(--muted);white-space:nowrap" title="แสดงเฉพาะสินค้าที่ on_hand ต่ำกว่าหรือเท่ากับขีดเตือน">
+          <span class="switch-mini"><input type="checkbox" id="onlyLow" onchange="filterStock()"><span class="slider"></span></span>
+          🚨 เฉพาะใกล้หมด
+        </label>
+      </div>
       <div class="card" style="overflow-x:auto">
         <table class="stock-table">
           <thead>
@@ -84,10 +107,10 @@
               <th data-i18n="stock.col.code">รหัส</th>
               <th data-i18n="stock.col.item">สินค้า</th>
               <th class="col-num" data-i18n="stock.col.received">รับมา</th>
-              <th class="col-num" data-i18n="stock.col.issued">เบิกแล้ว</th>
+              <th class="col-num" data-i18n="stock.col.issued">เบิก</th>
               <th class="col-num" data-i18n="stock.col.onhand">คงเหลือ</th>
+              <th class="col-num" title="แตะเพื่อแก้ — เมื่อ on_hand ต่ำกว่าหรือเท่ากับค่านี้จะ alert">ขีดเตือน</th>
               <th data-i18n="stock.col.uom">หน่วย</th>
-              <th data-i18n="stock.col.category">หมวด</th>
               <th style="text-align:center">เบิก</th>
             </tr>
           </thead>
@@ -189,38 +212,80 @@ function renderSummary() {
   const totalOnHand = allItems.reduce((s, i) => s + (i.on_hand || 0), 0);
   const totalReceived = allItems.reduce((s, i) => s + (i.total_received || 0), 0);
   const totalIssued = allItems.reduce((s, i) => s + (i.total_issued || 0), 0);
+  const lowCount = allItems.filter(i => i.low_stock).length;
   document.getElementById('summaryCards').innerHTML = `
     <div class="card summary-card"><div class="num">${totalItems}</div><div class="label">รายการ</div></div>
     <div class="card summary-card"><div class="num" style="color:var(--ok)">${totalReceived.toLocaleString()}</div><div class="label">รับมาทั้งหมด</div></div>
     <div class="card summary-card"><div class="num" style="color:var(--muted)">${totalIssued.toLocaleString()}</div><div class="label">เบิกออกแล้ว</div></div>
     <div class="card summary-card"><div class="num">${totalOnHand.toLocaleString()}</div><div class="label">คงเหลือ</div></div>
+    <div class="card summary-card" style="${lowCount>0?'border:1px solid #fecaca':''}"><div class="num" style="color:${lowCount>0?'#dc2626':'var(--muted)'}">${lowCount}</div><div class="label">🚨 ใกล้หมด</div></div>
   `;
 }
 
 function renderStock(items) {
-  document.getElementById('stockBody').innerHTML = items.map(i => `
-    <tr>
+  document.getElementById('stockBody').innerHTML = items.map(i => {
+    const rp = i.reorder_point || 0;
+    const safeItem = JSON.stringify(i).replace(/'/g, '&apos;');
+    return `
+    <tr class="${i.low_stock ? 'low-stock-row' : ''}">
       <td style="font-family:monospace;font-size:13px">${i.item_no}</td>
-      <td><strong>${itemName(i)}</strong></td>
+      <td><strong>${itemName(i)}</strong>${i.low_stock?'<span class="low-stock-pill">ใกล้หมด</span>':''}</td>
       <td class="col-num recv">${(i.total_received || 0).toLocaleString()}</td>
       <td class="col-num iss">${(i.total_issued || 0).toLocaleString()}</td>
       <td class="col-num onhand">${(i.on_hand || 0).toLocaleString()}</td>
-      <td>${i.uom || '-'}</td>
-      <td>${i.category ? `<span class="cat-badge">${catName(i.category)}</span>` : '-'}</td>
-      <td style="text-align:center">
-        <button class="btn-sm" ${i.on_hand <= 0 ? 'disabled' : ''} onclick='openIssueModal(${JSON.stringify(i).replace(/'/g, "&apos;")})'>📤 เบิก</button>
+      <td class="col-num">
+        <input type="number" class="reorder-input" min="0" step="0.01" value="${rp}"
+          data-item-no="${i.item_no}"
+          onblur="saveReorderPoint(this)"
+          onkeypress="if(event.key==='Enter')this.blur()">
       </td>
-    </tr>
-  `).join('');
+      <td>${i.uom || '-'}</td>
+      <td style="text-align:center">
+        <button class="btn-sm" ${i.on_hand <= 0 ? 'disabled' : ''} onclick='openIssueModal(${safeItem})'>📤 เบิก</button>
+      </td>
+    </tr>`;
+  }).join('');
 }
 
 function filterStock() {
   const q = document.getElementById('searchBox').value.toLowerCase();
-  if (!q) return renderStock(allItems);
-  renderStock(allItems.filter(i => {
+  const onlyLow = document.getElementById('onlyLow').checked;
+  let filtered = allItems;
+  if (onlyLow) filtered = filtered.filter(i => i.low_stock);
+  if (q) filtered = filtered.filter(i => {
     const hay = ((i.item_name||'') + ' ' + (i.item_name_en||'') + ' ' + (i.item_no||'')).toLowerCase();
     return hay.includes(q);
-  }));
+  });
+  renderStock(filtered);
+}
+
+async function saveReorderPoint(input) {
+  const itemNo = input.dataset.itemNo;
+  const value = parseFloat(input.value);
+  if (!Number.isFinite(value) || value < 0) {
+    input.value = 0;
+    return;
+  }
+  // Find the current cached value — skip API call if unchanged
+  const cached = allItems.find(i => i.item_no === itemNo);
+  if (cached && cached.reorder_point === value) return;
+  try {
+    await api('/api/reorder-points', {
+      method: 'POST',
+      body: JSON.stringify({ item_no: itemNo, reorder_point: value }),
+    });
+    // Update the local cache + re-render so low_stock + summary refresh
+    if (cached) {
+      cached.reorder_point = value;
+      cached.low_stock = value > 0 && cached.on_hand <= value;
+    }
+    renderSummary();
+    filterStock();
+    toast('ตั้งขีดเตือนเรียบร้อย');
+  } catch (e) {
+    toast('บันทึกไม่สำเร็จ: ' + e.message);
+    input.value = (cached && cached.reorder_point) || 0;
+  }
 }
 
 // ─── Issue create modal ───

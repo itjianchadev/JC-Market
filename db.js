@@ -180,6 +180,23 @@ CREATE TABLE IF NOT EXISTS stock_issue_lines (
 
 CREATE INDEX IF NOT EXISTS idx_stock_issues_branch ON stock_issues(branch_code, created_at);
 CREATE INDEX IF NOT EXISTS idx_stock_issue_lines_item ON stock_issue_lines(item_no);
+
+-- Reorder-point settings per (branch, item). When stock-balance.on_hand falls
+-- at or below reorder_point, the item is flagged low_stock so the branch can
+-- act before stock-out. reorder_qty is the recommended order quantity (next
+-- step: surface this as a one-click "เติมสต๊อก" in the shop page).
+CREATE TABLE IF NOT EXISTS branch_item_settings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  branch_code TEXT NOT NULL,
+  item_no TEXT NOT NULL,
+  reorder_point REAL NOT NULL DEFAULT 0,
+  reorder_qty REAL DEFAULT 0,
+  note TEXT DEFAULT '',
+  updated_by TEXT,
+  updated_at TEXT DEFAULT (datetime('now','localtime')),
+  UNIQUE(branch_code, item_no)
+);
+CREATE INDEX IF NOT EXISTS idx_bis_branch ON branch_item_settings(branch_code);
 `);
 
 // ─── Migrate: cancel fields ───
