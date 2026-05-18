@@ -1,26 +1,40 @@
 <!doctype html>
 <html lang="th"><head>
-<meta charset="utf-8"><title>เข้าสู่ระบบ — JC-Stock Market</title>
+<meta charset="utf-8"><title>เข้าสู่ระบบ — JC-Market</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/css/style.css">
-</head><body>
+</head><body data-i18n-title="login.page_title">
 <div class="login-wrap"><div class="login-box">
-  <h1>🛍️ JC-Stock Market</h1>
-  <p class="sub">ระบบสั่งซื้อวัตถุดิบสำหรับสาขา FC</p>
+  <div style="display:flex;justify-content:flex-end;margin-bottom:8px">
+    <a href="#" id="loginLangToggle" style="padding:4px 10px;border:1px solid var(--border);border-radius:8px;text-decoration:none;font-size:13px"></a>
+  </div>
+  <h1 data-i18n="login.title">🛍️ JC-Market</h1>
+  <p class="sub" data-i18n="login.sub">ระบบสั่งซื้อวัตถุดิบสำหรับสาขา FC</p>
   <form id="f">
-    <label>Username</label>
+    <label data-i18n="login.username">Username</label>
     <input name="username" required autofocus>
-    <label>Password</label>
+    <label data-i18n="login.password">Password</label>
     <input name="password" type="password" required>
-    <button class="btn" type="submit">เข้าสู่ระบบ</button>
+    <button class="btn" type="submit" data-i18n="login.submit">เข้าสู่ระบบ</button>
     <div class="err" id="err"></div>
   </form>
   <p class="sub" style="margin-top:20px;font-size:12px">Demo: admin/admin1234 · jf039/fc1234</p>
 </div></div>
 <script src="/js/app.js"></script>
 <script>
+function paintLangBtn(){
+  const lang = getLang();
+  const el = document.getElementById('loginLangToggle');
+  if (el) el.textContent = lang === 'th' ? '🇹🇭 TH' : '🇬🇧 EN';
+}
+paintLangBtn();
+document.getElementById('loginLangToggle').onclick = (e) => {
+  e.preventDefault();
+  setLang(getLang()==='th'?'en':'th');
+  paintLangBtn();
+};
 document.getElementById('f').onsubmit = async (e) => {
   e.preventDefault();
   const fd = new FormData(e.target);

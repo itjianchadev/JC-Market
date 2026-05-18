@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="th"><head>
+<meta charset="utf-8"><title>Stock สาขา — JC-Market</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<style>
+.page-layout{display:flex;gap:0;min-height:calc(100vh - 60px)}
+.sidebar{width:220px;flex-shrink:0;background:var(--card);border-right:1px solid var(--border);padding:16px 0}
+.sidebar h3{padding:0 16px;margin-bottom:12px;font-size:14px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
+.sidebar .branch-info{padding:0 16px 16px;font-size:13px;color:var(--muted);border-bottom:1px solid var(--border);margin-bottom:12px}
+.sidebar-item{display:flex;align-items:center;gap:10px;padding:10px 16px;cursor:pointer;transition:.15s;font-size:14px;color:var(--text);border-left:3px solid transparent}
+.sidebar-item:hover{background:var(--beige)}
+.sidebar-item.active{background:rgba(173,156,130,.12);border-left-color:var(--gold);color:var(--gold-dark);font-weight:600}
+.sidebar-item .icon{font-size:18px;width:24px;text-align:center}
+.sidebar-item .count{margin-left:auto;background:var(--border);padding:1px 8px;border-radius:10px;font-size:11px;color:var(--muted)}
+.main-content{flex:1;padding:20px 24px;overflow-y:auto}
+.stock-table{width:100%;border-collapse:collapse;font-size:14px}
+.stock-table th{text-align:left;color:var(--muted);font-size:12px;padding:8px;border-bottom:1px solid var(--border)}
+.stock-table td{padding:10px 8px;border-bottom:1px solid var(--border)}
+.stock-table tr:hover{background:rgba(173,156,130,.08)}
+.stock-qty{font-size:18px;font-weight:700;color:var(--gold)}
+.cat-badge{display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;background:var(--beige);color:var(--muted)}
+.summary-cards{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.summary-card{flex:1;min-width:100px;padding:14px;text-align:center}
+.summary-card .num{font-size:22px;font-weight:700;color:var(--gold)}
+.summary-card .label{font-size:11px;color:var(--muted);margin-top:4px}
+.search-box{width:100%;padding:10px 14px;margin-bottom:12px;border-radius:10px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:14px}
+.gr-card{padding:14px;margin-bottom:8px;cursor:pointer;transition:.15s}
+.gr-card:hover{border-color:var(--gold)}
+.gr-detail{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px;margin-top:8px;display:none}
+@media(max-width:768px){
+  .page-layout{flex-direction:column}
+  .sidebar{width:100%;flex-direction:row;display:flex;overflow-x:auto;border-right:none;border-bottom:1px solid var(--border);padding:0}
+  .sidebar h3,.sidebar .branch-info{display:none}
+  .sidebar-item{white-space:nowrap;border-left:none;border-bottom:3px solid transparent;padding:12px 16px}
+  .sidebar-item.active{border-bottom-color:var(--gold);border-left:none}
+  .main-content{padding:16px}
+}
+</style>
+</head><body data-i18n-title="stock.page_title">
+<div id="nav"></div>
+<div class="page-layout">
+  <div class="sidebar">
+    <h3 data-i18n="stock.title">Stock สาขา</h3>
+    <div class="branch-info" id="branchInfo"></div>
+    <div class="sidebar-item active" onclick="switchTab('stock')" id="tabStock">
+      <span class="icon">📦</span> <span data-i18n="stock.items">รายการสินค้าในคลัง</span> <span class="count" id="stockCount">0</span>
+    </div>
+    <div class="sidebar-item" onclick="switchTab('gr')" id="tabGR">
+      <span class="icon">📋</span> <span data-i18n="stock.gr_history">ประวัติการรับสินค้า</span> <span class="count" id="grCount">0</span>
+    </div>
+  </div>
+  <div class="main-content">
+    <!-- Stock Panel -->
+    <div id="panelStock">
+      <div id="summaryCards" class="summary-cards"></div>
+      <input type="text" class="search-box" id="searchBox" data-i18n-placeholder="stock.search" placeholder="ค้นหาสินค้า..." oninput="filterStock()">
+      <div class="card" style="overflow-x:auto">
+        <table class="stock-table">
+          <thead>
+            <tr>
+              <th data-i18n="stock.col.code">รหัส</th>
+              <th data-i18n="stock.col.item">สินค้า</th>
+              <th style="text-align:right" data-i18n="stock.col.received">จำนวนรับ</th>
+              <th data-i18n="stock.col.uom">หน่วย</th>
+              <th data-i18n="stock.col.category">หมวด</th>
+            </tr>
+          </thead>
+          <tbody id="stockBody"></tbody>
+        </table>
+      </div>
+      <div id="emptyMsg" style="display:none;text-align:center;padding:40px" class="card">
+        <p style="font-size:48px">📊</p>
+        <p style="color:var(--muted)" data-i18n="stock.empty">ยังไม่มีข้อมูล Stock — จะอัพเดทเมื่อรับของเข้าสาขา</p>
+      </div>
+    </div>
+    <!-- GR History Panel -->
+    <div id="panelGR" style="display:none">
+      <h3 style="margin-bottom:12px" data-i18n="stock.gr_history_full">ประวัติการรับสินค้า (GR)</h3>
+      <div id="grHistory"></div>
+    </div>
+  </div>
+</div>
+
+<script src="/js/app.js"></script>
+<script>
+if(!requireLogin()) throw '';
+document.getElementById('nav').innerHTML = renderNav('stock-balance.html');
+
+let allItems = [];
+let grData = [];
+
+function switchTab(tab) {
+  document.getElementById('panelStock').style.display = tab === 'stock' ? 'block' : 'none';
+  document.getElementById('panelGR').style.display = tab === 'gr' ? 'block' : 'none';
+  document.getElementById('tabStock').classList.toggle('active', tab === 'stock');
+  document.getElementById('tabGR').classList.toggle('active', tab === 'gr');
+}
+
+async function loadStock() {
+  try {
+    const data = await api('/api/stock-balance');
+    const branch = data.branch || {};
+    document.getElementById('branchInfo').textContent = `${branch.branch_name || branch.name || ''} ${branch.code ? '(' + branch.code + ')' : ''}`;
+
+    allItems = data.items || [];
+    document.getElementById('stockCount').textContent = allItems.length;
+    if (!allItems.length) {
+      document.getElementById('emptyMsg').style.display = 'block';
+      return;
+    }
+
+    renderSummary();
+    renderStock(allItems);
+  } catch (e) { toast(e.message); }
+}
+
+function renderSummary() {
+  const totalItems = allItems.length;
+  const totalQty = allItems.reduce((s, i) => s + i.total_received, 0);
+  const categories = [...new Set(allItems.map(i => i.category).filter(Boolean))];
+  document.getElementById('summaryCards').innerHTML = `
+    <div class="card summary-card"><div class="num">${totalItems}</div><div class="label">${t('stock.summary.items')}</div></div>
+    <div class="card summary-card"><div class="num">${totalQty.toLocaleString()}</div><div class="label">${t('stock.summary.qty')}</div></div>
+    <div class="card summary-card"><div class="num">${categories.length}</div><div class="label">${t('stock.summary.cats')}</div></div>
+  `;
+}
+
+function renderStock(items) {
+  document.getElementById('stockBody').innerHTML = items.map(i => `
+    <tr>
+      <td style="font-family:monospace;font-size:13px">${i.item_no}</td>
+      <td><strong>${itemName(i)}</strong></td>
+      <td style="text-align:right"><span class="stock-qty">${i.total_received.toLocaleString()}</span></td>
+      <td>${i.uom || '-'}</td>
+      <td>${i.category ? `<span class="cat-badge">${catName(i.category)}</span>` : '-'}</td>
+    </tr>
+  `).join('');
+}
+
+function filterStock() {
+  const q = document.getElementById('searchBox').value.toLowerCase();
+  if (!q) return renderStock(allItems);
+  renderStock(allItems.filter(i => {
+    const hay = ((i.item_name||'') + ' ' + (i.item_name_en||'') + ' ' + (i.item_no||'')).toLowerCase();
+    return hay.includes(q);
+  }));
+}
+
+async function loadGRHistory() {
+  try {
+    const receipts = await api('/api/receipts');
+    grData = receipts;
+    document.getElementById('grCount').textContent = receipts.length;
+    renderGRHistory();
+  } catch (e) { console.error('GR history:', e.message); }
+}
+
+function renderGRHistory() {
+  const el = document.getElementById('grHistory');
+  if (!grData.length) {
+    el.innerHTML = `<div class="card" style="text-align:center;padding:30px;color:var(--muted)">${t('stock.gr.none')}</div>`;
+    return;
+  }
+  el.innerHTML = grData.map((gr, idx) => `
+    <div class="card gr-card" onclick="toggleGR(${idx})">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <strong style="color:var(--gold);font-size:15px">${gr.receipt_number}</strong>
+          <span style="color:var(--muted);font-size:12px;margin-left:8px">${gr.bc_po_no || gr.order_number}</span>
+        </div>
+        <span style="color:var(--muted);font-size:12px">${gr.created_at}</span>
+      </div>
+      <div style="font-size:13px;color:var(--muted);margin-top:4px">${t('stock.gr.received_by')}: ${gr.received_by_name || '-'}${gr.note ? ' | ' + gr.note : ''}</div>
+      <div class="gr-detail" id="grDetail_${idx}">
+        <table style="width:100%;font-size:13px">
+          <tr style="color:var(--muted);font-size:11px"><th style="text-align:left">${t('stock.gr.col.code')}</th><th style="text-align:left">${t('stock.gr.col.item')}</th><th style="text-align:center">${t('stock.gr.col.ordered')}</th><th style="text-align:center;color:var(--ok)">${t('stock.gr.col.received')}</th><th style="text-align:left">${t('stock.gr.col.uom')}</th></tr>
+          ${gr.lines.map(l => `<tr>
+            <td style="font-family:monospace">${l.item_no}</td>
+            <td>${itemName(l)}</td>
+            <td style="text-align:center">${l.ordered_qty}</td>
+            <td style="text-align:center;color:var(--ok);font-weight:700">${l.received_qty}</td>
+            <td>${l.uom || '-'}</td>
+          </tr>`).join('')}
+        </table>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
+        ${gr.lines.map(l => `<span style="background:var(--border);padding:3px 8px;border-radius:6px;font-size:12px">${itemName(l)} <strong style="color:var(--gold)">x${l.received_qty}</strong></span>`).join('')}
+      </div>
+    </div>
+  `).join('');
+}
+
+function toggleGR(idx) {
+  const el = document.getElementById('grDetail_' + idx);
+  if (el) el.style.display = el.style.display === 'block' ? 'none' : 'block';
+}
+
+window.onLangChange = () => {
+  document.getElementById('nav').innerHTML = renderNav('stock-balance.html');
+  if (allItems.length) renderSummary();
+  renderStock(allItems);
+  renderGRHistory();
+};
+
+loadStock();
+loadGRHistory();
+</script>
+</body></html>

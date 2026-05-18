@@ -9,16 +9,30 @@ db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
 db.exec(`
+CREATE TABLE IF NOT EXISTS branches (
+  code TEXT PRIMARY KEY,                    -- JF039, JF050, ...
+  name TEXT NOT NULL,                        -- สาขา JF039
+  bc_customer_no TEXT DEFAULT '',            -- Customer No. ใน D365 BC
+  address TEXT DEFAULT '',
+  phone TEXT DEFAULT '',
+  manager_email TEXT DEFAULT '',
+  tax_id TEXT DEFAULT '',
+  show_tax_id INTEGER DEFAULT 1,             -- 1=โชว์, 0=ซ่อน
+  active INTEGER DEFAULT 1,
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   username TEXT UNIQUE NOT NULL,
   password TEXT NOT NULL,
   full_name TEXT NOT NULL,
-  role TEXT NOT NULL DEFAULT 'fc',           -- admin, fc
-  branch_code TEXT DEFAULT '',               -- JF039 ...
+  role TEXT NOT NULL DEFAULT 'fc',           -- super_admin, admin_scm, branch_owner, store_manager, cashier, fc
+  branch_code TEXT DEFAULT '',               -- FK → branches.code
   branch_name TEXT DEFAULT '',
-  bc_customer_no TEXT DEFAULT '',            -- Customer No. in D365 BC
+  bc_customer_no TEXT DEFAULT '',            -- Customer No. in D365 BC (denormalized)
   phone TEXT DEFAULT '',
+  can_order INTEGER DEFAULT 1,               -- 1=สั่งของได้, 0=สั่งไม่ได้
   active INTEGER DEFAULT 1,
   created_at TEXT DEFAULT (datetime('now','localtime'))
 );
@@ -26,7 +40,8 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS items_cache (
   id TEXT PRIMARY KEY,                       -- BC item id (GUID)
   item_no TEXT UNIQUE NOT NULL,              -- BC No.
-  name TEXT NOT NULL,
+  name TEXT NOT NULL,                        -- TH (BC displayName2) หรือ fallback
+  name_en TEXT DEFAULT '',                   -- EN (BC displayName)
   description TEXT DEFAULT '',
   category TEXT DEFAULT '',
   unit_price REAL DEFAULT 0,
@@ -53,9 +68,13 @@ CREATE TABLE IF NOT EXISTS orders (
   user_id TEXT NOT NULL REFERENCES users(id),
   branch_code TEXT,
   subtotal REAL DEFAULT 0,
+  vat_rate REAL DEFAULT 7,
+  vat_amount REAL DEFAULT 0,
   total REAL DEFAULT 0,
   payment_status TEXT DEFAULT 'pending',     -- pending, paid, verified, failed
   payment_method TEXT DEFAULT 'promptpay',
+  bc_so_id TEXT DEFAULT '',
+  bc_so_no TEXT DEFAULT '',
   bc_invoice_id TEXT DEFAULT '',
   bc_invoice_no TEXT DEFAULT '',
   bc_posted INTEGER DEFAULT 0,
@@ -97,18 +116,178 @@ CREATE TABLE IF NOT EXISTS sync_log (
 );
 `);
 
+// ─── Migrate: add bc_po columns if missing ───
+try { db.exec("ALTER TABLE orders ADD COLUMN bc_po_id TEXT DEFAULT ''"); } catch (e) { /* already exists */ }
+try { db.exec("ALTER TABLE orders ADD COLUMN bc_po_no TEXT DEFAULT ''"); } catch (e) { /* already exists */ }
+
+// ─── Migrate: fulfillment tracking ───
+try { db.exec("ALTER TABLE orders ADD COLUMN fulfillment_status TEXT DEFAULT 'pending'"); } catch (e) {}
+try { db.exec("ALTER TABLE orders ADD COLUMN shipped_at TEXT"); } catch (e) {}
+try { db.exec("ALTER TABLE orders ADD COLUMN shipped_by TEXT DEFAULT ''"); } catch (e) {}
+try { db.exec("ALTER TABLE orders ADD COLUMN fully_received_at TEXT"); } catch (e) {}
+
+// ─── Migrate: bc_po_line_id on order_lines ───
+try { db.exec("ALTER TABLE order_lines ADD COLUMN bc_po_line_id TEXT DEFAULT ''"); } catch (e) {}
+
+// ─── Goods Receipts ───
+db.exec(`
+CREATE TABLE IF NOT EXISTS goods_receipts (
+  id TEXT PRIMARY KEY,
+  order_id TEXT NOT NULL REFERENCES orders(id),
+  receipt_number TEXT UNIQUE NOT NULL,
+  received_by TEXT NOT NULL REFERENCES users(id),
+  bc_receipt_no TEXT DEFAULT '',
+  bc_posted INTEGER DEFAULT 0,
+  note TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS goods_receipt_lines (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  receipt_id TEXT NOT NULL REFERENCES goods_receipts(id),
+  order_line_id INTEGER NOT NULL REFERENCES order_lines(id),
+  item_no TEXT NOT NULL,
+  item_name TEXT NOT NULL,
+  ordered_qty REAL NOT NULL,
+  received_qty REAL NOT NULL,
+  note TEXT DEFAULT ''
+);
+`);
+
+// ─── Migrate: cancel fields ───
+try { db.exec("ALTER TABLE orders ADD COLUMN cancelled_at TEXT"); } catch (e) {}
+try { db.exec("ALTER TABLE orders ADD COLUMN cancelled_by TEXT DEFAULT ''"); } catch (e) {}
+try { db.exec("ALTER TABLE orders ADD COLUMN cancel_reason TEXT DEFAULT ''"); } catch (e) {}
+
+// ─── Migrate: BC post failure tracking ───
+// When the receive flow tries to post a Sales Invoice in BC but fails (stock,
+// permissions, etc.), we need a way for admins to see the orphan and retry.
+try { db.exec("ALTER TABLE orders ADD COLUMN bc_sync_error TEXT DEFAULT ''"); } catch (e) {}
+
+// ─── Migrate: anti-fraud fields on payments ───
+try { db.exec("ALTER TABLE payments ADD COLUMN slip_hash TEXT DEFAULT ''"); } catch (e) {}
+try { db.exec("ALTER TABLE payments ADD COLUMN trans_date TEXT DEFAULT ''"); } catch (e) {}
+try { db.exec("ALTER TABLE payments ADD COLUMN slip_sender TEXT DEFAULT ''"); } catch (e) {}
+try { db.exec("ALTER TABLE payments ADD COLUMN slip_receiver TEXT DEFAULT ''"); } catch (e) {}
+try { db.exec("ALTER TABLE payments ADD COLUMN slip_amount REAL DEFAULT 0"); } catch (e) {}
+try { db.exec("ALTER TABLE payments ADD COLUMN upload_ip TEXT DEFAULT ''"); } catch (e) {}
+// Partial unique index: only enforce uniqueness on non-empty qr_ref of verified payments
+try { db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_qr_ref_uniq ON payments(qr_ref) WHERE qr_ref != '' AND verified=1"); } catch (e) {}
+try { db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_slip_hash_uniq ON payments(slip_hash) WHERE slip_hash != '' AND verified=1"); } catch (e) {}
+
+// ─── Slip fraud attempts (audit log) ───
+db.exec(`
+CREATE TABLE IF NOT EXISTS slip_fraud_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id TEXT,
+  user_id TEXT,
+  username TEXT,
+  ip TEXT DEFAULT '',
+  reason TEXT NOT NULL,
+  slip_hash TEXT DEFAULT '',
+  qr_ref TEXT DEFAULT '',
+  slip_amount REAL DEFAULT 0,
+  expected_amount REAL DEFAULT 0,
+  trans_date TEXT DEFAULT '',
+  raw_response TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_fraud_user ON slip_fraud_log(user_id);
+CREATE INDEX IF NOT EXISTS idx_fraud_created ON slip_fraud_log(created_at);
+`);
+
+// ─── Payment Receipts (ใบเสร็จรับเงิน) ───
+db.exec(`
+CREATE TABLE IF NOT EXISTS payment_receipts (
+  id TEXT PRIMARY KEY,
+  order_id TEXT NOT NULL REFERENCES orders(id),
+  receipt_number TEXT UNIQUE NOT NULL,
+  issued_by TEXT NOT NULL REFERENCES users(id),
+  subtotal REAL NOT NULL DEFAULT 0,
+  vat_amount REAL NOT NULL DEFAULT 0,
+  total REAL NOT NULL DEFAULT 0,
+  note TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+`);
+
 // ─── Seed admin + demo FC users ───
+// ─── Migration: add name_en column to existing items_cache if missing ───
+try {
+  const cols = db.prepare("PRAGMA table_info(items_cache)").all();
+  if (!cols.some(c => c.name === 'name_en')) {
+    db.exec("ALTER TABLE items_cache ADD COLUMN name_en TEXT DEFAULT ''");
+    console.log('[db] Migration: added items_cache.name_en');
+  }
+} catch (e) { console.error('[db] name_en migration failed:', e.message); }
+
+// ─── Migration: add can_order to users if missing ───
+try {
+  const cols = db.prepare("PRAGMA table_info(users)").all();
+  if (!cols.some(c => c.name === 'can_order')) {
+    db.exec("ALTER TABLE users ADD COLUMN can_order INTEGER DEFAULT 1");
+    console.log('[db] Migration: added users.can_order');
+  }
+} catch (e) { console.error('[db] can_order migration failed:', e.message); }
+
+// ─── Migration: seed branches from existing users.branch_code ───
+try {
+  const branchCount = db.prepare('SELECT COUNT(*) c FROM branches').get().c;
+  if (branchCount === 0) {
+    const existing = db.prepare(`
+      SELECT DISTINCT branch_code, branch_name, bc_customer_no
+      FROM users WHERE branch_code <> '' AND branch_code IS NOT NULL
+    `).all();
+    const ins = db.prepare(`INSERT OR IGNORE INTO branches (code, name, bc_customer_no) VALUES (?, ?, ?)`);
+    for (const b of existing) {
+      ins.run(b.branch_code, b.branch_name || b.branch_code, b.bc_customer_no || '');
+    }
+    if (existing.length) console.log(`[db] Migration: seeded ${existing.length} branches from users`);
+  }
+} catch (e) { console.error('[db] branches seed failed:', e.message); }
+
+// ─── Role migration: rename old role names to new taxonomy ───
+// admin → admin_scm, branch_admin → branch_owner, manager → store_manager
+try {
+  const migrations = [
+    { from: 'admin', to: 'admin_scm' },
+    { from: 'branch_admin', to: 'branch_owner' },
+    { from: 'manager', to: 'store_manager' },
+  ];
+  for (const m of migrations) {
+    const r = db.prepare('UPDATE users SET role=? WHERE role=?').run(m.to, m.from);
+    if (r.changes) console.log(`[db] Role migration: ${m.from} → ${m.to} (${r.changes} user${r.changes>1?'s':''})`);
+  }
+} catch (e) { console.error('[db] role migration failed:', e.message); }
+
 const userCount = db.prepare('SELECT COUNT(*) c FROM users').get().c;
 if (userCount === 0) {
   const uid = () => crypto.randomUUID();
   const hash = (p) => bcrypt.hashSync(p, 10);
-  const stmt = db.prepare(`INSERT INTO users (id, username, password, full_name, role, branch_code, branch_name, bc_customer_no)
-    VALUES (?,?,?,?,?,?,?,?)`);
-  stmt.run(uid(), 'admin', hash('admin1234'), 'HQ Admin', 'admin', '', 'HQ', '');
-  stmt.run(uid(), 'jf039', hash('fc1234'), 'FC JF039', 'fc', 'JF039', 'สาขา JF039', 'C-JF039');
-  stmt.run(uid(), 'jf049', hash('fc1234'), 'FC JF049', 'fc', 'JF049', 'สาขา JF049', 'C-JF049');
-  console.log('[db] Seeded users: admin/admin1234, jf039/fc1234, jf049/fc1234');
+  const stmt = db.prepare(`INSERT INTO users (id, username, password, full_name, role, branch_code, branch_name, bc_customer_no, can_order)
+    VALUES (?,?,?,?,?,?,?,?,?)`);
+  // can_order: admins don't place orders (they manage), fc branches DO
+  // bc_customer_no values JF001/JF002 are the real customers in the
+  // Jiancha_develop BC environment. C-JF039 etc. were placeholder and
+  // failed BC validation with Internal_InvalidTableRelation on checkout.
+  stmt.run(uid(), 'itmanager', hash('it1234'), 'IT Manager', 'super_admin', '', 'HQ', '', 0);
+  stmt.run(uid(), 'admin', hash('admin1234'), 'SCM Admin', 'admin_scm', '', 'HQ', '', 0);
+  stmt.run(uid(), 'jf039', hash('fc1234'), 'FC JF039', 'fc', 'JF039', 'สาขา JF039', 'JF001', 1);
+  stmt.run(uid(), 'jf049', hash('fc1234'), 'FC JF049', 'fc', 'JF049', 'สาขา JF049', 'JF002', 1);
+  console.log('[db] Seeded users: itmanager/it1234 (super_admin), admin/admin1234 (admin_scm), jf039/jf049 (fc)');
 }
+
+// ─── Seed super_admin "IT Manager" ถ้ายังไม่มี ───
+try {
+  const hasSuper = db.prepare("SELECT 1 FROM users WHERE role='super_admin'").get();
+  if (!hasSuper) {
+    const uid = () => crypto.randomUUID();
+    const hash = (p) => bcrypt.hashSync(p, 10);
+    db.prepare(`INSERT INTO users (id, username, password, full_name, role, branch_code, branch_name, bc_customer_no, can_order)
+      VALUES (?,?,?,?,?,?,?,?,?)`).run(uid(), 'itmanager', hash('it1234'), 'IT Manager', 'super_admin', '', 'HQ', '', 0);
+    console.log('[db] Seeded super_admin: itmanager/it1234 (IT Manager) — เปลี่ยนรหัสหลัง login แรก');
+  }
+} catch (e) { console.error('[db] super_admin seed failed:', e.message); }
 
 // ─── Seed mock items (ใช้ก่อนยังไม่มี BC creds) ───
 const itemCount = db.prepare('SELECT COUNT(*) c FROM items_cache').get().c;
