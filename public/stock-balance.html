@@ -102,6 +102,7 @@
           <span class="switch-mini"><input type="checkbox" id="onlyLow" onchange="filterStock()"><span class="slider"></span></span>
           🚨 เฉพาะใกล้หมด
         </label>
+        <button class="btn" onclick="openIssueModal()" style="white-space:nowrap">+ เบิกใหม่</button>
       </div>
       <div class="card" style="overflow-x:auto">
         <table class="stock-table">
@@ -138,15 +139,21 @@
   </div>
 </div>
 
-<!-- Issue create modal -->
+<!-- Issue create modal (multi-line) -->
 <div id="issueModal" class="modal-bg" onclick="if(event.target===this)closeIssueModal()">
-  <div class="modal-box">
+  <div class="modal-box" style="max-width:560px">
     <button onclick="closeIssueModal()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer">&times;</button>
     <h3>📤 เบิกสินค้าออกจากคลัง</h3>
-    <div id="issueItemMeta" class="item-meta"></div>
 
-    <label class="label">จำนวน (สูงสุดเท่าที่คงเหลือ)</label>
-    <input type="number" id="issueQty" min="0" step="0.01" value="1">
+    <label class="label">รายการที่เบิก</label>
+    <div id="issueLinesList" style="margin-bottom:10px"></div>
+
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      <select id="issueAddPicker" style="flex:1;margin-bottom:0">
+        <option value="">— เลือกสินค้าเพื่อเพิ่ม —</option>
+      </select>
+      <button class="btn ghost" onclick="addIssueLineFromPicker()" style="white-space:nowrap">+ เพิ่ม</button>
+    </div>
 
     <label class="label">เหตุผล</label>
     <select id="issueReason">
@@ -173,6 +180,17 @@
   </div>
 </div>
 
+<style>
+.issue-line{display:flex;gap:8px;align-items:center;padding:8px 10px;background:var(--beige);border-radius:8px;margin-bottom:6px;font-size:13px}
+.issue-line .meta{flex:1;min-width:0}
+.issue-line .meta .name{font-weight:600;color:var(--text);font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.issue-line .meta .sub{color:var(--muted);font-size:11px}
+.issue-line input.qty{width:64px;padding:6px;border:1px solid var(--border);border-radius:6px;background:#fff;text-align:right;font-variant-numeric:tabular-nums}
+.issue-line .rm{background:none;border:none;color:var(--err);font-size:18px;cursor:pointer;padding:2px 6px}
+.issue-line .rm:hover{color:#991b1b}
+.issue-line-empty{padding:18px;text-align:center;color:var(--muted);font-size:13px;border:1px dashed var(--border);border-radius:8px}
+</style>
+
 <script src="/js/app.js"></script>
 <script>
 if(!requireLogin()) throw '';
@@ -181,7 +199,6 @@ document.getElementById('nav').innerHTML = renderNav('stock-balance.html');
 let allItems = [];
 let grData = [];
 let issueData = [];
-let currentIssueItem = null;
 
 function switchTab(tab) {
   document.getElementById('panelStock').style.display = tab === 'stock' ? 'block' : 'none';
@@ -291,46 +308,133 @@ async function saveReorderPoint(input) {
   }
 }
 
-// ─── Issue create modal ───
+// ─── Issue create modal (multi-line) ───
+// issueLines holds the lines the user is composing in the modal. Each entry
+// snapshots the item metadata so we don't keep looking it up in allItems
+// (and so qty can be edited without mutating the cached stock data).
+let issueLines = [];
+
 function openIssueModal(item) {
-  currentIssueItem = item;
-  document.getElementById('issueItemMeta').innerHTML = `
-    <div class="name">${itemName(item)}</div>
-    <div class="stock-line">${item.item_no} | ${item.uom || ''}</div>
-    <div class="stock-line">คงเหลือ: <strong>${(item.on_hand || 0).toLocaleString()}</strong> ${item.uom || ''}</div>
-  `;
-  document.getElementById('issueQty').max = item.on_hand;
-  document.getElementById('issueQty').value = 1;
+  // Called either with no arg (from "+ เบิกใหม่" button) or with an item
+  // (from per-row "เบิก" button) — in the latter case pre-populate one line.
+  issueLines = item ? [{
+    item_no: item.item_no,
+    item_name: itemName(item),
+    uom: item.uom || '',
+    on_hand: item.on_hand || 0,
+    qty: 1,
+  }] : [];
+
   document.getElementById('issueReason').value = 'sale';
   document.getElementById('issueNote').value = '';
   document.getElementById('issuePassword').value = '';
   document.getElementById('issueErr').textContent = '';
   const u = getUser();
   document.getElementById('issuerName').textContent = u ? `${u.full_name} (${u.branch_name || u.username})` : '';
+
+  renderIssueLines();
+  refreshIssueAddPicker();
   document.getElementById('issueModal').classList.add('open');
-  // Focus password (qty is pre-filled, password is the new required field)
-  setTimeout(() => document.getElementById('issueQty').focus(), 50);
 }
 
 function closeIssueModal() {
   document.getElementById('issueModal').classList.remove('open');
-  currentIssueItem = null;
+  issueLines = [];
+}
+
+function renderIssueLines() {
+  const el = document.getElementById('issueLinesList');
+  if (!issueLines.length) {
+    el.innerHTML = '<div class="issue-line-empty">ยังไม่มีรายการ — เลือกสินค้าด้านล่างเพื่อเพิ่ม</div>';
+    return;
+  }
+  el.innerHTML = issueLines.map((l, idx) => `
+    <div class="issue-line">
+      <div class="meta">
+        <div class="name">${l.item_name}</div>
+        <div class="sub">${l.item_no} · ${l.uom} · คงเหลือ ${l.on_hand}</div>
+      </div>
+      <input type="number" class="qty" min="0.01" step="0.01" max="${l.on_hand}"
+        value="${l.qty}"
+        onchange="updateIssueLineQty(${idx}, this.value)">
+      <button class="rm" onclick="removeIssueLine(${idx})" title="ลบรายการนี้">&times;</button>
+    </div>
+  `).join('');
+}
+
+function refreshIssueAddPicker() {
+  // Dropdown lists every in-stock item NOT already in issueLines.
+  const sel = document.getElementById('issueAddPicker');
+  const usedSet = new Set(issueLines.map(l => l.item_no));
+  const opts = allItems
+    .filter(i => (i.on_hand || 0) > 0 && !usedSet.has(i.item_no))
+    .map(i => `<option value="${i.item_no}">${itemName(i)} (${i.item_no} · คงเหลือ ${i.on_hand} ${i.uom||''})</option>`)
+    .join('');
+  sel.innerHTML = '<option value="">— เลือกสินค้าเพื่อเพิ่ม —</option>' + opts;
+}
+
+function addIssueLineFromPicker() {
+  const sel = document.getElementById('issueAddPicker');
+  const itemNo = sel.value;
+  if (!itemNo) return;
+  const item = allItems.find(i => i.item_no === itemNo);
+  if (!item) return;
+  issueLines.push({
+    item_no: item.item_no,
+    item_name: itemName(item),
+    uom: item.uom || '',
+    on_hand: item.on_hand || 0,
+    qty: 1,
+  });
+  renderIssueLines();
+  refreshIssueAddPicker();
+  sel.value = '';
+}
+
+function updateIssueLineQty(idx, val) {
+  const v = parseFloat(val);
+  if (!Number.isFinite(v) || v <= 0) {
+    // Reset to 1 if user typed garbage
+    issueLines[idx].qty = 1;
+    renderIssueLines();
+    return;
+  }
+  if (v > issueLines[idx].on_hand) {
+    document.getElementById('issueErr').textContent =
+      `${issueLines[idx].item_name}: เบิกได้ไม่เกินคงเหลือ (${issueLines[idx].on_hand})`;
+    issueLines[idx].qty = issueLines[idx].on_hand;
+    renderIssueLines();
+    return;
+  }
+  issueLines[idx].qty = v;
+  document.getElementById('issueErr').textContent = '';
+}
+
+function removeIssueLine(idx) {
+  issueLines.splice(idx, 1);
+  renderIssueLines();
+  refreshIssueAddPicker();
 }
 
 async function submitIssue() {
-  if (!currentIssueItem) return;
-  const qty = parseFloat(document.getElementById('issueQty').value);
+  if (!issueLines.length) {
+    document.getElementById('issueErr').textContent = 'ต้องเพิ่มรายการที่จะเบิกอย่างน้อย 1 รายการ';
+    return;
+  }
   const reason = document.getElementById('issueReason').value;
   const note = document.getElementById('issueNote').value.trim();
   const password = document.getElementById('issuePassword').value;
 
-  if (!Number.isFinite(qty) || qty <= 0) {
-    document.getElementById('issueErr').textContent = 'จำนวนต้องมากกว่า 0';
-    return;
-  }
-  if (qty > currentIssueItem.on_hand) {
-    document.getElementById('issueErr').textContent = `เบิกได้ไม่เกินคงเหลือ (${currentIssueItem.on_hand})`;
-    return;
+  // Defensive client-side check (server validates again with bcrypt)
+  for (const l of issueLines) {
+    if (!Number.isFinite(l.qty) || l.qty <= 0) {
+      document.getElementById('issueErr').textContent = `${l.item_name}: จำนวนต้องมากกว่า 0`;
+      return;
+    }
+    if (l.qty > l.on_hand) {
+      document.getElementById('issueErr').textContent = `${l.item_name}: เบิกได้ไม่เกินคงเหลือ (${l.on_hand})`;
+      return;
+    }
   }
   if (!password) {
     document.getElementById('issueErr').textContent = 'ต้องใส่รหัสผ่านยืนยันก่อนเบิก';
@@ -345,7 +449,12 @@ async function submitIssue() {
   try {
     const res = await api('/api/stock/issue', {
       method: 'POST',
-      body: JSON.stringify({ reason, note, password, lines: [{ item_no: currentIssueItem.item_no, qty, note }] }),
+      body: JSON.stringify({
+        reason,
+        note,
+        password,
+        lines: issueLines.map(l => ({ item_no: l.item_no, qty: l.qty })),
+      }),
     });
     toast(res.message || 'เบิกสำเร็จ');
     closeIssueModal();
@@ -353,7 +462,6 @@ async function submitIssue() {
     await loadIssues();
   } catch (e) {
     document.getElementById('issueErr').textContent = e.message;
-    // If password wrong, refocus password field so user can retry without redoing qty
     if (/รหัสผ่าน/.test(e.message)) {
       document.getElementById('issuePassword').value = '';
       document.getElementById('issuePassword').focus();
