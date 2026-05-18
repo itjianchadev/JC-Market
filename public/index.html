@@ -50,6 +50,16 @@
   .item-table thead th,.item-table tbody td{padding:6px 4px;font-size:12px}
   .stock-badge{padding:2px 6px;font-size:11px}
 }
+/* iOS-style switch for the "hide out-of-stock" toggle in the search bar */
+.switch{position:relative;display:inline-block;width:40px;height:22px;flex-shrink:0}
+.switch input{opacity:0;width:0;height:0}
+.switch .slider{position:absolute;cursor:pointer;inset:0;background:#ccc;transition:.25s;border-radius:22px}
+.switch .slider:before{position:absolute;content:"";height:16px;width:16px;left:3px;bottom:3px;background:#fff;transition:.25s;border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+.switch input:checked + .slider{background:var(--gold)}
+.switch input:checked + .slider:before{transform:translateX(18px)}
+.search-row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.search-row #q{flex:1;min-width:200px}
+.toggle-label{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;font-size:13px;color:var(--muted);white-space:nowrap}
 </style>
 </head><body data-i18n-title="shop.page_title">
 <div id="nav"></div>
@@ -68,7 +78,13 @@
     <!-- Main -->
     <div class="main-area">
       <div class="card" style="padding:12px">
-        <input id="q" data-i18n-placeholder="shop.search_placeholder" placeholder="ค้นหาสินค้า..." style="width:100%">
+        <div class="search-row">
+          <input id="q" data-i18n-placeholder="shop.search_placeholder" placeholder="ค้นหาสินค้า...">
+          <label class="toggle-label" title="ซ่อนสินค้าที่คงเหลือเป็น 0">
+            <span class="switch"><input type="checkbox" id="hideOos"><span class="slider"></span></span>
+            <span data-i18n="shop.hide_oos">ซ่อนสินค้าหมด</span>
+          </label>
+        </div>
       </div>
       <div style="margin:12px 0 8px;color:var(--muted);font-size:13px" id="resultInfo"></div>
       <div class="card" style="padding:0;overflow-x:auto">
@@ -199,17 +215,23 @@ function setCat(cat) {
 
 function renderItems() {
   const q = (document.getElementById('q').value || '').toLowerCase();
+  const hideOos = document.getElementById('hideOos').checked;
+  let oosHidden = 0;
   let filtered = allItems.filter(it => {
     if (activeCat && (it.category||'Other') !== activeCat) return false;
     if (q) {
       const hay = ((it.name||'') + ' ' + (it.name_en||'') + ' ' + (it.item_no||'')).toLowerCase();
       if (!hay.includes(q)) return false;
     }
+    if (hideOos && it.inventory <= 0) { oosHidden++; return false; }
     return true;
   });
-  document.getElementById('resultInfo').textContent = activeCat
+  const baseInfo = activeCat
     ? t('shop.showing_cat', { n: filtered.length, cat: catName(activeCat) })
     : t('shop.showing', { n: filtered.length });
+  document.getElementById('resultInfo').textContent = oosHidden > 0
+    ? `${baseInfo} · ${t('shop.oos_hidden', { n: oosHidden })}`
+    : baseInfo;
   const el = document.getElementById('itemBody');
   if (!filtered.length) { el.innerHTML = `<tr><td colspan="${isAdminView?7:6}" style="color:var(--muted);padding:20px;text-align:center">${t('shop.no_items')}</td></tr>`; return; }
 
@@ -374,6 +396,14 @@ window.onLangChange = () => {
 
 document.getElementById('q').oninput = () => { clearTimeout(window._t); window._t=setTimeout(renderItems,200); };
 document.getElementById('modal').onclick = (e) => { if(e.target.id==='modal') closeModal(); };
+
+// Restore "hide out-of-stock" toggle from previous session + persist on change
+document.getElementById('hideOos').checked = localStorage.getItem('shop.hideOos') === '1';
+document.getElementById('hideOos').onchange = (e) => {
+  localStorage.setItem('shop.hideOos', e.target.checked ? '1' : '0');
+  renderItems();
+};
+
 loadAll(); loadSyncInfo();
 </script>
 </body></html>
