@@ -12,7 +12,7 @@ async function syncItems() {
     if (bc.MOCK) {
       // Mock: สุ่มปรับ inventory เล็กน้อย เพื่อจำลองการ sync
       const items = db.prepare('SELECT item_no, inventory FROM items_cache').all();
-      const upd = db.prepare('UPDATE items_cache SET inventory=?, synced_at=datetime("now","localtime") WHERE item_no=?');
+      const upd = db.prepare("UPDATE items_cache SET inventory=?, synced_at=datetime('now','localtime') WHERE item_no=?");
       const tx = db.transaction(() => {
         for (const it of items) {
           const change = Math.floor(Math.random() * 5) - 1; // -1 to +3
