@@ -175,6 +175,37 @@ async function showDetail(id) {
     setTimeout(() => startCountdownTimer(), 100);
   }
 
+  // Rejected — show reason + allow re-upload (reuses the same dropPay/slipPay/payBtn IDs as 'pending')
+  if (o.payment_status === 'failed') {
+    const retry = o.slip_retry_count || 0;
+    html += `<hr style="border-color:var(--border);margin:12px 0">
+      <div style="background:#fee2e2;border-left:4px solid var(--err);padding:12px;border-radius:8px;margin-bottom:16px">
+        <div style="font-weight:700;color:var(--err);margin-bottom:6px">${t('orders.reject_title')}</div>
+        ${o.reject_reason ? `<div style="font-size:14px;margin-bottom:4px">${o.reject_reason}</div>` : ''}
+        <div style="font-size:12px;color:var(--muted)">
+          ${o.rejected_at ? `${t('orders.rejected_at')}: ${o.rejected_at}` : ''}
+          ${o.rejected_by_name ? ` · ${t('orders.rejected_by')}: ${o.rejected_by_name}` : ''}
+          ${retry > 0 ? ` · ${t('orders.retry_count', { n: retry })}` : ''}
+        </div>
+      </div>
+      <h4 style="margin-bottom:12px">${t('orders.reupload_title')}</h4>
+      <div style="text-align:center;margin-bottom:16px">
+        <div style="font-size:24px;font-weight:700;color:var(--gold);margin-bottom:8px">฿${o.total.toLocaleString()}</div>
+        <img id="payQr_${o.id}" src="" style="max-width:240px;border-radius:12px;background:#fff;padding:10px;display:none">
+        <p style="font-size:12px;color:var(--muted);margin-top:8px">${t('orders.scan_qr')}</p>
+      </div>
+      <div style="border:2px dashed var(--border);border-radius:12px;padding:20px;text-align:center;cursor:pointer" id="dropPay_${o.id}" onclick="document.getElementById('slipPay_${o.id}').click()">
+        <input type="file" id="slipPay_${o.id}" accept="image/*,.pdf" style="display:none" onchange="previewPaySlip('${o.id}',this)">
+        <p style="color:var(--muted)">${t('orders.upload_click')}</p>
+        <p style="font-size:12px;color:var(--muted)">${t('orders.upload_types')}</p>
+      </div>
+      <img id="slipPrev_${o.id}" style="max-width:200px;border-radius:8px;margin:12px auto;display:none">
+      <button class="btn" style="width:100%;margin-top:12px" id="payBtn_${o.id}" onclick="submitPaySlip('${o.id}')" disabled>${t('orders.send_slip')}</button>
+      <div class="err" id="payErr_${o.id}"></div>
+      <button class="btn ghost" style="width:100%;margin-top:8px;color:var(--err);border-color:var(--err)" onclick="cancelOrder('${o.id}')">${t('orders.cancel_order')}</button>`;
+    loadPayQR(o.id);
+  }
+
   // Cancelled order info
   if (o.payment_status === 'cancelled') {
     html += `<hr style="border-color:var(--border);margin:12px 0">
@@ -187,8 +218,8 @@ async function showDetail(id) {
       <button class="btn" style="width:100%;margin-top:12px;background:var(--gold)" onclick="reorder('${o.id}')">${t('orders.reorder')}</button>`;
   }
 
-  // Slip (already uploaded)
-  if (o.payment && o.payment.slip_path) {
+  // Slip (already uploaded) — suppress for 'failed' since the re-upload UI is the primary action
+  if (o.payment && o.payment.slip_path && o.payment_status !== 'failed') {
     html += `<hr style="border-color:var(--border);margin:12px 0"><h4>${t('orders.slip')}</h4>
       <img src="${o.payment.slip_path}" style="max-width:280px;border-radius:8px;margin-top:8px">`;
     if (o.payment.verified) html += `<p style="color:var(--ok);font-size:13px;margin-top:4px">${t('orders.verified_at', { at: o.payment.verified_at })}</p>`;
@@ -319,7 +350,7 @@ async function submitPaySlip(id) {
     });
     const j = await r.json();
     if (!r.ok) throw new Error(j.error);
-    toast(j.auto_verified ? t('orders.auto_ok') : t('orders.pending_review'));
+    toast(t('orders.pending_review'));
     closeDetail();
     load();
   } catch (e) {

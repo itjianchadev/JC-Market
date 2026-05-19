@@ -235,6 +235,8 @@ try { db.exec("ALTER TABLE payments ADD COLUMN auto_verify_reason TEXT DEFAULT '
 try { db.exec("ALTER TABLE orders ADD COLUMN reject_reason TEXT DEFAULT ''"); } catch (e) {}
 try { db.exec("ALTER TABLE orders ADD COLUMN rejected_at TEXT"); } catch (e) {}
 try { db.exec("ALTER TABLE orders ADD COLUMN rejected_by TEXT DEFAULT ''"); } catch (e) {}
+// How many times FC has re-uploaded a slip after a Finance rejection. 0 = original upload.
+try { db.exec("ALTER TABLE orders ADD COLUMN slip_retry_count INTEGER DEFAULT 0"); } catch (e) {}
 
 // ─── Migrate: cancel fields ───
 try { db.exec("ALTER TABLE orders ADD COLUMN cancelled_at TEXT"); } catch (e) {}

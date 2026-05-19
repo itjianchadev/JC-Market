@@ -207,7 +207,10 @@ async function renderPending() {
     return `
       <tr>
         <td style="white-space:nowrap;color:var(--muted)">${o.created_at}</td>
-        <td><strong>${o.order_number}</strong></td>
+        <td>
+          <strong>${o.order_number}</strong>
+          ${(o.slip_retry_count || 0) > 0 ? `<div style="display:inline-block;margin-left:6px;padding:2px 8px;border-radius:10px;background:#fef3c7;color:#92400e;font-size:11px;font-weight:600">🔁 อัปโหลดใหม่ #${o.slip_retry_count}</div>` : ''}
+        </td>
         <td>${o.branch_name || o.user_name || '-'}</td>
         <td style="font-weight:700;color:var(--gold-dark)">฿${o.total.toLocaleString()}</td>
         <td>${slipPath
