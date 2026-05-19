@@ -943,9 +943,12 @@ async function postPOToBC(orderId, vendorNo) {
   if (!lines.length) throw new Error('Order has no lines');
 
   // 1. Create Purchase Order (draft)
+  // Note: BC's purchaseOrder type does NOT accept externalDocumentNumber
+  // (it's a salesOrder-only property). Our local order_number → bc_po_no
+  // mapping lives in the orders table, so the cross-ref doesn't need to
+  // be pushed into BC.
   const po = await bc.createPurchaseOrder({
     vendorNumber: vendorNo,
-    externalDocumentNumber: order.order_number,
   });
   const poId = po.id;
   const poNo = po.number || '';
@@ -963,8 +966,10 @@ async function postPOToBC(orderId, vendorNo) {
     });
   }
 
-  db.prepare("UPDATE orders SET bc_po_id=?, bc_po_no=?, po_vendor_no=? WHERE id=?")
-    .run(poId, poNo, vendorNo, orderId);
+  // Clear any stale [PO]-prefixed sync error from a previous failed attempt.
+  const clearErr = (order.bc_sync_error || '').startsWith('[PO]') ? '' : (order.bc_sync_error || '');
+  db.prepare("UPDATE orders SET bc_po_id=?, bc_po_no=?, po_vendor_no=?, bc_sync_error=? WHERE id=?")
+    .run(poId, poNo, vendorNo, clearErr, orderId);
 
   db.prepare('INSERT INTO sync_log (kind, status, message, count) VALUES (?,?,?,?)')
     .run('purchase_order', 'ok', `Created PO ${poNo} for ${order.order_number} (vendor ${vendorNo})`, 1);
