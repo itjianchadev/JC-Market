@@ -15,7 +15,7 @@ const I18N = {
     'nav.shop':'🛒 ร้านค้า','nav.cart':'🧺 ตะกร้า','nav.orders':'📋 คำสั่งซื้อ',
     'nav.stock':'📊 Stock','nav.admin':'⚙️ Admin','nav.logout':'ออกจากระบบ',
     'nav.team':'👥 จัดการผู้ใช้',
-    'nav.pending_approvals':'⏳ รายการต้องอนุมัติ','nav.approved_list':'✅ รายการที่อนุมัติแล้ว',
+    'nav.pending_approvals':'⏳ รายการต้องอนุมัติ','nav.approved_list':'✅ รายการที่อนุมัติแล้ว','nav.rejected_list':'❌ ปฏิเสธ',
     // Common
     'common.loading':'กำลังโหลด...','common.close':'ปิด','common.confirm':'ยืนยัน','common.cancel':'ยกเลิก',
     'common.search':'ค้นหา','common.note':'หมายเหตุ','common.no_data':'ยังไม่มีข้อมูล','common.all':'ทั้งหมด',
@@ -210,7 +210,7 @@ const I18N = {
     'nav.shop':'🛒 Shop','nav.cart':'🧺 Cart','nav.orders':'📋 Orders',
     'nav.stock':'📊 Stock','nav.admin':'⚙️ Admin','nav.logout':'Logout',
     'nav.team':'👥 Users',
-    'nav.pending_approvals':'⏳ Pending Approval','nav.approved_list':'✅ Approved',
+    'nav.pending_approvals':'⏳ Pending Approval','nav.approved_list':'✅ Approved','nav.rejected_list':'❌ Rejected',
     // Common
     'common.loading':'Loading...','common.close':'Close','common.confirm':'Confirm','common.cancel':'Cancel',
     'common.search':'Search','common.note':'Note','common.no_data':'No data','common.all':'All',
@@ -542,12 +542,12 @@ function renderNav(active) {
   const isFinance = u.role === 'finance';
   const links = [];
   if (isFinance) {
-    // Finance is a focused role: only the two approval queues + an order
-    // browser for reference. They don't shop and they don't manage users,
-    // so those links are deliberately omitted.
-    links.push(['orders.html','nav.orders']);
+    // Finance is a focused role — just the three approval queues. They
+    // don't shop, manage users, or browse the full orders list, so those
+    // links are deliberately omitted.
     links.push(['approvals.html?tab=pending','nav.pending_approvals']);
     links.push(['approvals.html?tab=approved','nav.approved_list']);
+    links.push(['approvals.html?tab=rejected','nav.rejected_list']);
   } else if (isHq) {
     // super_admin / admin_scm — full HQ visibility minus the cart/stock flow
     links.push(['index.html','nav.shop']);

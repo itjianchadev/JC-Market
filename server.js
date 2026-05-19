@@ -555,12 +555,20 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
 app.get('/api/orders', requireAuth, (req, res) => {
   let sql, params;
   if (isHqAdmin(req.user)) {
-    sql = `SELECT o.*, u.full_name as user_name, u.branch_name
-           FROM orders o LEFT JOIN users u ON u.id=o.user_id ORDER BY o.created_at DESC`;
+    sql = `SELECT o.*, u.full_name as user_name, u.branch_name,
+                  rb.full_name as rejected_by_name
+           FROM orders o
+           LEFT JOIN users u  ON u.id=o.user_id
+           LEFT JOIN users rb ON rb.id=o.rejected_by
+           ORDER BY o.created_at DESC`;
     params = [];
   } else {
-    sql = `SELECT o.*, u.full_name as user_name, u.branch_name
-           FROM orders o LEFT JOIN users u ON u.id=o.user_id WHERE o.user_id=? ORDER BY o.created_at DESC`;
+    sql = `SELECT o.*, u.full_name as user_name, u.branch_name,
+                  rb.full_name as rejected_by_name
+           FROM orders o
+           LEFT JOIN users u  ON u.id=o.user_id
+           LEFT JOIN users rb ON rb.id=o.rejected_by
+           WHERE o.user_id=? ORDER BY o.created_at DESC`;
     params = [req.user.id];
   }
   res.json(db.prepare(sql).all(...params));

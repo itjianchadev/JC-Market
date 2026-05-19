@@ -47,6 +47,9 @@
     <button class="tab-btn" data-tab="approved" onclick="switchTab('approved')">
       ✅ อนุมัติแล้ว <span class="count" id="approvedCount">0</span>
     </button>
+    <button class="tab-btn" data-tab="rejected" onclick="switchTab('rejected')">
+      ❌ ปฏิเสธ <span class="count" id="rejectedCount">0</span>
+    </button>
   </div>
 
   <!-- Pending panel -->
@@ -89,6 +92,26 @@
       </table>
     </div>
   </div>
+
+  <!-- Rejected panel -->
+  <div id="panelRejected" style="display:none">
+    <div class="card" style="padding:0;overflow-x:auto">
+      <table class="appr-table">
+        <thead>
+          <tr>
+            <th>วันที่ปฏิเสธ</th>
+            <th>คำสั่งซื้อ</th>
+            <th>สาขา</th>
+            <th>ยอด</th>
+            <th style="min-width:220px">เหตุผล</th>
+            <th>ผู้ปฏิเสธ</th>
+            <th>สลิป</th>
+          </tr>
+        </thead>
+        <tbody id="rejectedBody"><tr><td colspan="7" class="empty">กำลังโหลด...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
 </div>
 
 <!-- Lightbox for slip thumbnails -->
@@ -128,10 +151,12 @@ document.getElementById('nav').innerHTML = renderNav('approvals.html');
 
 let pendingData = [];
 let approvedData = [];
+let rejectedData = [];
 
 function switchTab(tab) {
   document.getElementById('panelPending').style.display  = tab === 'pending'  ? 'block' : 'none';
   document.getElementById('panelApproved').style.display = tab === 'approved' ? 'block' : 'none';
+  document.getElementById('panelRejected').style.display = tab === 'rejected' ? 'block' : 'none';
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   // Reflect in URL so a refresh keeps you on the same tab
   const url = new URL(location.href);
@@ -144,10 +169,13 @@ async function load() {
     const orders = await api('/api/orders');
     pendingData  = orders.filter(o => o.payment_status === 'paid');
     approvedData = orders.filter(o => o.payment_status === 'verified');
+    rejectedData = orders.filter(o => o.payment_status === 'failed');
     document.getElementById('pendingCount').textContent  = pendingData.length;
     document.getElementById('approvedCount').textContent = approvedData.length;
+    document.getElementById('rejectedCount').textContent = rejectedData.length;
     renderPending();
     renderApproved();
+    renderRejected();
   } catch (e) {
     toast('โหลดไม่สำเร็จ: ' + e.message);
   }
@@ -213,6 +241,34 @@ function renderApproved() {
       <td><a href="/orders.html?id=${o.id}" style="font-size:11px;color:var(--gold-dark);text-decoration:underline">ดูรายละเอียด</a></td>
     </tr>
   `).join('');
+}
+
+async function renderRejected() {
+  const el = document.getElementById('rejectedBody');
+  if (!rejectedData.length) {
+    el.innerHTML = `<tr><td colspan="7" class="empty"><p>📪</p>ยังไม่มีรายการที่ปฏิเสธ</td></tr>`;
+    return;
+  }
+  // Fetch details in parallel so we can pull slip_path + rejected_by_name
+  const details = await Promise.all(rejectedData.slice(0, 100).map(o => api('/api/orders/'+o.id).catch(() => null)));
+
+  el.innerHTML = rejectedData.slice(0, 100).map((o, idx) => {
+    const det = details[idx] || {};
+    const slipPath = (det.payment || {}).slip_path || '';
+    return `
+      <tr>
+        <td style="white-space:nowrap;color:var(--muted)">${o.rejected_at || '-'}</td>
+        <td><strong>${o.order_number}</strong></td>
+        <td>${o.branch_name || o.user_name || '-'}</td>
+        <td style="font-weight:700;color:var(--gold-dark)">฿${o.total.toLocaleString()}</td>
+        <td style="color:#c62828;font-size:13px;max-width:260px">${o.reject_reason || '<span style="color:var(--muted)">(ไม่ระบุ)</span>'}</td>
+        <td style="font-size:12px">${o.rejected_by_name || det.rejected_by_name || '-'}</td>
+        <td>${slipPath
+          ? `<img src="${slipPath}" class="slip-thumb" onclick="openLightbox('${slipPath}')">`
+          : '<span style="color:var(--muted);font-size:11px">—</span>'}</td>
+      </tr>
+    `;
+  }).join('');
 }
 
 async function approveOrder(id, btn) {
