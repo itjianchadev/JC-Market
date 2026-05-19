@@ -188,7 +188,7 @@ const I18N = {
     'users.can_order':'สั่งซื้อได้','users.active':'เปิดใช้งาน','users.actions':'จัดการ',
     'users.filter_all':'ทุกสาขา','users.reset_pwd':'รีเซ็ต Password',
     'users.deactivate':'ปิด user','users.confirm_deactivate':'ปิด user นี้?',
-    'role.super_admin':'Super Admin','role.admin_scm':'SCM Admin',
+    'role.super_admin':'Super Admin','role.admin_scm':'SCM Admin','role.finance':'Finance',
     'role.branch_owner':'Branch Owner','role.store_manager':'Store Manager',
     'role.cashier':'แคชเชียร์','role.stock':'พนักงานสต๊อก','role.staff':'พนักงาน','role.fc':'สมาชิกสาขา',
     // legacy aliases (เผื่อข้อมูลเก่า)
@@ -381,7 +381,7 @@ const I18N = {
     'users.can_order':'Can Order','users.active':'Active','users.actions':'Actions',
     'users.filter_all':'All branches','users.reset_pwd':'Reset Password',
     'users.deactivate':'Deactivate','users.confirm_deactivate':'Deactivate this user?',
-    'role.super_admin':'Super Admin','role.admin_scm':'SCM Admin',
+    'role.super_admin':'Super Admin','role.admin_scm':'SCM Admin','role.finance':'Finance',
     'role.branch_owner':'Branch Owner','role.store_manager':'Store Manager',
     'role.cashier':'Cashier','role.stock':'Stock Keeper','role.staff':'Staff','role.fc':'Member',
     // legacy aliases

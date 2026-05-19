@@ -224,6 +224,12 @@ try { db.exec("ALTER TABLE branches ADD COLUMN license_key TEXT DEFAULT ''"); } 
 try { db.exec("ALTER TABLE branches ADD COLUMN license_issued_at TEXT"); } catch (e) {}
 try { db.exec("ALTER TABLE branches ADD COLUMN license_expires_at TEXT"); } catch (e) {}
 
+// ─── Strict-mode Finance gate: record SlipOK auto-verify outcome on the
+// payment but DON'T let it auto-promote the order. Finance review (via
+// /api/orders/:id/verify) is now the single approval channel.
+try { db.exec("ALTER TABLE payments ADD COLUMN auto_verify_passed INTEGER DEFAULT 0"); } catch (e) {}
+try { db.exec("ALTER TABLE payments ADD COLUMN auto_verify_reason TEXT DEFAULT ''"); } catch (e) {}
+
 // ─── Migrate: cancel fields ───
 try { db.exec("ALTER TABLE orders ADD COLUMN cancelled_at TEXT"); } catch (e) {}
 try { db.exec("ALTER TABLE orders ADD COLUMN cancelled_by TEXT DEFAULT ''"); } catch (e) {}
@@ -336,16 +342,14 @@ if (userCount === 0) {
   const hash = (p) => bcrypt.hashSync(p, 10);
   const stmt = db.prepare(`INSERT INTO users (id, username, password, full_name, role, branch_code, branch_name, bc_customer_no, can_order)
     VALUES (?,?,?,?,?,?,?,?,?)`);
-  // can_order: admins don't place orders (they manage), fc branches DO
-  // bc_customer_no values JF001/JF002 are the real customers in the
-  // Jiancha_develop BC environment. The two seeded branch users are
-  // branch_owner so they can manage their own branch team out of the box
-  // (add cashier / stock / staff under themselves via team.html).
+  // can_order: admins don't place orders, fc branches DO. Finance is HQ —
+  // approves slips so BC SO creation is gated by them.
   stmt.run(uid(), 'itmanager', hash('it1234'), 'IT Manager', 'super_admin', '', 'HQ', '', 0);
   stmt.run(uid(), 'admin', hash('admin1234'), 'SCM Admin', 'admin_scm', '', 'HQ', '', 0);
+  stmt.run(uid(), 'finance', hash('fin1234'), 'Finance Officer', 'finance', '', 'HQ', '', 0);
   stmt.run(uid(), 'jf039', hash('fc1234'), 'Owner JF039', 'branch_owner', 'JF039', 'สาขา JF039', 'JF001', 1);
   stmt.run(uid(), 'jf049', hash('fc1234'), 'Owner JF049', 'branch_owner', 'JF049', 'สาขา JF049', 'JF002', 1);
-  console.log('[db] Seeded users: itmanager/it1234 (super_admin), admin/admin1234 (admin_scm), jf039/jf049 (branch_owner)');
+  console.log('[db] Seeded users: itmanager/it1234 (super_admin), admin/admin1234 (admin_scm), finance/fin1234 (finance), jf039/jf049 (branch_owner)');
 }
 
 // ─── Seed super_admin "IT Manager" ถ้ายังไม่มี ───

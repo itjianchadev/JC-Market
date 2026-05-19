@@ -512,20 +512,20 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
   });
   tx();
 
-  // Create Sales Order in BC → get VAT from BC
-  let bcResult = null;
-  let vatAmount = 0;
-  let total = subtotal;
-  try {
-    bcResult = await postOrderToBC(orderId);
-    vatAmount = bcResult.vat_amount || 0;
-    total = bcResult.total_incl_vat || subtotal;
-  } catch (e) {
-    console.error('[BC Checkout]', e.message);
-    bcResult = { error: e.message };
-  }
+  // Local VAT calculation — Thai standard 7%. BC is NOT contacted at
+  // checkout anymore; postOrderToBC() is deferred until Finance approves
+  // the slip. This prevents orphan BC SOs from customers who cancel before
+  // paying and gives Finance the gatekeeper role they need for audit.
+  const vatRate = 0.07;
+  const vatAmount = Math.round(subtotal * vatRate * 100) / 100;
+  const total = Math.round((subtotal + vatAmount) * 100) / 100;
 
-  // Generate PromptPay QR with BC-calculated total
+  // Persist totals so QR / cart / receipt match what BC will later compute
+  // (BC uses the same 7% standard for these customers, so the figure tracks).
+  db.prepare('UPDATE orders SET vat_amount=?, total=? WHERE id=?').run(vatAmount, total, orderId);
+  db.prepare('UPDATE payments SET amount=? WHERE order_id=?').run(total, orderId);
+
+  // Generate PromptPay QR with locally-computed total
   let qrDataUrl = '';
   try {
     qrDataUrl = await generateQR(total);
@@ -536,23 +536,18 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
   // Grab created_at (set by SQLite DEFAULT) so client can sync countdown with server time
   const createdRow = db.prepare('SELECT created_at FROM orders WHERE id=?').get(orderId);
 
-  // postOrderToBC may have rewritten order_number to match the BC SO No. — read the
-  // canonical value back so the response (and any toast/redirect built from it)
-  // shows the same identifier as both the DB and BC.
-  const finalOrderNumber = (bcResult && bcResult.order_number) || orderNumber;
-
   res.json({
     ok: true,
     order_id: orderId,
-    order_number: finalOrderNumber,
+    order_number: orderNumber,
     subtotal,
     vat_amount: vatAmount,
     total,
-    bc_so: bcResult,
+    bc_so: null, // not created yet — finance approval will trigger
     qr_data_url: qrDataUrl,
     created_at: createdRow ? createdRow.created_at : null,
     cancel_timeout_min: 30,
-    message: `สร้างคำสั่งซื้อ ${finalOrderNumber} สำเร็จ`,
+    message: `สร้างคำสั่งซื้อ ${orderNumber} สำเร็จ — โอนชำระเงินและส่งสลิปเพื่อให้ Finance ตรวจสอบ`,
   });
 });
 
@@ -652,49 +647,40 @@ app.post('/api/orders/:id/slip', requireAuth, upload.single('slip'), async (req,
     } catch (e) { /* audit log failure should not break flow */ }
   }
 
-  if (result.verified) {
-    // Auto-approved!
-    db.prepare(`
-      UPDATE payments SET
-        slip_path=?, qr_ref=?, slip_hash=?, trans_date=?, slip_sender=?, slip_receiver=?, slip_amount=?, upload_ip=?,
-        verified=1, verified_by='auto', verified_at=datetime('now','localtime')
-      WHERE order_id=?
-    `).run(
-      slipPath, result.ref || '', result.slip_hash || '', result.transDate || '',
-      result.sender || '', result.receiver || '', result.amount || 0, clientIp, order.id
-    );
-    db.prepare("UPDATE orders SET payment_status='verified', paid_at=datetime('now','localtime') WHERE id=?").run(order.id);
+  // Strict-mode Finance gate: SlipOK auto-verify is INFORMATIONAL only.
+  // The payment is NEVER auto-promoted to 'verified' anymore — Finance must
+  // explicitly approve via /api/orders/:id/verify before the BC SO is
+  // created. The auto-verify result is saved so Finance has a quick
+  // "PASS / FAIL" hint when reviewing.
+  db.prepare(`
+    UPDATE payments SET
+      slip_path=?, qr_ref=?, slip_hash=?, trans_date=?, slip_sender=?, slip_receiver=?, slip_amount=?, upload_ip=?,
+      auto_verify_passed=?, auto_verify_reason=?, verified=0
+    WHERE order_id=?
+  `).run(
+    slipPath,
+    result.ref || '', result.slip_hash || '', result.transDate || '',
+    result.sender || '', result.receiver || '', result.amount || 0, clientIp,
+    result.verified ? 1 : 0, result.reason || '',
+    order.id
+  );
+  db.prepare("UPDATE orders SET payment_status='paid', paid_at=datetime('now','localtime') WHERE id=?").run(order.id);
 
-    res.json({
-      ok: true,
-      auto_verified: true,
-      slip_path: slipPath,
-      verify_result: {
-        amount: result.amount,
-        sender: result.sender,
-        receiver: result.receiver,
-        ref: result.ref,
-        reason: result.reason,
-      },
-      message: 'ตรวจสอบสลิปอัตโนมัติผ่าน! คำสั่งซื้ออนุมัติแล้ว',
-    });
-  } else {
-    // Failed auto-verify → manual review (still save metadata we have)
-    db.prepare(`
-      UPDATE payments SET
-        slip_path=?, slip_hash=?, slip_amount=?, upload_ip=?
-      WHERE order_id=?
-    `).run(slipPath, result.slip_hash || '', result.amount || 0, clientIp, order.id);
-    db.prepare("UPDATE orders SET payment_status='paid', paid_at=datetime('now','localtime') WHERE id=?").run(order.id);
-
-    res.json({
-      ok: true,
-      auto_verified: false,
-      slip_path: slipPath,
-      verify_result: { reason: result.reason },
-      message: 'อัพโหลดสลิปสำเร็จ ตรวจอัตโนมัติไม่ผ่าน — รอ Admin ตรวจสอบ',
-    });
-  }
+  res.json({
+    ok: true,
+    auto_verified: result.verified, // hint for the Finance reviewer
+    slip_path: slipPath,
+    verify_result: {
+      amount: result.amount,
+      sender: result.sender,
+      receiver: result.receiver,
+      ref: result.ref,
+      reason: result.reason,
+    },
+    message: result.verified
+      ? 'อัพโหลดสลิปสำเร็จ · ตรวจอัตโนมัติผ่าน → รอ Finance อนุมัติ'
+      : 'อัพโหลดสลิปสำเร็จ · ตรวจอัตโนมัติไม่ผ่าน → รอ Finance ตรวจสอบ',
+  });
 });
 
 // ─── Receipt number generator ───
@@ -706,7 +692,15 @@ function genReceiptNumber() {
   return prefix + String(seq).padStart(4, '0');
 }
 
-// ─── Orders: Admin verify payment ───
+// ─── Orders: Finance / Admin verify payment ───
+// Allowed roles: super_admin, admin_scm, finance (all in HQ_ROLES so the
+// requireAdmin middleware catches them). On 'approve' we:
+//   1. Flip payment_status to 'verified' + record verifier
+//   2. Issue an internal receipt number
+//   3. Create the BC Sales Order (postOrderToBC) — this is the moment BC
+//      first learns about this transaction. If BC sync fails we still keep
+//      the local approval and surface the error to admin for retry; never
+//      block Finance approval just because BC is unreachable.
 app.post('/api/orders/:id/verify', requireAuth, requireAdmin, async (req, res) => {
   const { action } = req.body; // 'approve' or 'reject'
   const order = db.prepare('SELECT * FROM orders WHERE id=?').get(req.params.id);
@@ -725,8 +719,6 @@ app.post('/api/orders/:id/verify', requireAuth, requireAdmin, async (req, res) =
       });
       tx();
     } catch (e) {
-      // Anti-fraud: same slip can't verify two orders. Surface a clear message
-      // instead of letting the unique-index error crash the process.
       if (String(e.message || '').includes('payments.slip_hash')) {
         return res.status(400).json({ error: 'สลิปนี้ถูกใช้กับคำสั่งซื้ออื่นที่อนุมัติไปแล้ว — ไม่สามารถอนุมัติซ้ำได้' });
       }
@@ -737,7 +729,31 @@ app.post('/api/orders/:id/verify', requireAuth, requireAdmin, async (req, res) =
       return res.status(500).json({ error: 'อนุมัติไม่สำเร็จ: ' + e.message });
     }
 
-    res.json({ ok: true, receipt_number: rcptNo, message: `อนุมัติการชำระเงินแล้ว — ออกใบเสร็จ ${rcptNo}` });
+    // BC SO creation — runs AFTER local approval so the customer is locked
+    // in regardless of BC availability. If it fails, bc_sync_error is set
+    // and the admin "Retry BC" button on the dashboard can re-attempt.
+    let bcResult = null;
+    if (!order.bc_so_id) {
+      try {
+        bcResult = await postOrderToBC(order.id);
+      } catch (e) {
+        console.error('[verify approve → BC]', e.message);
+        db.prepare("UPDATE orders SET bc_sync_error=? WHERE id=?").run(e.message, order.id);
+        bcResult = { ok: false, error: e.message };
+      }
+    } else {
+      bcResult = { already: true, bc_so_no: order.bc_so_no };
+    }
+
+    const bcMsg = bcResult && bcResult.bc_so_no
+      ? ` · BC SO ${bcResult.bc_so_no}`
+      : bcResult && bcResult.error ? ` · BC sync ค้าง (retry ได้)` : '';
+    res.json({
+      ok: true,
+      receipt_number: rcptNo,
+      bc_so: bcResult,
+      message: `อนุมัติการชำระเงิน · ออกใบเสร็จ ${rcptNo}${bcMsg}`,
+    });
   } else if (action === 'reject') {
     db.prepare("UPDATE orders SET payment_status='failed' WHERE id=?").run(order.id);
     res.json({ ok: true, message: 'ปฏิเสธการชำระเงิน' });
