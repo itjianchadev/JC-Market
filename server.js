@@ -775,14 +775,30 @@ app.post('/api/orders/:id/verify', requireAuth, requireAdmin, async (req, res) =
       bcResult = { already: true, bc_so_no: order.bc_so_no };
     }
 
-    const bcMsg = bcResult && bcResult.bc_so_no
-      ? ` · BC SO ${bcResult.bc_so_no}`
-      : bcResult && bcResult.error ? ` · BC sync ค้าง (retry ได้)` : '';
+    // BC PO creation — only if SO succeeded AND BC_DEFAULT_VENDOR_NO is set.
+    // PO failures are non-fatal and never block approval; admin can retry
+    // from the Approvals "Approved" tab via the "สร้าง PO" button.
+    let bcPoResult = null;
+    const defaultVendor = (process.env.BC_DEFAULT_VENDOR_NO || '').trim();
+    if (bcResult && bcResult.bc_so_no && !order.bc_po_no && defaultVendor) {
+      try {
+        bcPoResult = await postPOToBC(order.id, defaultVendor);
+      } catch (e) {
+        console.error('[verify approve → BC PO]', e.message);
+        // Keep SO sync_error untouched; tack PO failure on with a prefix so it's distinguishable
+        db.prepare("UPDATE orders SET bc_sync_error=? WHERE id=?").run('[PO] ' + e.message, order.id);
+        bcPoResult = { ok: false, error: e.message };
+      }
+    }
+
+    const soMsg = bcResult && bcResult.bc_so_no ? ` · BC SO ${bcResult.bc_so_no}` : (bcResult && bcResult.error ? ' · BC SO ค้าง (retry ได้)' : '');
+    const poMsg = bcPoResult && bcPoResult.bc_po_no ? ` · BC PO ${bcPoResult.bc_po_no}` : (bcPoResult && bcPoResult.error ? ' · BC PO ค้าง (retry ได้)' : '');
     res.json({
       ok: true,
       receipt_number: rcptNo,
       bc_so: bcResult,
-      message: `อนุมัติการชำระเงิน · ออกใบเสร็จ ${rcptNo}${bcMsg}`,
+      bc_po: bcPoResult,
+      message: `อนุมัติการชำระเงิน · ออกใบเสร็จ ${rcptNo}${soMsg}${poMsg}`,
     });
   } else if (action === 'reject') {
     // Finance must give a reason — surfaces back to the FC + saves to the
@@ -919,7 +935,9 @@ async function postPOToBC(orderId, vendorNo) {
   if (order.payment_status !== 'verified') throw new Error('Order ยังไม่ได้อนุมัติ — ต้องอนุมัติสลิปก่อน');
   if (!order.bc_so_no) throw new Error('Order ยังไม่มี BC SO — สร้าง SO ให้สำเร็จก่อน');
   if (order.bc_po_no) return { already: true, bc_po_id: order.bc_po_id, bc_po_no: order.bc_po_no };
-  if (!vendorNo) throw new Error('ต้องระบุ vendorNo');
+  // Fallback to env default if caller didn't pass a vendor explicitly
+  vendorNo = (vendorNo || process.env.BC_DEFAULT_VENDOR_NO || '').trim();
+  if (!vendorNo) throw new Error('ไม่มี vendor — ตั้งค่า BC_DEFAULT_VENDOR_NO ใน .env ก่อน');
 
   const lines = db.prepare('SELECT * FROM order_lines WHERE order_id=?').all(orderId);
   if (!lines.length) throw new Error('Order has no lines');
@@ -1262,8 +1280,9 @@ async function postSalesInvoiceForOrder(orderId) {
 // Finance picks a vendor on the Approvals "Approved" tab and triggers this.
 // requireAdmin allows super_admin, admin_scm, finance (all in HQ_ROLES).
 app.post('/api/orders/:id/create-po', requireAuth, requireAdmin, async (req, res) => {
+  // vendor_no is optional — if omitted, postPOToBC falls back to BC_DEFAULT_VENDOR_NO.
+  // The UI just calls this with no body for the retry-after-failure case.
   const vendorNo = String(req.body.vendor_no || '').trim();
-  if (!vendorNo) return res.status(400).json({ error: 'ต้องเลือก Vendor' });
   try {
     const result = await postPOToBC(req.params.id, vendorNo);
     res.json({ ok: true, ...result, message: result.already ? `PO มีอยู่แล้ว: ${result.bc_po_no}` : `สร้าง PO สำเร็จ: ${result.bc_po_no}` });
