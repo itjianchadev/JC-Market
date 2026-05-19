@@ -962,7 +962,7 @@ async function postPOToBC(orderId, vendorNo) {
       quantity: line.quantity,
       directUnitCost: line.unit_price,
       description: line.item_name,
-      locationId: '7e4291d6-d13e-f011-be59-000d3a086703', // CTI WH
+      locationId: '814291d6-d13e-f011-be59-000d3a086703', // INTRANSIT — goods sit here until put-away to CTI
     });
   }
 
