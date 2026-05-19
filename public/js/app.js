@@ -188,7 +188,7 @@ const I18N = {
     'users.can_order':'สั่งซื้อได้','users.active':'เปิดใช้งาน','users.actions':'จัดการ',
     'users.filter_all':'ทุกสาขา','users.reset_pwd':'รีเซ็ต Password',
     'users.deactivate':'ปิด user','users.confirm_deactivate':'ปิด user นี้?',
-    'role.super_admin':'Super Admin','role.admin_scm':'SCM Admin',
+    'role.super_admin':'Super Admin','role.admin_scm':'SCM Admin','role.finance':'Finance',
     'role.branch_owner':'Branch Owner','role.store_manager':'Store Manager',
     'role.cashier':'แคชเชียร์','role.stock':'พนักงานสต๊อก','role.staff':'พนักงาน','role.fc':'สมาชิกสาขา',
     // legacy aliases (เผื่อข้อมูลเก่า)
@@ -381,7 +381,7 @@ const I18N = {
     'users.can_order':'Can Order','users.active':'Active','users.actions':'Actions',
     'users.filter_all':'All branches','users.reset_pwd':'Reset Password',
     'users.deactivate':'Deactivate','users.confirm_deactivate':'Deactivate this user?',
-    'role.super_admin':'Super Admin','role.admin_scm':'SCM Admin',
+    'role.super_admin':'Super Admin','role.admin_scm':'SCM Admin','role.finance':'Finance',
     'role.branch_owner':'Branch Owner','role.store_manager':'Store Manager',
     'role.cashier':'Cashier','role.stock':'Stock Keeper','role.staff':'Staff','role.fc':'Member',
     // legacy aliases
@@ -532,12 +532,18 @@ async function updateCartBadge() {
 function renderNav(active) {
   const u = getUser();
   if (!u) return '';
-  const HQ_ROLES = ['super_admin','admin_scm'];
+  // Keep in sync with auth.js HQ_ROLES — frontend uses this to decide which
+  // nav links to show. (finance is HQ-tier so they see admin.html and the
+  // pending-slips queue.)
+  const HQ_ROLES = ['super_admin','admin_scm','finance'];
   const isHq = HQ_ROLES.includes(u.role);
   const links = [];
-  // HQ admin (super/SCM) เห็นแค่ ร้านค้า (ดู catalog/สต๊อกจาก BC) — ไม่มี cart/orders/stock-balance
+  // HQ users see ร้านค้า (BC catalog view) but not cart/checkout/stock-balance.
+  // Branch users get the full shop flow.
   if (isHq) {
     links.push(['index.html','nav.shop']);
+    // Finance + admin_scm need to see orders to review pending slips
+    links.push(['orders.html','nav.orders']);
   } else {
     links.push(['index.html','nav.shop']);
     links.push(['cart.html','nav.cart']);

@@ -22,7 +22,9 @@ function login(username, password) {
 }
 
 // ─── Role helpers ───
-const HQ_ROLES = new Set(['super_admin', 'admin_scm']);        // HQ roles (no branch, admin-level)
+// HQ-level roles (no branch). super_admin = full ops, admin_scm = SCM dept,
+// finance = approves bank-slip transfers and gates BC SO creation.
+const HQ_ROLES = new Set(['super_admin', 'admin_scm', 'finance']);
 const ADMIN_ROLES = HQ_ROLES;                                   // กลุ่มที่ผ่าน requireAdmin
 // Branch-level role hierarchy (top → bottom):
 //   branch_owner   — manages users in own branch + everything below

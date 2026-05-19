@@ -198,7 +198,8 @@
 <script>
 if(!requireLogin()) throw '';
 const u = getUser();
-if(u.role !== 'super_admin' && u.role !== 'admin_scm'){ location.href='/index.html'; throw ''; }
+// HQ-only — keep in sync with auth.js HQ_ROLES. Finance reviews slips here.
+if(u.role !== 'super_admin' && u.role !== 'admin_scm' && u.role !== 'finance'){ location.href='/index.html'; throw ''; }
 document.getElementById('nav').innerHTML = renderNav('admin.html');
 
 let dashData = null;

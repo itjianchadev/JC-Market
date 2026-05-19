@@ -394,7 +394,7 @@ function rolesForUI() {
   // super_admin: any role
   // admin_scm:   only admin_scm (SCM dept members)
   // branch_owner: branch-level non-owner roles (manager / cashier / stock / staff / legacy fc)
-  if (isSuper) return ['super_admin','admin_scm','branch_owner','store_manager','cashier','stock','staff','fc'];
+  if (isSuper) return ['super_admin','admin_scm','finance','branch_owner','store_manager','cashier','stock','staff','fc'];
   if (me.role === 'admin_scm') return ['admin_scm'];
   return ['store_manager','cashier','stock','staff','fc'];
 }
