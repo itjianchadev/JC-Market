@@ -83,12 +83,13 @@
             <th>สาขา</th>
             <th>ยอด</th>
             <th>BC SO</th>
+            <th>BC PO</th>
             <th>BC Invoice</th>
             <th>ผู้อนุมัติ</th>
             <th>สลิป</th>
           </tr>
         </thead>
-        <tbody id="approvedBody"><tr><td colspan="8" class="empty">กำลังโหลด...</td></tr></tbody>
+        <tbody id="approvedBody"><tr><td colspan="9" class="empty">กำลังโหลด...</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -135,6 +136,27 @@
       <button id="rejConfirmBtn" style="flex:1;padding:10px;background:var(--err);color:#fff;border:none;border-radius:8px;font-weight:600;cursor:pointer" onclick="confirmReject()">ยืนยันปฏิเสธ</button>
     </div>
     <div class="err" id="rejErr" style="margin-top:8px"></div>
+  </div>
+</div>
+
+<!-- Create PO modal — Finance picks vendor for an approved order -->
+<div id="poModal" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1001;display:none;align-items:center;justify-content:center;padding:20px">
+  <div style="background:var(--card);border:1px solid var(--border);border-radius:14px;padding:22px;max-width:480px;width:100%;position:relative">
+    <button onclick="closeCreatePOModal()" style="position:absolute;top:10px;right:14px;background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer">&times;</button>
+    <h3 style="margin-bottom:6px;color:var(--gold-dark)">🛒 สร้าง Purchase Order</h3>
+    <p style="color:var(--muted);font-size:13px;margin-bottom:14px">คำสั่งซื้อ <strong id="poOrderNum" style="color:var(--text)"></strong></p>
+
+    <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px">เลือก Vendor <span style="color:var(--err)">*</span></label>
+    <select id="poVendor" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-family:inherit;font-size:14px">
+      <option value="">กำลังโหลด vendors จาก BC...</option>
+    </select>
+    <p style="font-size:11px;color:var(--muted);margin-top:6px">PO line จะใช้ราคาขาย (เหมือน SO) · location: CTI WH</p>
+
+    <div style="display:flex;gap:10px;margin-top:14px">
+      <button class="btn ghost" onclick="closeCreatePOModal()" style="flex:1">ยกเลิก</button>
+      <button id="poConfirmBtn" style="flex:1;padding:10px;background:var(--gold-dark);color:#fff;border:none;border-radius:8px;font-weight:600;cursor:pointer" onclick="confirmCreatePO()">สร้าง PO</button>
+    </div>
+    <div class="err" id="poErr" style="margin-top:8px"></div>
   </div>
 </div>
 
@@ -229,21 +251,31 @@ async function renderPending() {
 function renderApproved() {
   const el = document.getElementById('approvedBody');
   if (!approvedData.length) {
-    el.innerHTML = `<tr><td colspan="8" class="empty"><p>📋</p>ยังไม่มีรายการที่อนุมัติ</td></tr>`;
+    el.innerHTML = `<tr><td colspan="9" class="empty"><p>📋</p>ยังไม่มีรายการที่อนุมัติ</td></tr>`;
     return;
   }
-  el.innerHTML = approvedData.slice(0, 100).map(o => `
+  el.innerHTML = approvedData.slice(0, 100).map(o => {
+    // PO cell: show number if created, otherwise "สร้าง PO" button.
+    // Disabled when there's no BC SO yet (BC sync error path) — must have SO first.
+    const poCell = o.bc_po_no
+      ? `<span class="bc-no">${o.bc_po_no}</span>${o.po_vendor_no ? `<div style="font-size:10px;color:var(--muted)">vendor: ${o.po_vendor_no}</div>` : ''}`
+      : (o.bc_so_no
+        ? `<button class="btn-approve" style="font-size:12px;padding:4px 10px" onclick="openCreatePOModal('${o.id}','${o.order_number}')">🛒 สร้าง PO</button>`
+        : `<span style="color:var(--muted);font-size:11px">— รอ SO —</span>`);
+    return `
     <tr>
       <td style="white-space:nowrap;color:var(--muted)">${o.paid_at || o.created_at}</td>
       <td><strong>${o.order_number}</strong></td>
       <td>${o.branch_name || o.user_name || '-'}</td>
       <td style="font-weight:700;color:var(--gold-dark)">฿${o.total.toLocaleString()}</td>
       <td><span class="bc-no">${o.bc_so_no || '—'}</span></td>
+      <td>${poCell}</td>
       <td><span class="bc-no">${o.bc_invoice_no || (o.bc_posted ? '(posted)' : '—')}</span></td>
       <td style="font-size:12px">${o.verified_by_name || '-'}</td>
       <td><a href="/orders.html?id=${o.id}" style="font-size:11px;color:var(--gold-dark);text-decoration:underline">ดูรายละเอียด</a></td>
     </tr>
-  `).join('');
+  `;
+  }).join('');
 }
 
 async function renderRejected() {
@@ -341,6 +373,72 @@ async function confirmReject() {
 function openLightbox(src) {
   document.getElementById('lightboxImg').src = src;
   document.getElementById('lightbox').style.display = 'flex';
+}
+
+// ─── Create PO modal ───────────────────────────────────────────────────
+// Vendor list is cached for the page lifetime — vendors rarely change and
+// fetching is a hop to BC.
+let currentPOOrderId = null;
+let vendorsCache = null;
+let vendorsLoading = null;
+
+async function loadVendorsOnce() {
+  if (vendorsCache) return vendorsCache;
+  if (vendorsLoading) return vendorsLoading;
+  vendorsLoading = api('/api/bc/vendors').then(list => {
+    vendorsCache = Array.isArray(list) ? list : [];
+    return vendorsCache;
+  }).catch(e => { vendorsLoading = null; throw e; });
+  return vendorsLoading;
+}
+
+async function openCreatePOModal(id, orderNum) {
+  currentPOOrderId = id;
+  document.getElementById('poOrderNum').textContent = orderNum;
+  document.getElementById('poErr').textContent = '';
+  const sel = document.getElementById('poVendor');
+  sel.innerHTML = '<option value="">กำลังโหลด vendors จาก BC...</option>';
+  document.getElementById('poModal').style.display = 'flex';
+  try {
+    const vendors = await loadVendorsOnce();
+    if (!vendors.length) {
+      sel.innerHTML = '<option value="">ไม่พบ vendor ใน BC</option>';
+      return;
+    }
+    sel.innerHTML = '<option value="">— เลือก Vendor —</option>' +
+      vendors.map(v => `<option value="${v.number}">${v.number} · ${v.displayName || v.name || ''}</option>`).join('');
+  } catch (e) {
+    sel.innerHTML = `<option value="">โหลด vendors ไม่สำเร็จ</option>`;
+    document.getElementById('poErr').textContent = 'โหลด vendors ไม่สำเร็จ: ' + e.message;
+  }
+}
+
+function closeCreatePOModal() {
+  document.getElementById('poModal').style.display = 'none';
+  currentPOOrderId = null;
+}
+
+async function confirmCreatePO() {
+  if (!currentPOOrderId) return;
+  const vendorNo = document.getElementById('poVendor').value;
+  const err = document.getElementById('poErr');
+  if (!vendorNo) { err.textContent = 'กรุณาเลือก Vendor'; return; }
+  const btn = document.getElementById('poConfirmBtn');
+  btn.disabled = true;
+  btn.textContent = 'กำลังสร้าง PO...';
+  try {
+    const res = await api('/api/orders/'+currentPOOrderId+'/create-po', {
+      method: 'POST',
+      body: JSON.stringify({ vendor_no: vendorNo })
+    });
+    toast(res.message || 'สร้าง PO สำเร็จ');
+    closeCreatePOModal();
+    await load();
+  } catch (e) {
+    err.textContent = e.message;
+    btn.disabled = false;
+    btn.textContent = 'สร้าง PO';
+  }
 }
 
 // Honour ?tab= so the two nav links open in the right tab

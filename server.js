@@ -908,6 +908,52 @@ async function postOrderToBC(orderId) {
   return { ok: true, bc_so_id: soId, bc_so_no: soNo, order_number: newOrderNumber, vat_amount: vatAmount, total_incl_vat: totalInclVat };
 }
 
+// ─── BC: Create Purchase Order from a verified order ───
+// Decoupled from Finance approval — Finance picks a vendor on the "Approved"
+// tab and triggers this. Sales price is reused on the PO (same unit_price as
+// the SO line) per the current design; if cost-tracking is added later this
+// can switch to BC Item Card's directUnitCost.
+async function postPOToBC(orderId, vendorNo) {
+  const order = db.prepare('SELECT * FROM orders WHERE id=?').get(orderId);
+  if (!order) throw new Error('Order not found');
+  if (order.payment_status !== 'verified') throw new Error('Order ยังไม่ได้อนุมัติ — ต้องอนุมัติสลิปก่อน');
+  if (!order.bc_so_no) throw new Error('Order ยังไม่มี BC SO — สร้าง SO ให้สำเร็จก่อน');
+  if (order.bc_po_no) return { already: true, bc_po_id: order.bc_po_id, bc_po_no: order.bc_po_no };
+  if (!vendorNo) throw new Error('ต้องระบุ vendorNo');
+
+  const lines = db.prepare('SELECT * FROM order_lines WHERE order_id=?').all(orderId);
+  if (!lines.length) throw new Error('Order has no lines');
+
+  // 1. Create Purchase Order (draft)
+  const po = await bc.createPurchaseOrder({
+    vendorNumber: vendorNo,
+    externalDocumentNumber: order.order_number,
+  });
+  const poId = po.id;
+  const poNo = po.number || '';
+
+  // 2. Add lines (mirror SO lines — same items, qty, sales price)
+  for (const line of lines) {
+    const item = db.prepare('SELECT id FROM items_cache WHERE item_no=?').get(line.item_no);
+    await bc.addPurchaseOrderLine(poId, {
+      itemId: item ? item.id : undefined,
+      lineType: 'Item',
+      quantity: line.quantity,
+      directUnitCost: line.unit_price,
+      description: line.item_name,
+      locationId: '7e4291d6-d13e-f011-be59-000d3a086703', // CTI WH
+    });
+  }
+
+  db.prepare("UPDATE orders SET bc_po_id=?, bc_po_no=?, po_vendor_no=? WHERE id=?")
+    .run(poId, poNo, vendorNo, orderId);
+
+  db.prepare('INSERT INTO sync_log (kind, status, message, count) VALUES (?,?,?,?)')
+    .run('purchase_order', 'ok', `Created PO ${poNo} for ${order.order_number} (vendor ${vendorNo})`, 1);
+
+  return { ok: true, bc_po_id: poId, bc_po_no: poNo, vendor_no: vendorNo };
+}
+
 // ─── Fulfillment: Sync from BC Purchase Receipts ───
 async function syncFulfillmentFromBC(orderId) {
   const order = db.prepare('SELECT * FROM orders WHERE id=?').get(orderId);
@@ -1211,6 +1257,20 @@ async function postSalesInvoiceForOrder(orderId) {
     }
   }
 }
+
+// ─── Finance/Admin: create BC Purchase Order for a verified order ───
+// Finance picks a vendor on the Approvals "Approved" tab and triggers this.
+// requireAdmin allows super_admin, admin_scm, finance (all in HQ_ROLES).
+app.post('/api/orders/:id/create-po', requireAuth, requireAdmin, async (req, res) => {
+  const vendorNo = String(req.body.vendor_no || '').trim();
+  if (!vendorNo) return res.status(400).json({ error: 'ต้องเลือก Vendor' });
+  try {
+    const result = await postPOToBC(req.params.id, vendorNo);
+    res.json({ ok: true, ...result, message: result.already ? `PO มีอยู่แล้ว: ${result.bc_po_no}` : `สร้าง PO สำเร็จ: ${result.bc_po_no}` });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+});
 
 // ─── Admin: retry BC Invoice posting for an order whose previous attempt failed ───
 app.post('/api/orders/:id/retry-bc-post', requireAuth, requireAdmin, async (req, res) => {
