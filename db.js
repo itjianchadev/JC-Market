@@ -119,6 +119,8 @@ CREATE TABLE IF NOT EXISTS sync_log (
 // ─── Migrate: add bc_po columns if missing ───
 try { db.exec("ALTER TABLE orders ADD COLUMN bc_po_id TEXT DEFAULT ''"); } catch (e) { /* already exists */ }
 try { db.exec("ALTER TABLE orders ADD COLUMN bc_po_no TEXT DEFAULT ''"); } catch (e) { /* already exists */ }
+// BC Vendor on the PO — Finance picks this after approving the slip; null until then.
+try { db.exec("ALTER TABLE orders ADD COLUMN po_vendor_no TEXT DEFAULT ''"); } catch (e) { /* already exists */ }
 
 // ─── Migrate: fulfillment tracking ───
 try { db.exec("ALTER TABLE orders ADD COLUMN fulfillment_status TEXT DEFAULT 'pending'"); } catch (e) {}

@@ -83,12 +83,13 @@
             <th>สาขา</th>
             <th>ยอด</th>
             <th>BC SO</th>
+            <th>BC PO</th>
             <th>BC Invoice</th>
             <th>ผู้อนุมัติ</th>
             <th>สลิป</th>
           </tr>
         </thead>
-        <tbody id="approvedBody"><tr><td colspan="8" class="empty">กำลังโหลด...</td></tr></tbody>
+        <tbody id="approvedBody"><tr><td colspan="9" class="empty">กำลังโหลด...</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -137,6 +138,7 @@
     <div class="err" id="rejErr" style="margin-top:8px"></div>
   </div>
 </div>
+
 
 <script src="/js/app.js"></script>
 <script>
@@ -229,21 +231,31 @@ async function renderPending() {
 function renderApproved() {
   const el = document.getElementById('approvedBody');
   if (!approvedData.length) {
-    el.innerHTML = `<tr><td colspan="8" class="empty"><p>📋</p>ยังไม่มีรายการที่อนุมัติ</td></tr>`;
+    el.innerHTML = `<tr><td colspan="9" class="empty"><p>📋</p>ยังไม่มีรายการที่อนุมัติ</td></tr>`;
     return;
   }
-  el.innerHTML = approvedData.slice(0, 100).map(o => `
+  el.innerHTML = approvedData.slice(0, 100).map(o => {
+    // PO cell: show number if created, otherwise "สร้าง PO" button.
+    // Disabled when there's no BC SO yet (BC sync error path) — must have SO first.
+    const poCell = o.bc_po_no
+      ? `<span class="bc-no">${o.bc_po_no}</span>${o.po_vendor_no ? `<div style="font-size:10px;color:var(--muted)">vendor: ${o.po_vendor_no}</div>` : ''}`
+      : (o.bc_so_no
+        ? `<button class="btn-approve" style="font-size:12px;padding:4px 10px" onclick="retryCreatePO('${o.id}', this)">🔁 สร้าง PO</button>`
+        : `<span style="color:var(--muted);font-size:11px">— รอ SO —</span>`);
+    return `
     <tr>
       <td style="white-space:nowrap;color:var(--muted)">${o.paid_at || o.created_at}</td>
       <td><strong>${o.order_number}</strong></td>
       <td>${o.branch_name || o.user_name || '-'}</td>
       <td style="font-weight:700;color:var(--gold-dark)">฿${o.total.toLocaleString()}</td>
       <td><span class="bc-no">${o.bc_so_no || '—'}</span></td>
+      <td>${poCell}</td>
       <td><span class="bc-no">${o.bc_invoice_no || (o.bc_posted ? '(posted)' : '—')}</span></td>
       <td style="font-size:12px">${o.verified_by_name || '-'}</td>
       <td><a href="/orders.html?id=${o.id}" style="font-size:11px;color:var(--gold-dark);text-decoration:underline">ดูรายละเอียด</a></td>
     </tr>
-  `).join('');
+  `;
+  }).join('');
 }
 
 async function renderRejected() {
@@ -341,6 +353,25 @@ async function confirmReject() {
 function openLightbox(src) {
   document.getElementById('lightboxImg').src = src;
   document.getElementById('lightbox').style.display = 'flex';
+}
+
+// ─── Retry PO creation (single-click) ────────────────────────────────
+// Auto-PO runs at approve time using BC_DEFAULT_VENDOR_NO from .env.
+// This button is the retry path when that auto-create failed.
+async function retryCreatePO(id, btn) {
+  if (!confirm('สร้าง PO ใน BC ด้วย vendor เริ่มต้นจาก .env?')) return;
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'กำลังสร้าง...';
+  try {
+    const res = await api('/api/orders/'+id+'/create-po', { method: 'POST', body: JSON.stringify({}) });
+    toast(res.message || 'สร้าง PO สำเร็จ');
+    await load();
+  } catch (e) {
+    toast('สร้าง PO ไม่สำเร็จ: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = original;
+  }
 }
 
 // Honour ?tab= so the two nav links open in the right tab
