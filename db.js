@@ -230,6 +230,12 @@ try { db.exec("ALTER TABLE branches ADD COLUMN license_expires_at TEXT"); } catc
 try { db.exec("ALTER TABLE payments ADD COLUMN auto_verify_passed INTEGER DEFAULT 0"); } catch (e) {}
 try { db.exec("ALTER TABLE payments ADD COLUMN auto_verify_reason TEXT DEFAULT ''"); } catch (e) {}
 
+// ─── Rejection audit (Finance rejects a slip → record the reason) ──────────
+// Distinct from cancellation (FC cancels their own pending order).
+try { db.exec("ALTER TABLE orders ADD COLUMN reject_reason TEXT DEFAULT ''"); } catch (e) {}
+try { db.exec("ALTER TABLE orders ADD COLUMN rejected_at TEXT"); } catch (e) {}
+try { db.exec("ALTER TABLE orders ADD COLUMN rejected_by TEXT DEFAULT ''"); } catch (e) {}
+
 // ─── Migrate: cancel fields ───
 try { db.exec("ALTER TABLE orders ADD COLUMN cancelled_at TEXT"); } catch (e) {}
 try { db.exec("ALTER TABLE orders ADD COLUMN cancelled_by TEXT DEFAULT ''"); } catch (e) {}

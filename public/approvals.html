@@ -94,6 +94,27 @@
 <!-- Lightbox for slip thumbnails -->
 <div id="lightbox" class="lightbox" onclick="this.style.display='none'"><img id="lightboxImg"></div>
 
+<!-- Reject reason modal -->
+<div id="rejectModal" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1001;display:none;align-items:center;justify-content:center;padding:20px">
+  <div style="background:var(--card);border:1px solid var(--border);border-radius:14px;padding:22px;max-width:440px;width:100%;position:relative">
+    <button onclick="closeRejectModal()" style="position:absolute;top:10px;right:14px;background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer">&times;</button>
+    <h3 style="margin-bottom:6px;color:var(--err)">❌ ปฏิเสธการชำระเงิน</h3>
+    <p style="color:var(--muted);font-size:13px;margin-bottom:14px">คำสั่งซื้อ <strong id="rejOrderNum" style="color:var(--text)"></strong></p>
+
+    <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px">เหตุผลในการปฏิเสธ <span style="color:var(--err)">*</span></label>
+    <textarea id="rejReason" rows="4" maxlength="500"
+      placeholder="เช่น สลิปไม่ชัดเจน · ยอดเงินไม่ตรง · ผู้รับโอนไม่ถูกต้อง · สลิปถูกตัดต่อ ฯลฯ"
+      style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-family:inherit;resize:vertical;font-size:14px"></textarea>
+    <div style="font-size:11px;color:var(--muted);text-align:right;margin-top:4px"><span id="rejCharCount">0</span> / 500</div>
+
+    <div style="display:flex;gap:10px;margin-top:14px">
+      <button class="btn ghost" onclick="closeRejectModal()" style="flex:1">ยกเลิก</button>
+      <button id="rejConfirmBtn" style="flex:1;padding:10px;background:var(--err);color:#fff;border:none;border-radius:8px;font-weight:600;cursor:pointer" onclick="confirmReject()">ยืนยันปฏิเสธ</button>
+    </div>
+    <div class="err" id="rejErr" style="margin-top:8px"></div>
+  </div>
+</div>
+
 <script src="/js/app.js"></script>
 <script>
 if(!requireLogin()) throw '';
@@ -166,8 +187,8 @@ async function renderPending() {
           : '<span style="color:var(--muted);font-size:11px">—</span>'}</td>
         <td>${autoPill}${autoReason ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">${autoReason}</div>` : ''}</td>
         <td>
-          <button class="btn-approve" onclick="actOnOrder('${o.id}','approve', this)">✅ อนุมัติ</button>
-          <button class="btn-reject" onclick="actOnOrder('${o.id}','reject', this)">❌ ปฏิเสธ</button>
+          <button class="btn-approve" onclick="approveOrder('${o.id}', this)">✅ อนุมัติ</button>
+          <button class="btn-reject" onclick="openRejectModal('${o.id}','${o.order_number}')">❌ ปฏิเสธ</button>
         </td>
       </tr>
     `;
@@ -194,18 +215,67 @@ function renderApproved() {
   `).join('');
 }
 
-async function actOnOrder(id, action, btn) {
-  if (action === 'reject' && !confirm('ยืนยันปฏิเสธ? คำสั่งซื้อนี้จะถูกตั้งเป็น failed และไม่สามารถสร้าง BC SO ได้')) return;
+async function approveOrder(id, btn) {
   btn.disabled = true;
-  btn.textContent = action === 'approve' ? 'กำลังอนุมัติ...' : 'กำลังปฏิเสธ...';
+  btn.textContent = 'กำลังอนุมัติ...';
   try {
-    const res = await api('/api/orders/'+id+'/verify', { method:'POST', body: JSON.stringify({action}) });
+    const res = await api('/api/orders/'+id+'/verify', { method:'POST', body: JSON.stringify({action:'approve'}) });
     toast(res.message || 'OK');
     await load();
   } catch (e) {
     toast('ไม่สำเร็จ: ' + e.message);
     btn.disabled = false;
-    btn.textContent = action === 'approve' ? '✅ อนุมัติ' : '❌ ปฏิเสธ';
+    btn.textContent = '✅ อนุมัติ';
+  }
+}
+
+// ─── Reject reason modal ───
+let currentRejectId = null;
+function openRejectModal(id, orderNum) {
+  currentRejectId = id;
+  document.getElementById('rejOrderNum').textContent = orderNum;
+  document.getElementById('rejReason').value = '';
+  document.getElementById('rejErr').textContent = '';
+  document.getElementById('rejCharCount').textContent = '0';
+  document.getElementById('rejectModal').style.display = 'flex';
+  setTimeout(() => document.getElementById('rejReason').focus(), 50);
+}
+function closeRejectModal() {
+  document.getElementById('rejectModal').style.display = 'none';
+  currentRejectId = null;
+}
+// Live char counter so user sees how close they are to the 500 cap
+document.getElementById('rejReason').addEventListener('input', e => {
+  document.getElementById('rejCharCount').textContent = e.target.value.length;
+});
+
+async function confirmReject() {
+  if (!currentRejectId) return;
+  const reason = document.getElementById('rejReason').value.trim();
+  const err = document.getElementById('rejErr');
+  if (!reason) {
+    err.textContent = 'กรุณาระบุเหตุผลในการปฏิเสธ';
+    return;
+  }
+  if (reason.length > 500) {
+    err.textContent = 'เหตุผลยาวเกิน 500 ตัวอักษร';
+    return;
+  }
+  const btn = document.getElementById('rejConfirmBtn');
+  btn.disabled = true;
+  btn.textContent = 'กำลังปฏิเสธ...';
+  try {
+    const res = await api('/api/orders/'+currentRejectId+'/verify', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'reject', reason })
+    });
+    toast(res.message || 'ปฏิเสธแล้ว');
+    closeRejectModal();
+    await load();
+  } catch (e) {
+    err.textContent = e.message;
+    btn.disabled = false;
+    btn.textContent = 'ยืนยันปฏิเสธ';
   }
 }
 

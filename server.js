@@ -755,8 +755,20 @@ app.post('/api/orders/:id/verify', requireAuth, requireAdmin, async (req, res) =
       message: `อนุมัติการชำระเงิน · ออกใบเสร็จ ${rcptNo}${bcMsg}`,
     });
   } else if (action === 'reject') {
-    db.prepare("UPDATE orders SET payment_status='failed' WHERE id=?").run(order.id);
-    res.json({ ok: true, message: 'ปฏิเสธการชำระเงิน' });
+    // Finance must give a reason — surfaces back to the FC + saves to the
+    // audit trail so admin can review later why a slip was bounced.
+    const reason = String(req.body.reason || '').trim();
+    if (!reason) return res.status(400).json({ error: 'ต้องระบุเหตุผลในการปฏิเสธ' });
+    if (reason.length > 500) return res.status(400).json({ error: 'เหตุผลยาวเกิน 500 ตัวอักษร' });
+
+    db.prepare(`UPDATE orders SET
+        payment_status='failed',
+        reject_reason=?,
+        rejected_at=datetime('now','localtime'),
+        rejected_by=?
+      WHERE id=?`)
+      .run(reason, req.user.id, order.id);
+    res.json({ ok: true, message: 'ปฏิเสธการชำระเงิน: ' + reason });
   } else {
     res.status(400).json({ error: 'action must be approve or reject' });
   }
