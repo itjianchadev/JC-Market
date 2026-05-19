@@ -14,6 +14,8 @@ const I18N = {
     // Nav
     'nav.shop':'🛒 ร้านค้า','nav.cart':'🧺 ตะกร้า','nav.orders':'📋 คำสั่งซื้อ',
     'nav.stock':'📊 Stock','nav.admin':'⚙️ Admin','nav.logout':'ออกจากระบบ',
+    'nav.team':'👥 จัดการผู้ใช้',
+    'nav.pending_approvals':'⏳ รายการต้องอนุมัติ','nav.approved_list':'✅ รายการที่อนุมัติแล้ว',
     // Common
     'common.loading':'กำลังโหลด...','common.close':'ปิด','common.confirm':'ยืนยัน','common.cancel':'ยกเลิก',
     'common.search':'ค้นหา','common.note':'หมายเหตุ','common.no_data':'ยังไม่มีข้อมูล','common.all':'ทั้งหมด',
@@ -207,6 +209,8 @@ const I18N = {
     // Nav
     'nav.shop':'🛒 Shop','nav.cart':'🧺 Cart','nav.orders':'📋 Orders',
     'nav.stock':'📊 Stock','nav.admin':'⚙️ Admin','nav.logout':'Logout',
+    'nav.team':'👥 Users',
+    'nav.pending_approvals':'⏳ Pending Approval','nav.approved_list':'✅ Approved',
     // Common
     'common.loading':'Loading...','common.close':'Close','common.confirm':'Confirm','common.cancel':'Cancel',
     'common.search':'Search','common.note':'Note','common.no_data':'No data','common.all':'All',
@@ -532,26 +536,31 @@ async function updateCartBadge() {
 function renderNav(active) {
   const u = getUser();
   if (!u) return '';
-  // Keep in sync with auth.js HQ_ROLES — frontend uses this to decide which
-  // nav links to show. (finance is HQ-tier so they see admin.html and the
-  // pending-slips queue.)
+  // Keep in sync with auth.js HQ_ROLES.
   const HQ_ROLES = ['super_admin','admin_scm','finance'];
   const isHq = HQ_ROLES.includes(u.role);
+  const isFinance = u.role === 'finance';
   const links = [];
-  // HQ users see ร้านค้า (BC catalog view) but not cart/checkout/stock-balance.
-  // Branch users get the full shop flow.
-  if (isHq) {
+  if (isFinance) {
+    // Finance is a focused role: only the two approval queues + an order
+    // browser for reference. They don't shop and they don't manage users,
+    // so those links are deliberately omitted.
+    links.push(['orders.html','nav.orders']);
+    links.push(['approvals.html?tab=pending','nav.pending_approvals']);
+    links.push(['approvals.html?tab=approved','nav.approved_list']);
+  } else if (isHq) {
+    // super_admin / admin_scm — full HQ visibility minus the cart/stock flow
     links.push(['index.html','nav.shop']);
-    // Finance + admin_scm need to see orders to review pending slips
     links.push(['orders.html','nav.orders']);
   } else {
+    // Branch users — full shop flow
     links.push(['index.html','nav.shop']);
     links.push(['cart.html','nav.cart']);
     links.push(['orders.html','nav.orders']);
     links.push(['stock-balance.html','nav.stock']);
   }
-  if (isHq || u.role === 'branch_owner') links.push(['team.html','nav.team']);
-  if (isHq) links.push(['admin.html','nav.admin']);
+  if (!isFinance && (isHq || u.role === 'branch_owner')) links.push(['team.html','nav.team']);
+  if (!isFinance && isHq) links.push(['admin.html','nav.admin']);
   const lang = getLang();
   const otherLang = lang === 'th' ? 'en' : 'th';
   const flag = lang === 'th' ? '🇹🇭 TH' : '🇬🇧 EN';
