@@ -7,6 +7,7 @@ function getUser(){try{return JSON.parse(localStorage.getItem(USER_KEY))}catch{r
 function setAuth(t,u){localStorage.setItem(TOKEN_KEY,t);localStorage.setItem(USER_KEY,JSON.stringify(u))}
 function clearAuth(){localStorage.removeItem(TOKEN_KEY);localStorage.removeItem(USER_KEY);location.href='/login.html'}
 function requireLogin(){if(!getToken()){location.href='/login.html';return false}return true}
+function denyFinance(){const u=getUser();if(u&&u.role==='finance'){location.href='/approvals.html?tab=pending';return false}return true}
 
 /* ─────────────── i18n ─────────────── */
 const I18N = {

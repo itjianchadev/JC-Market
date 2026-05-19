@@ -126,6 +126,7 @@
 <script src="/js/app.js"></script>
 <script>
 if(!requireLogin()) throw '';
+if(!denyFinance()) throw '';
 document.getElementById('nav').innerHTML = renderNav('');
 
 let currentOrderId = null;
