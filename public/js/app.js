@@ -532,12 +532,18 @@ async function updateCartBadge() {
 function renderNav(active) {
   const u = getUser();
   if (!u) return '';
-  const HQ_ROLES = ['super_admin','admin_scm'];
+  // Keep in sync with auth.js HQ_ROLES — frontend uses this to decide which
+  // nav links to show. (finance is HQ-tier so they see admin.html and the
+  // pending-slips queue.)
+  const HQ_ROLES = ['super_admin','admin_scm','finance'];
   const isHq = HQ_ROLES.includes(u.role);
   const links = [];
-  // HQ admin (super/SCM) เห็นแค่ ร้านค้า (ดู catalog/สต๊อกจาก BC) — ไม่มี cart/orders/stock-balance
+  // HQ users see ร้านค้า (BC catalog view) but not cart/checkout/stock-balance.
+  // Branch users get the full shop flow.
   if (isHq) {
     links.push(['index.html','nav.shop']);
+    // Finance + admin_scm need to see orders to review pending slips
+    links.push(['orders.html','nav.orders']);
   } else {
     links.push(['index.html','nav.shop']);
     links.push(['cart.html','nav.cart']);
