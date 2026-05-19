@@ -290,39 +290,30 @@ async function uploadSlip() {
     document.getElementById('step2').style.display = 'none';
     document.getElementById('step3').style.display = 'block';
 
-    if (j.auto_verified) {
-      // Auto-approved!
-      document.getElementById('doneIcon').textContent = '✅';
-      document.getElementById('doneTitle').style.color = 'var(--ok)';
-      document.getElementById('doneTitle').textContent = t('checkout.auto_ok');
-      document.getElementById('doneMsg').textContent = t('checkout.order_approved');
-      const vr = j.verify_result || {};
-      const bcSo = j.bc_so || {};
+    // Strict mode: every slip waits for Finance approval — same pending UI
+    // regardless of the SlipOK auto-verify hint. BC SO is created only after
+    // Finance clicks Approve.
+    document.getElementById('doneIcon').textContent = '⏳';
+    document.getElementById('doneTitle').style.color = '#f59e0b';
+    document.getElementById('doneTitle').textContent = t('checkout.pending_title');
+    document.getElementById('doneMsg').textContent = t('checkout.pending_msg');
+
+    const vr = j.verify_result || {};
+    const autoPassed = !!j.auto_verified;
+    const hasSlipMeta = vr.amount || vr.sender || vr.receiver || vr.ref;
+    if (hasSlipMeta || vr.reason) {
       const detail = document.getElementById('verifyDetail');
       detail.style.display = 'block';
+      const hint = autoPassed
+        ? `<div style="color:var(--ok);margin-top:6px">${t('checkout.auto_pass_hint')}</div>`
+        : (vr.reason ? `<div style="color:var(--err);margin-top:6px">${t('checkout.auto_fail_hint')} ${vr.reason}</div>` : '');
       detail.querySelector('.card').innerHTML = `
-        ${vr.amount || vr.sender ? `
-          <div style="margin-bottom:6px"><strong>${t('checkout.transfer_amount')}:</strong> ฿${(vr.amount||0).toLocaleString()}</div>
-          ${vr.sender ? `<div style="margin-bottom:6px"><strong>${t('checkout.sender')}:</strong> ${vr.sender}</div>` : ''}
-          ${vr.receiver ? `<div style="margin-bottom:6px"><strong>${t('checkout.receiver')}:</strong> ${vr.receiver}</div>` : ''}
-          ${vr.ref ? `<div style="margin-bottom:6px"><strong>${t('checkout.ref')}:</strong> ${vr.ref}</div>` : ''}
-          <div style="color:var(--ok);margin-bottom:8px">✓ ${vr.reason}</div>
-        ` : ''}
-        ${bcSo.bc_po_no || bcSo.bc_so_no ? `
-          <hr style="border-color:var(--border);margin:8px 0">
-          ${bcSo.bc_po_no ? `<div style="color:var(--ok);font-weight:600"><strong>${t('checkout.bc_po')}:</strong> ${bcSo.bc_po_no}</div>` : ''}
-          ${bcSo.bc_so_no ? `<div style="color:var(--ok);font-weight:600"><strong>${t('checkout.bc_so')}:</strong> ${bcSo.bc_so_no}</div>` : ''}
-          <div style="font-size:12px;color:var(--muted)">${t('checkout.bc_created_note')}</div>
-        ` : bcSo.error ? `
-          <hr style="border-color:var(--border);margin:8px 0">
-          <div style="color:var(--err)"><strong>BC:</strong> ${bcSo.error}</div>
-        ` : ''}`;
-    } else {
-      // Manual review needed
-      document.getElementById('doneIcon').textContent = '⏳';
-      document.getElementById('doneTitle').style.color = '#f59e0b';
-      document.getElementById('doneTitle').textContent = t('checkout.manual_title');
-      document.getElementById('doneMsg').innerHTML = t('checkout.manual_msg', { reason: `<span style="color:var(--err)">${(j.verify_result||{}).reason||''}</span>` });
+        ${vr.amount ? `<div style="margin-bottom:6px"><strong>${t('checkout.transfer_amount')}:</strong> ฿${(vr.amount||0).toLocaleString()}</div>` : ''}
+        ${vr.sender ? `<div style="margin-bottom:6px"><strong>${t('checkout.sender')}:</strong> ${vr.sender}</div>` : ''}
+        ${vr.receiver ? `<div style="margin-bottom:6px"><strong>${t('checkout.receiver')}:</strong> ${vr.receiver}</div>` : ''}
+        ${vr.ref ? `<div style="margin-bottom:6px"><strong>${t('checkout.ref')}:</strong> ${vr.ref}</div>` : ''}
+        ${hint}
+      `;
     }
   } catch (e) {
     document.getElementById('slipErr').textContent = e.message;
