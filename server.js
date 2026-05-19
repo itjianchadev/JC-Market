@@ -576,7 +576,11 @@ app.get('/api/orders', requireAuth, (req, res) => {
 
 // ─── Orders: Detail ───
 app.get('/api/orders/:id', requireAuth, (req, res) => {
-  const order = db.prepare('SELECT * FROM orders WHERE id=?').get(req.params.id);
+  const order = db.prepare(`
+    SELECT o.*, rb.full_name as rejected_by_name
+    FROM orders o
+    LEFT JOIN users rb ON rb.id = o.rejected_by
+    WHERE o.id=?`).get(req.params.id);
   if (!order) return res.status(404).json({ error: 'Order not found' });
   if (!isHqAdmin(req.user) && order.user_id !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
   const lines = db.prepare('SELECT ol.*, i.name_en as item_name_en FROM order_lines ol LEFT JOIN items_cache i ON i.item_no=ol.item_no WHERE ol.order_id=?').all(order.id);
@@ -589,7 +593,10 @@ app.get('/api/orders/:id', requireAuth, (req, res) => {
 app.get('/api/orders/:id/qr', requireAuth, async (req, res) => {
   const order = db.prepare('SELECT * FROM orders WHERE id=?').get(req.params.id);
   if (!order) return res.status(404).json({ error: 'Order not found' });
-  if (order.payment_status !== 'pending') return res.status(400).json({ error: 'Order already paid' });
+  // QR is needed both on first checkout ('pending') AND when re-uploading
+  // after a Finance rejection ('failed') — FC may have transferred the wrong
+  // amount and need the QR again to re-pay.
+  if (order.payment_status !== 'pending' && order.payment_status !== 'failed') return res.status(400).json({ error: 'Order already paid' });
   try {
     const qr = await generateQR(order.total);
     res.json({ qr_data_url: qr, total: order.total });
@@ -604,6 +611,10 @@ app.post('/api/orders/:id/slip', requireAuth, upload.single('slip'), async (req,
   if (!req.file) return res.status(400).json({ error: 'No slip file' });
   if (order.payment_status === 'verified') return res.status(400).json({ error: 'Order already verified' });
   if (order.payment_status === 'cancelled') return res.status(400).json({ error: 'Order was cancelled' });
+  // Block overwriting a slip that's currently waiting for Finance review.
+  // Re-upload is only allowed after a Finance rejection ('failed') or for
+  // the original upload ('pending').
+  if (order.payment_status === 'paid') return res.status(400).json({ error: 'ส่งสลิปไปแล้ว · รอ Finance ตรวจสอบ' });
 
   const slipPath = '/uploads/' + req.file.filename;
   const absPath = path.join(__dirname, 'uploads', req.file.filename);
@@ -672,7 +683,18 @@ app.post('/api/orders/:id/slip', requireAuth, upload.single('slip'), async (req,
     result.verified ? 1 : 0, result.reason || '',
     order.id
   );
-  db.prepare("UPDATE orders SET payment_status='paid', paid_at=datetime('now','localtime') WHERE id=?").run(order.id);
+  // On re-upload after a Finance rejection, clear the reject audit fields
+  // (the new slip starts a fresh review) and bump the retry count so Finance
+  // sees this is a resubmission.
+  const isRetry = order.payment_status === 'failed';
+  db.prepare(`UPDATE orders SET
+      payment_status='paid',
+      paid_at=datetime('now','localtime'),
+      reject_reason='',
+      rejected_at=NULL,
+      rejected_by='',
+      slip_retry_count = slip_retry_count + ?
+    WHERE id=?`).run(isRetry ? 1 : 0, order.id);
 
   res.json({
     ok: true,
