@@ -7,6 +7,7 @@ function getUser(){try{return JSON.parse(localStorage.getItem(USER_KEY))}catch{r
 function setAuth(t,u){localStorage.setItem(TOKEN_KEY,t);localStorage.setItem(USER_KEY,JSON.stringify(u))}
 function clearAuth(){localStorage.removeItem(TOKEN_KEY);localStorage.removeItem(USER_KEY);location.href='/login.html'}
 function requireLogin(){if(!getToken()){location.href='/login.html';return false}return true}
+function denyFinance(){const u=getUser();if(u&&u.role==='finance'){location.href='/approvals.html?tab=pending';return false}return true}
 
 /* ─────────────── i18n ─────────────── */
 const I18N = {
@@ -14,6 +15,8 @@ const I18N = {
     // Nav
     'nav.shop':'🛒 ร้านค้า','nav.cart':'🧺 ตะกร้า','nav.orders':'📋 คำสั่งซื้อ',
     'nav.stock':'📊 Stock','nav.admin':'⚙️ Admin','nav.logout':'ออกจากระบบ',
+    'nav.team':'👥 จัดการผู้ใช้',
+    'nav.pending_approvals':'⏳ รายการต้องอนุมัติ','nav.approved_list':'✅ รายการที่อนุมัติแล้ว','nav.rejected_list':'❌ ปฏิเสธ',
     // Common
     'common.loading':'กำลังโหลด...','common.close':'ปิด','common.confirm':'ยืนยัน','common.cancel':'ยกเลิก',
     'common.search':'ค้นหา','common.note':'หมายเหตุ','common.no_data':'ยังไม่มีข้อมูล','common.all':'ทั้งหมด',
@@ -62,12 +65,13 @@ const I18N = {
     'checkout.qr_title':'PromptPay QR','checkout.qr_hint':'สแกน QR ด้วยแอปธนาคาร',
     'checkout.vat_breakdown':'สินค้า ฿{sub} + VAT ฿{vat}',
     'checkout.bc_po':'BC Purchase Order','checkout.bc_so':'BC Sales Order',
-    'checkout.order_no_label':'คำสั่งซื้อ','checkout.auto_ok':'ตรวจสอบสลิปผ่าน — อนุมัติอัตโนมัติ!',
-    'checkout.order_approved':'คำสั่งซื้อได้รับการอนุมัติแล้ว',
+    'checkout.order_no_label':'คำสั่งซื้อ',
+    'checkout.pending_title':'ส่งสลิปแล้ว — รอ Finance ตรวจสอบ',
+    'checkout.pending_msg':'เมื่อ Finance อนุมัติสลิปแล้ว ระบบจะสร้างเอกสาร SO ใน D365 BC อัตโนมัติ',
     'checkout.transfer_amount':'ยอดโอน','checkout.sender':'ผู้โอน','checkout.receiver':'ผู้รับ',
-    'checkout.ref':'Ref','checkout.bc_created_note':'สร้างเอกสารเข้า D365 BC เรียบร้อย (รอทีมตรวจสอบ & Post)',
-    'checkout.manual_title':'ส่งสลิปแล้ว — รอตรวจสอบ',
-    'checkout.manual_msg':'ตรวจอัตโนมัติไม่ผ่าน: {reason}<br>รอ Admin ตรวจสอบสลิปและอนุมัติ',
+    'checkout.ref':'Ref',
+    'checkout.auto_pass_hint':'✓ ตรวจสลิปอัตโนมัติผ่าน — รอ Finance อนุมัติ',
+    'checkout.auto_fail_hint':'⚠ ตรวจสลิปอัตโนมัติไม่ผ่าน:',
     'checkout.view_orders':'ดูคำสั่งซื้อ','checkout.back_shop':'กลับหน้าร้านค้า',
     'checkout.save_qr':'💾 บันทึก QR','checkout.download_pdf':'📄 ดาวน์โหลด PDF',
     'checkout.pdf_title':'คำสั่งซื้อ / Order','checkout.pdf_order_no':'เลขที่คำสั่งซื้อ',
@@ -207,6 +211,8 @@ const I18N = {
     // Nav
     'nav.shop':'🛒 Shop','nav.cart':'🧺 Cart','nav.orders':'📋 Orders',
     'nav.stock':'📊 Stock','nav.admin':'⚙️ Admin','nav.logout':'Logout',
+    'nav.team':'👥 Users',
+    'nav.pending_approvals':'⏳ Pending Approval','nav.approved_list':'✅ Approved','nav.rejected_list':'❌ Rejected',
     // Common
     'common.loading':'Loading...','common.close':'Close','common.confirm':'Confirm','common.cancel':'Cancel',
     'common.search':'Search','common.note':'Note','common.no_data':'No data','common.all':'All',
@@ -255,12 +261,13 @@ const I18N = {
     'checkout.qr_title':'PromptPay QR','checkout.qr_hint':'Scan with your banking app',
     'checkout.vat_breakdown':'Items ฿{sub} + VAT ฿{vat}',
     'checkout.bc_po':'BC Purchase Order','checkout.bc_so':'BC Sales Order',
-    'checkout.order_no_label':'Order','checkout.auto_ok':'Slip verified — auto approved!',
-    'checkout.order_approved':'Order has been approved',
+    'checkout.order_no_label':'Order',
+    'checkout.pending_title':'Slip uploaded — awaiting Finance review',
+    'checkout.pending_msg':'Once Finance approves the slip, a Sales Order will be created in D365 BC automatically.',
     'checkout.transfer_amount':'Transfer amount','checkout.sender':'Sender','checkout.receiver':'Receiver',
-    'checkout.ref':'Ref','checkout.bc_created_note':'Document created in D365 BC (pending team review & posting)',
-    'checkout.manual_title':'Slip submitted — awaiting review',
-    'checkout.manual_msg':'Auto-verification failed: {reason}<br>Awaiting admin review',
+    'checkout.ref':'Ref',
+    'checkout.auto_pass_hint':'✓ Auto-check passed — awaiting Finance approval',
+    'checkout.auto_fail_hint':'⚠ Auto-check failed:',
     'checkout.view_orders':'View Orders','checkout.back_shop':'Back to Shop',
     'checkout.save_qr':'💾 Save QR','checkout.download_pdf':'📄 Download PDF',
     'checkout.pdf_title':'Order / คำสั่งซื้อ','checkout.pdf_order_no':'Order No.',
@@ -532,26 +539,31 @@ async function updateCartBadge() {
 function renderNav(active) {
   const u = getUser();
   if (!u) return '';
-  // Keep in sync with auth.js HQ_ROLES — frontend uses this to decide which
-  // nav links to show. (finance is HQ-tier so they see admin.html and the
-  // pending-slips queue.)
+  // Keep in sync with auth.js HQ_ROLES.
   const HQ_ROLES = ['super_admin','admin_scm','finance'];
   const isHq = HQ_ROLES.includes(u.role);
+  const isFinance = u.role === 'finance';
   const links = [];
-  // HQ users see ร้านค้า (BC catalog view) but not cart/checkout/stock-balance.
-  // Branch users get the full shop flow.
-  if (isHq) {
+  if (isFinance) {
+    // Finance is a focused role — just the three approval queues. They
+    // don't shop, manage users, or browse the full orders list, so those
+    // links are deliberately omitted.
+    links.push(['approvals.html?tab=pending','nav.pending_approvals']);
+    links.push(['approvals.html?tab=approved','nav.approved_list']);
+    links.push(['approvals.html?tab=rejected','nav.rejected_list']);
+  } else if (isHq) {
+    // super_admin / admin_scm — full HQ visibility minus the cart/stock flow
     links.push(['index.html','nav.shop']);
-    // Finance + admin_scm need to see orders to review pending slips
     links.push(['orders.html','nav.orders']);
   } else {
+    // Branch users — full shop flow
     links.push(['index.html','nav.shop']);
     links.push(['cart.html','nav.cart']);
     links.push(['orders.html','nav.orders']);
     links.push(['stock-balance.html','nav.stock']);
   }
-  if (isHq || u.role === 'branch_owner') links.push(['team.html','nav.team']);
-  if (isHq) links.push(['admin.html','nav.admin']);
+  if (!isFinance && (isHq || u.role === 'branch_owner')) links.push(['team.html','nav.team']);
+  if (!isFinance && isHq) links.push(['admin.html','nav.admin']);
   const lang = getLang();
   const otherLang = lang === 'th' ? 'en' : 'th';
   const flag = lang === 'th' ? '🇹🇭 TH' : '🇬🇧 EN';

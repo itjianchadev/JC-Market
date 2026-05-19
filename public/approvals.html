@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="th"><head>
+<meta charset="utf-8"><title>รายการอนุมัติ — JC-Market</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<style>
+.tab-row{display:flex;gap:8px;border-bottom:1px solid var(--border);margin-bottom:16px;padding:0 4px;flex-wrap:wrap}
+.tab-btn{background:none;border:none;border-bottom:3px solid transparent;padding:12px 18px;cursor:pointer;font-size:15px;font-weight:600;color:var(--muted);transition:.15s;display:flex;align-items:center;gap:8px}
+.tab-btn:hover{color:var(--text)}
+.tab-btn.active{color:var(--gold-dark);border-bottom-color:var(--gold)}
+.tab-btn .count{background:var(--border);color:var(--muted);padding:1px 9px;border-radius:10px;font-size:12px;font-weight:600}
+.tab-btn.active .count{background:var(--gold);color:#fff}
+.appr-table{width:100%;border-collapse:collapse;font-size:13px}
+.appr-table th{text-align:left;color:var(--muted);font-size:12px;padding:8px;background:var(--primary);color:var(--gold);position:sticky;top:0;font-weight:600}
+.appr-table td{padding:10px 8px;border-bottom:1px solid var(--border);vertical-align:middle}
+.appr-table tr:hover{background:rgba(173,156,130,.06)}
+.slip-thumb{width:60px;height:60px;object-fit:cover;border-radius:6px;cursor:pointer;border:1px solid var(--border)}
+.slip-thumb:hover{border-color:var(--gold)}
+.btn-approve{padding:6px 14px;background:var(--ok);color:#fff;border:none;border-radius:6px;font-weight:600;cursor:pointer;font-size:12px}
+.btn-approve:hover{opacity:.9}
+.btn-approve:disabled{opacity:.5;cursor:not-allowed}
+.btn-reject{padding:6px 14px;background:var(--err);color:#fff;border:none;border-radius:6px;font-weight:600;cursor:pointer;font-size:12px;margin-left:6px}
+.btn-reject:hover{opacity:.9}
+.auto-pill{display:inline-block;padding:2px 8px;border-radius:8px;font-size:11px;font-weight:600;margin-left:6px}
+.auto-pill.ok{background:#e8f5e9;color:#2e7d32}
+.auto-pill.fail{background:#fff3e0;color:#e65100}
+.status-badge{display:inline-block;padding:3px 10px;border-radius:10px;font-size:11px;font-weight:600}
+.status-verified{background:#e8f5e9;color:#2e7d32}
+.status-paid{background:#fff3e0;color:#e65100}
+.empty{text-align:center;padding:60px 20px;color:var(--muted)}
+.empty p{font-size:48px;margin-bottom:12px}
+.bc-no{font-family:monospace;font-size:12px;color:var(--gold-dark)}
+.lightbox{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:1000;display:none;align-items:center;justify-content:center;padding:20px;cursor:pointer}
+.lightbox img{max-width:90%;max-height:90vh;object-fit:contain;border-radius:8px}
+</style>
+</head><body>
+<div id="nav"></div>
+<div class="container">
+  <h2 style="margin-bottom:4px" id="pageTitle">รายการอนุมัติการชำระเงิน</h2>
+  <p style="color:var(--muted);font-size:13px;margin-bottom:16px" id="pageSub">Finance ตรวจสอบสลิปก่อนสร้าง BC Sales Order</p>
+
+  <div class="tab-row">
+    <button class="tab-btn active" data-tab="pending" onclick="switchTab('pending')">
+      ⏳ ต้องอนุมัติ <span class="count" id="pendingCount">0</span>
+    </button>
+    <button class="tab-btn" data-tab="approved" onclick="switchTab('approved')">
+      ✅ อนุมัติแล้ว <span class="count" id="approvedCount">0</span>
+    </button>
+    <button class="tab-btn" data-tab="rejected" onclick="switchTab('rejected')">
+      ❌ ปฏิเสธ <span class="count" id="rejectedCount">0</span>
+    </button>
+  </div>
+
+  <!-- Pending panel -->
+  <div id="panelPending">
+    <div class="card" style="padding:0;overflow-x:auto">
+      <table class="appr-table">
+        <thead>
+          <tr>
+            <th>วันที่</th>
+            <th>คำสั่งซื้อ</th>
+            <th>สาขา</th>
+            <th>ยอด</th>
+            <th>สลิป</th>
+            <th>SlipOK auto-check</th>
+            <th>จัดการ</th>
+          </tr>
+        </thead>
+        <tbody id="pendingBody"><tr><td colspan="7" class="empty">กำลังโหลด...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Approved panel -->
+  <div id="panelApproved" style="display:none">
+    <div class="card" style="padding:0;overflow-x:auto">
+      <table class="appr-table">
+        <thead>
+          <tr>
+            <th>วันที่อนุมัติ</th>
+            <th>คำสั่งซื้อ</th>
+            <th>สาขา</th>
+            <th>ยอด</th>
+            <th>BC SO</th>
+            <th>BC Invoice</th>
+            <th>ผู้อนุมัติ</th>
+            <th>สลิป</th>
+          </tr>
+        </thead>
+        <tbody id="approvedBody"><tr><td colspan="8" class="empty">กำลังโหลด...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Rejected panel -->
+  <div id="panelRejected" style="display:none">
+    <div class="card" style="padding:0;overflow-x:auto">
+      <table class="appr-table">
+        <thead>
+          <tr>
+            <th>วันที่ปฏิเสธ</th>
+            <th>คำสั่งซื้อ</th>
+            <th>สาขา</th>
+            <th>ยอด</th>
+            <th style="min-width:220px">เหตุผล</th>
+            <th>ผู้ปฏิเสธ</th>
+            <th>สลิป</th>
+          </tr>
+        </thead>
+        <tbody id="rejectedBody"><tr><td colspan="7" class="empty">กำลังโหลด...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Lightbox for slip thumbnails -->
+<div id="lightbox" class="lightbox" onclick="this.style.display='none'"><img id="lightboxImg"></div>
+
+<!-- Reject reason modal -->
+<div id="rejectModal" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1001;display:none;align-items:center;justify-content:center;padding:20px">
+  <div style="background:var(--card);border:1px solid var(--border);border-radius:14px;padding:22px;max-width:440px;width:100%;position:relative">
+    <button onclick="closeRejectModal()" style="position:absolute;top:10px;right:14px;background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer">&times;</button>
+    <h3 style="margin-bottom:6px;color:var(--err)">❌ ปฏิเสธการชำระเงิน</h3>
+    <p style="color:var(--muted);font-size:13px;margin-bottom:14px">คำสั่งซื้อ <strong id="rejOrderNum" style="color:var(--text)"></strong></p>
+
+    <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px">เหตุผลในการปฏิเสธ <span style="color:var(--err)">*</span></label>
+    <textarea id="rejReason" rows="4" maxlength="500"
+      placeholder="เช่น สลิปไม่ชัดเจน · ยอดเงินไม่ตรง · ผู้รับโอนไม่ถูกต้อง · สลิปถูกตัดต่อ ฯลฯ"
+      style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-family:inherit;resize:vertical;font-size:14px"></textarea>
+    <div style="font-size:11px;color:var(--muted);text-align:right;margin-top:4px"><span id="rejCharCount">0</span> / 500</div>
+
+    <div style="display:flex;gap:10px;margin-top:14px">
+      <button class="btn ghost" onclick="closeRejectModal()" style="flex:1">ยกเลิก</button>
+      <button id="rejConfirmBtn" style="flex:1;padding:10px;background:var(--err);color:#fff;border:none;border-radius:8px;font-weight:600;cursor:pointer" onclick="confirmReject()">ยืนยันปฏิเสธ</button>
+    </div>
+    <div class="err" id="rejErr" style="margin-top:8px"></div>
+  </div>
+</div>
+
+<script src="/js/app.js"></script>
+<script>
+if(!requireLogin()) throw '';
+const u = getUser();
+const HQ_ROLES = ['super_admin','admin_scm','finance'];
+// Only HQ-tier can see approvals. Branch users (incl. branch_owner) get
+// kicked to their landing so they don't end up here by URL guessing.
+if (!HQ_ROLES.includes(u.role)) { location.href = '/index.html'; throw ''; }
+
+document.getElementById('nav').innerHTML = renderNav('approvals.html');
+
+let pendingData = [];
+let approvedData = [];
+let rejectedData = [];
+
+function switchTab(tab) {
+  document.getElementById('panelPending').style.display  = tab === 'pending'  ? 'block' : 'none';
+  document.getElementById('panelApproved').style.display = tab === 'approved' ? 'block' : 'none';
+  document.getElementById('panelRejected').style.display = tab === 'rejected' ? 'block' : 'none';
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  // Reflect in URL so a refresh keeps you on the same tab
+  const url = new URL(location.href);
+  url.searchParams.set('tab', tab);
+  history.replaceState(null, '', url);
+}
+
+async function load() {
+  try {
+    const orders = await api('/api/orders');
+    pendingData  = orders.filter(o => o.payment_status === 'paid');
+    approvedData = orders.filter(o => o.payment_status === 'verified');
+    rejectedData = orders.filter(o => o.payment_status === 'failed');
+    document.getElementById('pendingCount').textContent  = pendingData.length;
+    document.getElementById('approvedCount').textContent = approvedData.length;
+    document.getElementById('rejectedCount').textContent = rejectedData.length;
+    renderPending();
+    renderApproved();
+    renderRejected();
+  } catch (e) {
+    toast('โหลดไม่สำเร็จ: ' + e.message);
+  }
+}
+
+async function renderPending() {
+  const el = document.getElementById('pendingBody');
+  if (!pendingData.length) {
+    el.innerHTML = `<tr><td colspan="7" class="empty"><p>📭</p>ไม่มีรายการรอตรวจสอบ</td></tr>`;
+    return;
+  }
+  // Pull payment details (slip path + auto-verify hint) for each order in
+  // parallel so the table renders quickly even with many pending slips.
+  const details = await Promise.all(pendingData.map(o => api('/api/orders/'+o.id).catch(() => null)));
+
+  el.innerHTML = pendingData.map((o, idx) => {
+    const det = details[idx] || {};
+    const pay = det.payment || {};
+    const slipPath = pay.slip_path || '';
+    // auto_verify_passed = 1/0 INTEGER from SQLite. Treat 1 as PASS,
+    // anything else (0 or null when SlipOK wasn't run) as not-passed.
+    const autoPassed = pay.auto_verify_passed === 1;
+    const autoReason = pay.auto_verify_reason || '';
+    const autoPill = pay.slip_path
+      ? (autoPassed
+        ? `<span class="auto-pill ok">✅ SlipOK ผ่าน</span>`
+        : `<span class="auto-pill fail">⚠️ SlipOK ไม่ผ่าน</span>`)
+      : '<span style="color:var(--muted);font-size:11px">—</span>';
+    return `
+      <tr>
+        <td style="white-space:nowrap;color:var(--muted)">${o.created_at}</td>
+        <td><strong>${o.order_number}</strong></td>
+        <td>${o.branch_name || o.user_name || '-'}</td>
+        <td style="font-weight:700;color:var(--gold-dark)">฿${o.total.toLocaleString()}</td>
+        <td>${slipPath
+          ? `<img src="${slipPath}" class="slip-thumb" onclick="openLightbox('${slipPath}')">`
+          : '<span style="color:var(--muted);font-size:11px">—</span>'}</td>
+        <td>${autoPill}${autoReason ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">${autoReason}</div>` : ''}</td>
+        <td>
+          <button class="btn-approve" onclick="approveOrder('${o.id}', this)">✅ อนุมัติ</button>
+          <button class="btn-reject" onclick="openRejectModal('${o.id}','${o.order_number}')">❌ ปฏิเสธ</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function renderApproved() {
+  const el = document.getElementById('approvedBody');
+  if (!approvedData.length) {
+    el.innerHTML = `<tr><td colspan="8" class="empty"><p>📋</p>ยังไม่มีรายการที่อนุมัติ</td></tr>`;
+    return;
+  }
+  el.innerHTML = approvedData.slice(0, 100).map(o => `
+    <tr>
+      <td style="white-space:nowrap;color:var(--muted)">${o.paid_at || o.created_at}</td>
+      <td><strong>${o.order_number}</strong></td>
+      <td>${o.branch_name || o.user_name || '-'}</td>
+      <td style="font-weight:700;color:var(--gold-dark)">฿${o.total.toLocaleString()}</td>
+      <td><span class="bc-no">${o.bc_so_no || '—'}</span></td>
+      <td><span class="bc-no">${o.bc_invoice_no || (o.bc_posted ? '(posted)' : '—')}</span></td>
+      <td style="font-size:12px">${o.verified_by_name || '-'}</td>
+      <td><a href="/orders.html?id=${o.id}" style="font-size:11px;color:var(--gold-dark);text-decoration:underline">ดูรายละเอียด</a></td>
+    </tr>
+  `).join('');
+}
+
+async function renderRejected() {
+  const el = document.getElementById('rejectedBody');
+  if (!rejectedData.length) {
+    el.innerHTML = `<tr><td colspan="7" class="empty"><p>📪</p>ยังไม่มีรายการที่ปฏิเสธ</td></tr>`;
+    return;
+  }
+  // Fetch details in parallel so we can pull slip_path + rejected_by_name
+  const details = await Promise.all(rejectedData.slice(0, 100).map(o => api('/api/orders/'+o.id).catch(() => null)));
+
+  el.innerHTML = rejectedData.slice(0, 100).map((o, idx) => {
+    const det = details[idx] || {};
+    const slipPath = (det.payment || {}).slip_path || '';
+    return `
+      <tr>
+        <td style="white-space:nowrap;color:var(--muted)">${o.rejected_at || '-'}</td>
+        <td><strong>${o.order_number}</strong></td>
+        <td>${o.branch_name || o.user_name || '-'}</td>
+        <td style="font-weight:700;color:var(--gold-dark)">฿${o.total.toLocaleString()}</td>
+        <td style="color:#c62828;font-size:13px;max-width:260px">${o.reject_reason || '<span style="color:var(--muted)">(ไม่ระบุ)</span>'}</td>
+        <td style="font-size:12px">${o.rejected_by_name || det.rejected_by_name || '-'}</td>
+        <td>${slipPath
+          ? `<img src="${slipPath}" class="slip-thumb" onclick="openLightbox('${slipPath}')">`
+          : '<span style="color:var(--muted);font-size:11px">—</span>'}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+async function approveOrder(id, btn) {
+  btn.disabled = true;
+  btn.textContent = 'กำลังอนุมัติ...';
+  try {
+    const res = await api('/api/orders/'+id+'/verify', { method:'POST', body: JSON.stringify({action:'approve'}) });
+    toast(res.message || 'OK');
+    await load();
+  } catch (e) {
+    toast('ไม่สำเร็จ: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = '✅ อนุมัติ';
+  }
+}
+
+// ─── Reject reason modal ───
+let currentRejectId = null;
+function openRejectModal(id, orderNum) {
+  currentRejectId = id;
+  document.getElementById('rejOrderNum').textContent = orderNum;
+  document.getElementById('rejReason').value = '';
+  document.getElementById('rejErr').textContent = '';
+  document.getElementById('rejCharCount').textContent = '0';
+  document.getElementById('rejectModal').style.display = 'flex';
+  setTimeout(() => document.getElementById('rejReason').focus(), 50);
+}
+function closeRejectModal() {
+  document.getElementById('rejectModal').style.display = 'none';
+  currentRejectId = null;
+}
+// Live char counter so user sees how close they are to the 500 cap
+document.getElementById('rejReason').addEventListener('input', e => {
+  document.getElementById('rejCharCount').textContent = e.target.value.length;
+});
+
+async function confirmReject() {
+  if (!currentRejectId) return;
+  const reason = document.getElementById('rejReason').value.trim();
+  const err = document.getElementById('rejErr');
+  if (!reason) {
+    err.textContent = 'กรุณาระบุเหตุผลในการปฏิเสธ';
+    return;
+  }
+  if (reason.length > 500) {
+    err.textContent = 'เหตุผลยาวเกิน 500 ตัวอักษร';
+    return;
+  }
+  const btn = document.getElementById('rejConfirmBtn');
+  btn.disabled = true;
+  btn.textContent = 'กำลังปฏิเสธ...';
+  try {
+    const res = await api('/api/orders/'+currentRejectId+'/verify', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'reject', reason })
+    });
+    toast(res.message || 'ปฏิเสธแล้ว');
+    closeRejectModal();
+    await load();
+  } catch (e) {
+    err.textContent = e.message;
+    btn.disabled = false;
+    btn.textContent = 'ยืนยันปฏิเสธ';
+  }
+}
+
+function openLightbox(src) {
+  document.getElementById('lightboxImg').src = src;
+  document.getElementById('lightbox').style.display = 'flex';
+}
+
+// Honour ?tab= so the two nav links open in the right tab
+const initialTab = new URLSearchParams(location.search).get('tab') || 'pending';
+switchTab(initialTab);
+
+load();
+// Refresh every 30s so a newly-uploaded slip appears without a manual reload
+setInterval(load, 30000);
+</script>
+</body></html>
