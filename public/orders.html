@@ -140,11 +140,21 @@ async function showDetail(id) {
 
   // Payment section for pending orders
   if (o.payment_status === 'pending') {
+    const isCredit = o.payment_method === 'credit_7d';
     const remaining = getRemaining(o.created_at);
     const urgent = remaining > 0 && remaining < 5 * 60 * 1000;
     html += `<hr style="border-color:var(--border);margin:12px 0">
       <h4 style="margin-bottom:12px">${t('orders.pay')}</h4>`;
-    if (remaining > 0) {
+    if (isCredit) {
+      // Credit orders skip the 30-min cancel timer entirely. Show due date
+      // (and a red "เกินกำหนด" badge if past it) instead of countdown.
+      const dueMs = o.credit_due_at ? new Date(o.credit_due_at.replace(' ', 'T')).getTime() : 0;
+      const overdue = dueMs && Date.now() > dueMs;
+      html += `<div style="text-align:center;padding:14px;margin-bottom:12px;background:${overdue?'#fee2e2':'#fef3c7'};border-radius:8px">
+        <div style="font-size:14px;color:${overdue?'#991b1b':'#92400e'};font-weight:600">${overdue ? '⚠ ' + t('orders.credit_overdue') : '📅 ' + t('orders.credit_due')}</div>
+        <div style="font-size:13px;margin-top:4px">${o.credit_due_at || ''}</div>
+      </div>`;
+    } else if (remaining > 0) {
       html += `<div style="text-align:center;margin-bottom:12px">
         <div class="countdown ${urgent?'urgent':''}" style="font-size:18px;display:inline-flex" id="modalCountdown" data-expire="${new Date(o.created_at).getTime() + CANCEL_TIMEOUT_MIN*60*1000}">⏱ ${fmtCountdown(remaining)}</div>
         <p style="font-size:12px;color:var(--muted);margin-top:4px">${t('orders.pay_hint')}</p>

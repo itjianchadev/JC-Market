@@ -57,6 +57,20 @@
           <hr style="border-color:var(--border);margin:12px 0">
           <div style="display:flex;justify-content:space-between;font-size:24px;font-weight:700"><span data-i18n="checkout.grand">รวม</span><span id="grandTotal" style="color:var(--gold)"></span></div>
           <div style="color:var(--muted);font-size:12px;margin-top:4px;text-align:right" data-i18n="checkout.vat_note">VAT คำนวณจาก D365 BC เมื่อยืนยันสั่งซื้อ</div>
+
+          <!-- Payment method picker — visible only for fruit orders -->
+          <div id="payMethodBox" style="display:none;margin-top:16px;padding:12px;border:1px solid var(--border);border-radius:8px">
+            <div style="font-size:13px;font-weight:600;margin-bottom:8px" data-i18n="checkout.payment_method">วิธีชำระเงิน</div>
+            <label style="display:flex;gap:8px;align-items:center;padding:8px;border-radius:6px;cursor:pointer;font-size:14px">
+              <input type="radio" name="paymentMethod" value="immediate" checked>
+              <span data-i18n="checkout.pay_immediate">ชำระทันที</span>
+            </label>
+            <label style="display:flex;gap:8px;align-items:center;padding:8px;border-radius:6px;cursor:pointer;font-size:14px">
+              <input type="radio" name="paymentMethod" value="credit_7d">
+              <span data-i18n="checkout.pay_credit_7d">เครดิต 7 วัน</span>
+            </label>
+          </div>
+
           <button class="btn" style="width:100%;margin-top:20px;font-size:16px;padding:14px" onclick="placeOrder()" data-i18n="checkout.place">ยืนยันสั่งซื้อ</button>
           <div class="err" id="orderErr"></div>
         </div>
@@ -183,6 +197,12 @@ async function init() {
     renderCartItems();
     document.getElementById('subtotal').textContent = `฿${cartData.subtotal.toLocaleString()}`;
     document.getElementById('grandTotal').textContent = `฿${cartData.subtotal.toLocaleString()}`;
+    // Show payment method picker only for fruit carts. Cart is uniform by the
+    // no-mixed-categories rule, so the first item's group represents all.
+    const firstCat = cartData.items[0] && cartData.items[0].category;
+    if (firstCat && categoryGroup(firstCat) === 'fruit') {
+      document.getElementById('payMethodBox').style.display = 'block';
+    }
   } catch (e) { alert(e.message); }
 }
 
@@ -201,27 +221,53 @@ let lastOrderResp = null;
 let savedItems = null; // snapshot ของ items ก่อน cart ถูกล้าง ใช้สำหรับ PDF
 async function placeOrder() {
   const note = document.getElementById('note').value;
+  const methodInput = document.querySelector('input[name="paymentMethod"]:checked');
+  const paymentMethod = methodInput ? methodInput.value : 'immediate';
   try {
     // snapshot items ก่อน server ล้าง cart
     savedItems = cartData ? cartData.items.map(it => ({
       item_no: it.item_no, item_name: it.item_name, item_name_en: it.item_name_en,
       quantity: it.quantity, uom: it.uom, unit_price: it.unit_price,
     })) : [];
-    const r = await api('/api/orders/checkout', { method:'POST', body: JSON.stringify({ note }) });
+    const r = await api('/api/orders/checkout', { method:'POST', body: JSON.stringify({ note, payment_method: paymentMethod }) });
     currentOrderId = r.order_id;
     lastOrderResp = r;
-    // Show step 2
+    updateCartBadge();
+
+    // Credit-7d: skip the QR/slip step entirely — order is locked in, BC SO+PO
+    // already created. Go straight to the success page with credit info.
+    if (r.payment_method === 'credit_7d') {
+      document.getElementById('step1').style.display = 'none';
+      document.getElementById('step3').style.display = 'block';
+      document.getElementById('doneOrderNo').textContent = r.order_number;
+      document.getElementById('doneIcon').textContent = '📅';
+      document.getElementById('doneTitle').style.color = '#f59e0b';
+      document.getElementById('doneTitle').textContent = t('checkout.credit_title');
+      document.getElementById('doneMsg').textContent = t('checkout.credit_msg', { due: r.credit_due_at || '' });
+      // Show BC SO/PO numbers if returned (fruit orders create them immediately)
+      const detail = document.getElementById('verifyDetail');
+      const bcSo = r.bc_so || {};
+      const bcPo = r.bc_po || {};
+      if (bcSo.bc_so_no || bcPo.bc_po_no) {
+        detail.style.display = 'block';
+        detail.querySelector('.card').innerHTML = `
+          ${bcSo.bc_so_no ? `<div style="margin-bottom:6px"><strong>${t('checkout.bc_so')}:</strong> ${bcSo.bc_so_no}</div>` : ''}
+          ${bcPo.bc_po_no ? `<div style="margin-bottom:6px"><strong>${t('checkout.bc_po')}:</strong> ${bcPo.bc_po_no}</div>` : ''}
+        `;
+      }
+      return;
+    }
+
+    // Immediate payment: continue to step 2 (QR + slip upload)
     document.getElementById('step1').style.display = 'none';
     document.getElementById('step2').style.display = 'block';
     renderStep1Label();
-    // Start 30-min payment countdown
     startPayCountdown(r.created_at, r.cancel_timeout_min);
     document.getElementById('qrAmount').textContent = `฿${r.total.toLocaleString()}`;
     document.getElementById('qrImg').src = r.qr_data_url;
     document.getElementById('doneOrderNo').textContent = r.order_number;
     renderVatInfo();
     renderBcSoInfo();
-    updateCartBadge();
   } catch (e) {
     document.getElementById('orderErr').textContent = e.message;
   }
