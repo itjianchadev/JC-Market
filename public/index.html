@@ -12,6 +12,9 @@
 .sidebar .cat-list li:hover{background:var(--beige);color:var(--text)}
 .sidebar .cat-list li.active{background:var(--gold);color:#fff;font-weight:600}
 .sidebar .cat-list li .count{font-size:12px;opacity:.7}
+.sidebar .cat-list li.group-header{margin-top:8px;font-weight:700;color:var(--gold-dark);font-size:13px;letter-spacing:.3px;text-transform:none}
+.sidebar .cat-list li.group-header.active{background:var(--gold);color:#fff}
+.sidebar .cat-list li.sub{padding-left:26px;font-size:13px}
 .main-area{flex:1;min-width:0}
 /* Item list table */
 .item-table{width:100%;border-collapse:separate;border-spacing:0}
@@ -159,7 +162,8 @@ const me = getUser();
 const isAdminView = me && (me.role === 'super_admin' || me.role === 'admin_scm');
 
 let selectedItem = null;
-let activeCat = '';
+let activeCat = '';      // selected sub-category code (mutually exclusive with activeGroup)
+let activeGroup = '';    // selected top-level group: '' | 'general' | 'fruit'
 let allItems = [];
 let categories = [];
 
@@ -200,16 +204,36 @@ async function loadAll() {
 
 function renderCats() {
   const total = allItems.length;
-  let html = `<li class="${activeCat===''?'active':''}" onclick="setCat('')">${t('common.all')} <span class="count">${total}</span></li>`;
+  const allActive = activeCat==='' && activeGroup==='';
+  let html = `<li class="${allActive?'active':''}" onclick="setAll()">${t('common.all')} <span class="count">${total}</span></li>`;
+
+  // Bucket sub-categories under their top-level group
+  const buckets = { general: [], fruit: [] };
+  let groupTotals = { general: 0, fruit: 0 };
   for (const [cat, count] of categories) {
-    const safe = cat.replace(/'/g, "\\'");
-    html += `<li class="${activeCat===cat?'active':''}" onclick="setCat('${safe}')">${catName(cat)} <span class="count">${count}</span></li>`;
+    const g = categoryGroup(cat);
+    buckets[g].push([cat, count]);
+    groupTotals[g] += count;
+  }
+
+  for (const groupKey of ['general', 'fruit']) {
+    if (!buckets[groupKey].length) continue;
+    const groupLabel = t('shop.group_' + groupKey);
+    const groupActive = activeGroup === groupKey;
+    html += `<li class="group-header ${groupActive?'active':''}" onclick="setGroup('${groupKey}')">${groupLabel} <span class="count">${groupTotals[groupKey]}</span></li>`;
+    for (const [cat, count] of buckets[groupKey]) {
+      const safe = cat.replace(/'/g, "\\'");
+      html += `<li class="sub ${activeCat===cat?'active':''}" onclick="setCat('${safe}')">${catName(cat)} <span class="count">${count}</span></li>`;
+    }
   }
   document.getElementById('catList').innerHTML = html;
 }
 
+function setAll(){ activeCat=''; activeGroup=''; renderCats(); renderItems(); }
+function setGroup(g){ activeGroup = g; activeCat = ''; renderCats(); renderItems(); }
 function setCat(cat) {
   activeCat = cat;
+  activeGroup = '';
   renderCats();
   renderItems();
 }
@@ -220,6 +244,7 @@ function renderItems() {
   let oosHidden = 0;
   let filtered = allItems.filter(it => {
     if (activeCat && (it.category||'Other') !== activeCat) return false;
+    if (activeGroup && categoryGroup(it.category||'Other') !== activeGroup) return false;
     if (q) {
       const hay = ((it.name||'') + ' ' + (it.name_en||'') + ' ' + (it.item_no||'')).toLowerCase();
       if (!hay.includes(q)) return false;
@@ -229,7 +254,9 @@ function renderItems() {
   });
   const baseInfo = activeCat
     ? t('shop.showing_cat', { n: filtered.length, cat: catName(activeCat) })
-    : t('shop.showing', { n: filtered.length });
+    : activeGroup
+      ? t('shop.showing_cat', { n: filtered.length, cat: t('shop.group_' + activeGroup) })
+      : t('shop.showing', { n: filtered.length });
   document.getElementById('resultInfo').textContent = oosHidden > 0
     ? `${baseInfo} · ${t('shop.oos_hidden', { n: oosHidden })}`
     : baseInfo;
