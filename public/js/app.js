@@ -31,6 +31,7 @@ const I18N = {
     'shop.page_title':'ร้านค้า — JC-Market',
     'shop.categories':'หมวดหมู่','shop.search_placeholder':'ค้นหาสินค้า...',
     'shop.group_general':'สินค้าทั่วไป','shop.group_fruit':'ผลไม้สด',
+    'shop.overdue_credit':'มีออร์เดอร์เครดิตเกินกำหนดค้าง {n} รายการ — สั่งผลไม้สดใหม่ไม่ได้จนกว่าจะชำระครบ (สั่งสินค้าทั่วไปได้ปกติ)',
     'shop.col.code':'รหัส','shop.col.name':'ชื่อสินค้า','shop.col.price':'ราคา',
     'shop.col.stock':'คงเหลือ','shop.col.uom':'หน่วย','shop.col.action':'สั่งซื้อ',
     'shop.showing':'แสดง {n} รายการ','shop.showing_cat':'แสดง {n} รายการ ในหมวด {cat}',
@@ -70,6 +71,13 @@ const I18N = {
     'checkout.order_no_label':'คำสั่งซื้อ',
     'checkout.pending_title':'ส่งสลิปแล้ว — รอ Finance ตรวจสอบ',
     'checkout.pending_msg':'คำสั่งซื้อนี้จะสำเร็จเมื่อ Finance ตรวจสอบแล้วเท่านั้น',
+    'checkout.payment_method':'วิธีชำระเงิน',
+    'checkout.pay_immediate':'ชำระทันที (โอนพร้อมส่งสลิป)',
+    'checkout.pay_credit_7d':'เครดิต 7 วัน (ชำระภายใน 7 วันหลังสั่ง)',
+    'checkout.credit_title':'รับออร์เดอร์เครดิต 7 วัน',
+    'checkout.credit_msg':'กำหนดชำระเงินภายใน {due} · เมื่อโอนแล้วอัปสลิปได้ที่หน้าคำสั่งซื้อ',
+    'checkout.credit_overdue':'⚠ เกินกำหนดชำระ (เครดิต 7 วัน)',
+    'checkout.credit_overdue_sub':'ยังสามารถอัปสลิปได้ · สาขานี้จะสั่งผลไม้สดใหม่ไม่ได้จนกว่าจะชำระค้างหมด',
     'checkout.transfer_amount':'ยอดโอน','checkout.sender':'ผู้โอน','checkout.receiver':'ผู้รับ',
     'checkout.ref':'Ref',
     'checkout.auto_pass_hint':'✓ ตรวจสลิปอัตโนมัติผ่าน — รอ Finance อนุมัติ',
@@ -91,6 +99,8 @@ const I18N = {
     'orders.items':'รายการสินค้า','orders.subtotal':'ยอดสินค้า','orders.vat':'VAT','orders.grand':'รวมทั้งสิ้น',
     'orders.note_prefix':'หมายเหตุ: {note}','orders.pay':'ชำระเงิน',
     'orders.pay_hint':'กรุณาชำระเงินภายในเวลาที่กำหนด',
+    'orders.credit_due':'เครดิต 7 วัน · กำหนดชำระภายใน',
+    'orders.credit_overdue':'เกินกำหนดชำระ (เครดิต 7 วัน)',
     'orders.scan_qr':'สแกน QR ด้วยแอปธนาคาร','orders.upload_click':'คลิกเพื่ออัพโหลดสลิป',
     'orders.upload_types':'รองรับ JPG, PNG, PDF','orders.send_slip':'ส่งสลิป',
     'orders.uploading':'กำลังอัพโหลด...','orders.cancel_order':'✕ ยกเลิกคำสั่งซื้อ',
@@ -233,6 +243,7 @@ const I18N = {
     'shop.page_title':'Shop — JC-Market',
     'shop.categories':'Categories','shop.search_placeholder':'Search items...',
     'shop.group_general':'General products','shop.group_fruit':'Fresh fruit',
+    'shop.overdue_credit':'{n} credit order(s) overdue — fresh fruit ordering is locked until all are settled (general products remain available)',
     'shop.col.code':'Code','shop.col.name':'Item Name','shop.col.price':'Price',
     'shop.col.stock':'Stock','shop.col.uom':'Unit','shop.col.action':'Order',
     'shop.showing':'Showing {n} items','shop.showing_cat':'Showing {n} items in {cat}',
@@ -272,6 +283,13 @@ const I18N = {
     'checkout.order_no_label':'Order',
     'checkout.pending_title':'Slip uploaded — awaiting Finance review',
     'checkout.pending_msg':'This order will be completed only after Finance has reviewed it.',
+    'checkout.payment_method':'Payment method',
+    'checkout.pay_immediate':'Pay now (transfer + upload slip)',
+    'checkout.pay_credit_7d':'Credit 7 days (settle within 7 days)',
+    'checkout.credit_title':'Order placed on 7-day credit',
+    'checkout.credit_msg':'Payment due by {due} · upload the slip from the Orders page once paid.',
+    'checkout.credit_overdue':'⚠ Credit payment overdue (7-day)',
+    'checkout.credit_overdue_sub':'You can still upload a slip · this branch cannot order fresh fruit again until all outstanding credits are settled',
     'checkout.transfer_amount':'Transfer amount','checkout.sender':'Sender','checkout.receiver':'Receiver',
     'checkout.ref':'Ref',
     'checkout.auto_pass_hint':'✓ Auto-check passed — awaiting Finance approval',
@@ -293,6 +311,8 @@ const I18N = {
     'orders.items':'Items','orders.subtotal':'Subtotal','orders.vat':'VAT','orders.grand':'Total',
     'orders.note_prefix':'Note: {note}','orders.pay':'Payment',
     'orders.pay_hint':'Please pay within the time limit',
+    'orders.credit_due':'7-day credit · payment due by',
+    'orders.credit_overdue':'Overdue (7-day credit)',
     'orders.scan_qr':'Scan with your banking app','orders.upload_click':'Click to upload slip',
     'orders.upload_types':'Supports JPG, PNG, PDF','orders.send_slip':'Submit Slip',
     'orders.uploading':'Uploading...','orders.cancel_order':'✕ Cancel Order',
@@ -550,6 +570,19 @@ async function updateCartBadge() {
     if (badge) {
       badge.textContent = r.count || '';
       badge.style.display = r.count > 0 ? 'inline-flex' : 'none';
+    }
+    // Overdue-credit warning on the shop page. Banner is opt-in: page must
+    // include #overdueCreditBanner. We can't filter fruit items themselves
+    // — the FC sees the rule explained and the backend rejects fruit adds.
+    const banner = document.getElementById('overdueCreditBanner');
+    if (banner) {
+      const n = r.overdue_credit_count || 0;
+      if (n > 0) {
+        banner.innerHTML = `<strong>⚠ ${t('shop.overdue_credit', { n })}</strong>`;
+        banner.style.display = 'block';
+      } else {
+        banner.style.display = 'none';
+      }
     }
   } catch {}
 }

@@ -57,6 +57,20 @@
           <hr style="border-color:var(--border);margin:12px 0">
           <div style="display:flex;justify-content:space-between;font-size:24px;font-weight:700"><span data-i18n="checkout.grand">รวม</span><span id="grandTotal" style="color:var(--gold)"></span></div>
           <div style="color:var(--muted);font-size:12px;margin-top:4px;text-align:right" data-i18n="checkout.vat_note">VAT คำนวณจาก D365 BC เมื่อยืนยันสั่งซื้อ</div>
+
+          <!-- Payment method picker — visible only for fruit orders -->
+          <div id="payMethodBox" style="display:none;margin-top:16px;padding:12px;border:1px solid var(--border);border-radius:8px">
+            <div style="font-size:13px;font-weight:600;margin-bottom:8px" data-i18n="checkout.payment_method">วิธีชำระเงิน</div>
+            <label style="display:flex;gap:8px;align-items:center;padding:8px;border-radius:6px;cursor:pointer;font-size:14px">
+              <input type="radio" name="paymentMethod" value="immediate" checked>
+              <span data-i18n="checkout.pay_immediate">ชำระทันที</span>
+            </label>
+            <label style="display:flex;gap:8px;align-items:center;padding:8px;border-radius:6px;cursor:pointer;font-size:14px">
+              <input type="radio" name="paymentMethod" value="credit_7d">
+              <span data-i18n="checkout.pay_credit_7d">เครดิต 7 วัน</span>
+            </label>
+          </div>
+
           <button class="btn" style="width:100%;margin-top:20px;font-size:16px;padding:14px" onclick="placeOrder()" data-i18n="checkout.place">ยืนยันสั่งซื้อ</button>
           <div class="err" id="orderErr"></div>
         </div>
@@ -137,12 +151,20 @@ const CANCEL_TIMEOUT_MIN = 30;
 
 function fmtCountdown(ms) {
   if (ms <= 0) return '00:00';
+  // For durations longer than an hour (credit_7d), show day+hour granularity.
+  // Under an hour falls back to MM:SS so the immediate-pay timer still feels
+  // urgent.
+  if (ms >= 3600000) {
+    const days = Math.floor(ms / 86400000);
+    const hours = Math.floor((ms % 86400000) / 3600000);
+    return days > 0 ? `${days} วัน ${hours} ชม.` : `${hours} ชม.`;
+  }
   const min = Math.floor(ms / 60000);
   const sec = Math.floor((ms % 60000) / 1000);
   return `${String(min).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
 }
 
-function startPayCountdown(createdAtStr, timeoutMin) {
+function startPayCountdown(createdAtStr, timeoutMin, isCredit) {
   const createdMs = createdAtStr ? new Date(createdAtStr).getTime() : Date.now();
   const validCreated = isNaN(createdMs) ? Date.now() : createdMs;
   payExpireAt = validCreated + (timeoutMin || CANCEL_TIMEOUT_MIN) * 60 * 1000;
@@ -151,19 +173,32 @@ function startPayCountdown(createdAtStr, timeoutMin) {
   const textEl = document.getElementById('payTimerText');
   timerEl.style.display = 'flex';
   subEl.style.display = 'block';
+  if (isCredit) {
+    // Credit orders aren't auto-cancelled — replace the "or it gets cancelled"
+    // sub-text with a less alarming credit note. ⏱ icon is still useful since
+    // we are counting down to a due date.
+    subEl.textContent = t('checkout.credit_msg', { due: '' }).replace(' · upload the slip from the Orders page once paid.', '').replace(' · เมื่อโอนแล้วอัปสลิปได้ที่หน้าคำสั่งซื้อ', '');
+  }
   if (payTimerInterval) clearInterval(payTimerInterval);
   const tick = () => {
     const remaining = Math.max(0, payExpireAt - Date.now());
     textEl.textContent = fmtCountdown(remaining);
-    timerEl.classList.toggle('urgent', remaining > 0 && remaining < 5 * 60 * 1000);
+    // "urgent" pulse: under 5 min for immediate, under 12 h for credit
+    const urgentThreshold = isCredit ? 12 * 60 * 60 * 1000 : 5 * 60 * 1000;
+    timerEl.classList.toggle('urgent', remaining > 0 && remaining < urgentThreshold);
     if (remaining <= 0) {
       clearInterval(payTimerInterval);
       payTimerInterval = null;
       timerEl.classList.remove('urgent');
       timerEl.classList.add('expired');
-      timerEl.innerHTML = t('checkout.pay_expired');
+      timerEl.innerHTML = isCredit ? t('checkout.credit_overdue') : t('checkout.pay_expired');
+      if (isCredit) {
+        // Overdue but slip upload still allowed — no auto-redirect.
+        subEl.textContent = t('checkout.credit_overdue_sub');
+        return;
+      }
       subEl.textContent = t('checkout.pay_cancelled_sub');
-      // Disable upload controls
+      // Disable upload controls for immediate orders only
       const uploadArea = document.getElementById('dropArea');
       const uploadBtn = document.getElementById('uploadBtn');
       if (uploadArea) uploadArea.style.pointerEvents = 'none', uploadArea.style.opacity = '0.5';
@@ -183,6 +218,12 @@ async function init() {
     renderCartItems();
     document.getElementById('subtotal').textContent = `฿${cartData.subtotal.toLocaleString()}`;
     document.getElementById('grandTotal').textContent = `฿${cartData.subtotal.toLocaleString()}`;
+    // Show payment method picker only for fruit carts. Cart is uniform by the
+    // no-mixed-categories rule, so the first item's group represents all.
+    const firstCat = cartData.items[0] && cartData.items[0].category;
+    if (firstCat && categoryGroup(firstCat) === 'fruit') {
+      document.getElementById('payMethodBox').style.display = 'block';
+    }
   } catch (e) { alert(e.message); }
 }
 
@@ -201,27 +242,54 @@ let lastOrderResp = null;
 let savedItems = null; // snapshot ของ items ก่อน cart ถูกล้าง ใช้สำหรับ PDF
 async function placeOrder() {
   const note = document.getElementById('note').value;
+  const methodInput = document.querySelector('input[name="paymentMethod"]:checked');
+  const paymentMethod = methodInput ? methodInput.value : 'immediate';
   try {
     // snapshot items ก่อน server ล้าง cart
     savedItems = cartData ? cartData.items.map(it => ({
       item_no: it.item_no, item_name: it.item_name, item_name_en: it.item_name_en,
       quantity: it.quantity, uom: it.uom, unit_price: it.unit_price,
     })) : [];
-    const r = await api('/api/orders/checkout', { method:'POST', body: JSON.stringify({ note }) });
+    const r = await api('/api/orders/checkout', { method:'POST', body: JSON.stringify({ note, payment_method: paymentMethod }) });
     currentOrderId = r.order_id;
     lastOrderResp = r;
-    // Show step 2
+    updateCartBadge();
+
+    // Credit_7d: skip the QR/slip step — order is locked in, BC SO+PO already
+    // created. Jump to step 3 with a simple success message. The FC opens the
+    // order from /orders.html when they're ready to pay (QR + upload are
+    // rendered there from /api/orders/:id/qr on demand).
+    if (r.payment_method === 'credit_7d') {
+      document.getElementById('step1').style.display = 'none';
+      document.getElementById('step3').style.display = 'block';
+      document.getElementById('doneOrderNo').textContent = r.order_number;
+      document.getElementById('doneIcon').textContent = '📅';
+      document.getElementById('doneTitle').style.color = '#f59e0b';
+      document.getElementById('doneTitle').textContent = t('checkout.credit_title');
+      document.getElementById('doneMsg').textContent = t('checkout.credit_msg', { due: r.credit_due_at || '' });
+      const detail = document.getElementById('verifyDetail');
+      const bcSo = r.bc_so || {};
+      const bcPo = r.bc_po || {};
+      if (bcSo.bc_so_no || bcPo.bc_po_no) {
+        detail.style.display = 'block';
+        detail.querySelector('.card').innerHTML = `
+          ${bcSo.bc_so_no ? `<div style="margin-bottom:6px"><strong>${t('checkout.bc_so')}:</strong> ${bcSo.bc_so_no}</div>` : ''}
+          ${bcPo.bc_po_no ? `<div style="margin-bottom:6px"><strong>${t('checkout.bc_po')}:</strong> ${bcPo.bc_po_no}</div>` : ''}
+        `;
+      }
+      return;
+    }
+
+    // Immediate payment: continue to step 2 (QR + slip upload)
     document.getElementById('step1').style.display = 'none';
     document.getElementById('step2').style.display = 'block';
     renderStep1Label();
-    // Start 30-min payment countdown
-    startPayCountdown(r.created_at, r.cancel_timeout_min);
+    startPayCountdown(r.created_at, r.cancel_timeout_min, false);
     document.getElementById('qrAmount').textContent = `฿${r.total.toLocaleString()}`;
     document.getElementById('qrImg').src = r.qr_data_url;
     document.getElementById('doneOrderNo').textContent = r.order_number;
     renderVatInfo();
     renderBcSoInfo();
-    updateCartBadge();
   } catch (e) {
     document.getElementById('orderErr').textContent = e.message;
   }

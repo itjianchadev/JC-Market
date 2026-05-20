@@ -402,6 +402,21 @@ const FRUIT_CATEGORIES_SRV = new Set(['Fruit fresh']);
 const categoryGroupSrv = cat => FRUIT_CATEGORIES_SRV.has(cat) ? 'fruit' : 'general';
 const groupLabelTH = g => g === 'fruit' ? 'ผลไม้สด' : 'สินค้าทั่วไป';
 
+// Block-list helper: a FC with any past-due credit order can't place new
+// fruit orders until they've settled. Returns the count of outstanding
+// overdue credits — 0 means clear to order fruit.
+function overdueCreditCount(userId) {
+  const row = db.prepare(`
+    SELECT COUNT(*) AS c FROM orders
+    WHERE user_id = ?
+      AND payment_method = 'credit_7d'
+      AND payment_status NOT IN ('verified', 'cancelled')
+      AND credit_due_at != ''
+      AND credit_due_at < datetime('now', 'localtime')
+  `).get(userId);
+  return row ? row.c : 0;
+}
+
 app.get('/api/cart', requireAuth, (req, res) => {
   const rows = db.prepare(`
     SELECT c.id, c.item_no, c.quantity, c.unit_price,
@@ -422,6 +437,17 @@ app.post('/api/cart/add', requireAuth, (req, res) => {
   const item = db.prepare('SELECT * FROM items_cache WHERE item_no=? AND active=1').get(item_no);
   if (!item) return res.status(404).json({ error: 'Item not found' });
   if (!item.unit_price || item.unit_price <= 0) return res.status(400).json({ error: 'ราคาไม่พร้อม — ติดต่อ HQ / Price unavailable — contact HQ' });
+
+  // Overdue credit block: if this is a fruit item and the FC still has
+  // past-due 7-day credit orders, refuse. General items are unaffected.
+  if (categoryGroupSrv(item.category) === 'fruit') {
+    const overdue = overdueCreditCount(req.user.id);
+    if (overdue > 0) {
+      return res.status(400).json({
+        error: `มีออร์เดอร์เครดิตเกินกำหนดค้างอยู่ ${overdue} รายการ — กรุณาชำระให้ครบก่อนสั่งผลไม้สดใหม่`,
+      });
+    }
+  }
 
   // Enforce single-group orders. Look at any one item already in this user's
   // cart — if its group differs from the new item's, block. (Cart is uniform
@@ -474,7 +500,10 @@ app.delete('/api/cart', requireAuth, (req, res) => {
 
 app.get('/api/cart/count', requireAuth, (req, res) => {
   const r = db.prepare('SELECT COALESCE(SUM(quantity),0) as count FROM cart_items WHERE user_id=?').get(req.user.id);
-  res.json({ count: r.count });
+  // overdue_credit_count lets the shop page banner appear without an extra
+  // round-trip. Branch-side users only; HQ/admin never see fruit-block.
+  const overdue = isHqAdmin(req.user) ? 0 : overdueCreditCount(req.user.id);
+  res.json({ count: r.count, overdue_credit_count: overdue });
 });
 
 // ─── Orders: Checkout ───
@@ -492,7 +521,8 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
   if (isHqAdmin(req.user)) return res.status(403).json({ error: 'HQ Admin ไม่ใช่ผู้สั่งซื้อ / HQ Admin cannot place orders' });
   const u = db.prepare('SELECT can_order FROM users WHERE id=?').get(req.user.id);
   if (!u || !u.can_order) return res.status(403).json({ error: 'ไม่มีสิทธิ์สั่งซื้อ / Not allowed to order' });
-  const { note = '' } = req.body || {};
+  const { note = '', payment_method: rawMethod = 'immediate' } = req.body || {};
+  const paymentMethod = (rawMethod === 'credit_7d') ? 'credit_7d' : 'immediate';
   // Get cart
   const cartItems = db.prepare(`
     SELECT c.item_no, c.quantity, c.unit_price, i.name as item_name, i.inventory, i.uom, i.category
@@ -511,6 +541,23 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
     });
   }
 
+  // Credit-7d is only available for fruit orders.
+  const isFruitOrder = groups.has('fruit');
+  if (paymentMethod === 'credit_7d' && !isFruitOrder) {
+    return res.status(400).json({ error: 'เครดิต 7 วันใช้ได้กับ "ผลไม้สด" เท่านั้น' });
+  }
+
+  // Defense in depth — same overdue-credit gate as /cart/add. Catches the
+  // case where items were added before a credit went overdue.
+  if (isFruitOrder) {
+    const overdue = overdueCreditCount(req.user.id);
+    if (overdue > 0) {
+      return res.status(400).json({
+        error: `มีออร์เดอร์เครดิตเกินกำหนดค้างอยู่ ${overdue} รายการ — กรุณาชำระให้ครบก่อนสั่งผลไม้สดใหม่`,
+      });
+    }
+  }
+
   // Validate stock
   for (const ci of cartItems) {
     if (ci.quantity > ci.inventory) {
@@ -522,10 +569,15 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
   const orderNumber = genOrderNumber();
   const subtotal = cartItems.reduce((s, r) => s + r.quantity * r.unit_price, 0);
 
+  // Credit-7d due date — only set when credit is chosen; otherwise blank.
+  const creditDueAt = paymentMethod === 'credit_7d'
+    ? db.prepare("SELECT datetime('now', '+7 days', 'localtime') AS d").get().d
+    : '';
+
   const tx = db.transaction(() => {
     // Create order (VAT=0 ก่อน จะอัพเดทจาก BC ทีหลัง)
-    db.prepare(`INSERT INTO orders (id, order_number, user_id, branch_code, subtotal, vat_amount, total, note)
-      VALUES (?,?,?,?,?,0,?,?)`).run(orderId, orderNumber, req.user.id, req.user.branch_code || '', subtotal, subtotal, note);
+    db.prepare(`INSERT INTO orders (id, order_number, user_id, branch_code, subtotal, vat_amount, total, note, payment_method, credit_due_at)
+      VALUES (?,?,?,?,?,0,?,?,?,?)`).run(orderId, orderNumber, req.user.id, req.user.branch_code || '', subtotal, subtotal, note, paymentMethod, creditDueAt);
 
     // Create order lines
     const insLine = db.prepare('INSERT INTO order_lines (order_id, item_no, item_name, quantity, unit_price, line_total) VALUES (?,?,?,?,?,?)');
@@ -560,7 +612,8 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
   db.prepare('UPDATE orders SET vat_amount=?, total=? WHERE id=?').run(vatAmount, total, orderId);
   db.prepare('UPDATE payments SET amount=? WHERE order_id=?').run(total, orderId);
 
-  // Generate PromptPay QR with locally-computed total
+  // Generate PromptPay QR. Both methods get one — credit_7d users may want
+  // to scan + pay at any point during the 7-day window.
   let qrDataUrl = '';
   try {
     qrDataUrl = await generateQR(total);
@@ -568,8 +621,38 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
     console.error('[QR]', e.message);
   }
 
+  // Fruit orders create BC SO+PO immediately at checkout (before the FC even
+  // sees the payment screen) per the new flow. Non-fruit orders keep the
+  // existing strict-mode behaviour: BC is created only when Finance approves
+  // the slip.
+  let bcSoResult = null;
+  let bcPoResult = null;
+  if (isFruitOrder) {
+    try {
+      bcSoResult = await postOrderToBC(orderId);
+    } catch (e) {
+      console.error('[checkout → BC SO]', e.message);
+      db.prepare("UPDATE orders SET bc_sync_error=? WHERE id=?").run(e.message, orderId);
+      bcSoResult = { ok: false, error: e.message };
+    }
+    const defaultVendor = (process.env.BC_DEFAULT_VENDOR_NO || '').trim();
+    if (bcSoResult && bcSoResult.bc_so_no && defaultVendor) {
+      try {
+        bcPoResult = await postPOToBC(orderId, defaultVendor);
+      } catch (e) {
+        console.error('[checkout → BC PO]', e.message);
+        db.prepare("UPDATE orders SET bc_sync_error=? WHERE id=?").run('[PO] ' + e.message, orderId);
+        bcPoResult = { ok: false, error: e.message };
+      }
+    }
+  }
+
   // Grab created_at (set by SQLite DEFAULT) so client can sync countdown with server time
   const createdRow = db.prepare('SELECT created_at FROM orders WHERE id=?').get(orderId);
+
+  const msgBase = paymentMethod === 'credit_7d'
+    ? `สร้างคำสั่งซื้อ ${orderNumber} (เครดิต 7 วัน) — กำหนดชำระภายใน ${creditDueAt}`
+    : `สร้างคำสั่งซื้อ ${orderNumber} — โอนชำระเงินและส่งสลิปเพื่อให้ Finance ตรวจสอบ`;
 
   res.json({
     ok: true,
@@ -578,11 +661,15 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
     subtotal,
     vat_amount: vatAmount,
     total,
-    bc_so: null, // not created yet — finance approval will trigger
+    payment_method: paymentMethod,
+    credit_due_at: creditDueAt,
+    is_fruit: isFruitOrder,
+    bc_so: bcSoResult,
+    bc_po: bcPoResult,
     qr_data_url: qrDataUrl,
     created_at: createdRow ? createdRow.created_at : null,
-    cancel_timeout_min: 30,
-    message: `สร้างคำสั่งซื้อ ${orderNumber} สำเร็จ — โอนชำระเงินและส่งสลิปเพื่อให้ Finance ตรวจสอบ`,
+    cancel_timeout_min: paymentMethod === 'credit_7d' ? 10080 : 30, // 10080 min = 7 days; UI uses it for countdown only — credit orders aren't auto-cancelled
+    message: msgBase,
   });
 });
 
@@ -967,7 +1054,9 @@ async function postOrderToBC(orderId) {
 async function postPOToBC(orderId, vendorNo) {
   const order = db.prepare('SELECT * FROM orders WHERE id=?').get(orderId);
   if (!order) throw new Error('Order not found');
-  if (order.payment_status !== 'verified') throw new Error('Order ยังไม่ได้อนุมัติ — ต้องอนุมัติสลิปก่อน');
+  // Fruit orders create BC SO+PO at checkout (before Finance ever sees them) —
+  // so the 'verified' status gate doesn't apply. The bc_so_no gate is enough:
+  // we just need the SO to exist so the PO can mirror its lines.
   if (!order.bc_so_no) throw new Error('Order ยังไม่มี BC SO — สร้าง SO ให้สำเร็จก่อน');
   if (order.bc_po_no) return { already: true, bc_po_id: order.bc_po_id, bc_po_no: order.bc_po_no };
   // Fallback to env default if caller didn't pass a vendor explicitly
@@ -2078,6 +2167,7 @@ function autoCancelExpiredOrders() {
   const expired = db.prepare(`
     SELECT id, order_number FROM orders
     WHERE payment_status = 'pending'
+      AND COALESCE(payment_method, 'immediate') != 'credit_7d'
       AND created_at <= datetime('now', '-${CANCEL_TIMEOUT_MIN} minutes', 'localtime')
   `).all();
 

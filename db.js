@@ -240,6 +240,12 @@ try { db.exec("ALTER TABLE orders ADD COLUMN rejected_by TEXT DEFAULT ''"); } ca
 // How many times FC has re-uploaded a slip after a Finance rejection. 0 = original upload.
 try { db.exec("ALTER TABLE orders ADD COLUMN slip_retry_count INTEGER DEFAULT 0"); } catch (e) {}
 
+// Fruit-order payment mode: 'immediate' (default — pay now via slip) or
+// 'credit_7d' (settle within 7 days). credit_due_at is the deadline when
+// 'credit_7d' is chosen.
+try { db.exec("ALTER TABLE orders ADD COLUMN payment_method TEXT DEFAULT 'immediate'"); } catch (e) {}
+try { db.exec("ALTER TABLE orders ADD COLUMN credit_due_at TEXT DEFAULT ''"); } catch (e) {}
+
 // ─── Migrate: cancel fields ───
 try { db.exec("ALTER TABLE orders ADD COLUMN cancelled_at TEXT"); } catch (e) {}
 try { db.exec("ALTER TABLE orders ADD COLUMN cancelled_by TEXT DEFAULT ''"); } catch (e) {}
