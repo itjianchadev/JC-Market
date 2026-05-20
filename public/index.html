@@ -14,7 +14,9 @@
 .sidebar .cat-list li .count{font-size:12px;opacity:.7}
 .sidebar .cat-list li.group-header{margin-top:8px;font-weight:700;color:var(--gold-dark);font-size:13px;letter-spacing:.3px;text-transform:none}
 .sidebar .cat-list li.group-header.active{background:var(--gold);color:#fff}
-.sidebar .cat-list li.sub{padding-left:26px;font-size:13px}
+.sidebar .cat-list li.group-header .chev{display:inline-block;font-size:10px;width:14px;color:var(--muted);transition:transform .15s}
+.sidebar .cat-list li.group-header.active .chev{color:#fff}
+.sidebar .cat-list li.sub{padding-left:32px;font-size:13px}
 .main-area{flex:1;min-width:0}
 /* Item list table */
 .item-table{width:100%;border-collapse:separate;border-spacing:0}
@@ -164,6 +166,7 @@ const isAdminView = me && (me.role === 'super_admin' || me.role === 'admin_scm')
 let selectedItem = null;
 let activeCat = '';      // selected sub-category code (mutually exclusive with activeGroup)
 let activeGroup = '';    // selected top-level group: '' | 'general' | 'fruit'
+let expandedGroup = '';  // which group's sub-cats are currently shown (accordion, one at a time)
 let allItems = [];
 let categories = [];
 
@@ -220,17 +223,30 @@ function renderCats() {
     if (!buckets[groupKey].length) continue;
     const groupLabel = t('shop.group_' + groupKey);
     const groupActive = activeGroup === groupKey;
-    html += `<li class="group-header ${groupActive?'active':''}" onclick="setGroup('${groupKey}')">${groupLabel} <span class="count">${groupTotals[groupKey]}</span></li>`;
-    for (const [cat, count] of buckets[groupKey]) {
-      const safe = cat.replace(/'/g, "\\'");
-      html += `<li class="sub ${activeCat===cat?'active':''}" onclick="setCat('${safe}')">${catName(cat)} <span class="count">${count}</span></li>`;
+    const isOpen = expandedGroup === groupKey;
+    const chevron = isOpen ? '▼' : '▶';
+    html += `<li class="group-header ${groupActive?'active':''}" onclick="toggleGroup('${groupKey}')"><span class="chev">${chevron}</span> ${groupLabel} <span class="count">${groupTotals[groupKey]}</span></li>`;
+    if (isOpen) {
+      for (const [cat, count] of buckets[groupKey]) {
+        const safe = cat.replace(/'/g, "\\'");
+        html += `<li class="sub ${activeCat===cat?'active':''}" onclick="setCat('${safe}')">${catName(cat)} <span class="count">${count}</span></li>`;
+      }
     }
   }
   document.getElementById('catList').innerHTML = html;
 }
 
-function setAll(){ activeCat=''; activeGroup=''; renderCats(); renderItems(); }
-function setGroup(g){ activeGroup = g; activeCat = ''; renderCats(); renderItems(); }
+function setAll(){ activeCat=''; activeGroup=''; expandedGroup=''; renderCats(); renderItems(); }
+// Click on a group header — accordion toggle + filter. Clicking the open group
+// again collapses it and resets the filter; clicking a different (or closed)
+// group expands it and filters items to that group.
+function toggleGroup(g){
+  if (expandedGroup === g) { expandedGroup = ''; activeGroup = ''; }
+  else { expandedGroup = g; activeGroup = g; }
+  activeCat = '';
+  renderCats();
+  renderItems();
+}
 function setCat(cat) {
   activeCat = cat;
   activeGroup = '';
