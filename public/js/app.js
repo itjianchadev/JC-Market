@@ -48,6 +48,7 @@ const I18N = {
     'cart.col.uom':'หน่วย','cart.col.total':'รวม',
     'cart.remaining':'คงเหลือ','cart.clear':'ล้างตะกร้า','cart.checkout':'ดำเนินการชำระเงิน',
     'cart.items_count':'{n} รายการ','cart.vat_note':'ยังไม่รวม VAT (คำนวณเมื่อยืนยันสั่งซื้อ)',
+    'cart.group_locked':'หมวด {grp} · ห้ามสั่งร่วมกับหมวดอื่นในออร์เดอร์เดียวกัน',
     'cart.removed':'ลบรายการแล้ว','cart.confirm_clear':'ล้างตะกร้าทั้งหมด?',
     // Checkout
     'checkout.page_title':'ชำระเงิน — JC-Market',
@@ -249,6 +250,7 @@ const I18N = {
     'cart.col.uom':'Unit','cart.col.total':'Total',
     'cart.remaining':'Remaining','cart.clear':'Clear Cart','cart.checkout':'Proceed to Payment',
     'cart.items_count':'{n} items','cart.vat_note':'VAT not included (calculated at checkout)',
+    'cart.group_locked':'Group: {grp} · cannot be combined with another category in the same order',
     'cart.removed':'Item removed','cart.confirm_clear':'Clear entire cart?',
     // Checkout
     'checkout.page_title':'Payment — JC-Market',
