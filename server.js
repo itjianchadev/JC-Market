@@ -395,6 +395,13 @@ app.get('/api/items/categories', requireAuth, (req, res) => {
 });
 
 // ─── Cart ───
+// Top-level category grouping for the "no mixed-category orders" rule.
+// Must mirror FRUIT_CATEGORIES in public/js/app.js — keep these two in sync
+// whenever BC adds a new fresh-fruit category code.
+const FRUIT_CATEGORIES_SRV = new Set(['Fruit fresh']);
+const categoryGroupSrv = cat => FRUIT_CATEGORIES_SRV.has(cat) ? 'fruit' : 'general';
+const groupLabelTH = g => g === 'fruit' ? 'ผลไม้สด' : 'สินค้าทั่วไป';
+
 app.get('/api/cart', requireAuth, (req, res) => {
   const rows = db.prepare(`
     SELECT c.id, c.item_no, c.quantity, c.unit_price,
@@ -415,6 +422,25 @@ app.post('/api/cart/add', requireAuth, (req, res) => {
   const item = db.prepare('SELECT * FROM items_cache WHERE item_no=? AND active=1').get(item_no);
   if (!item) return res.status(404).json({ error: 'Item not found' });
   if (!item.unit_price || item.unit_price <= 0) return res.status(400).json({ error: 'ราคาไม่พร้อม — ติดต่อ HQ / Price unavailable — contact HQ' });
+
+  // Enforce single-group orders. Look at any one item already in this user's
+  // cart — if its group differs from the new item's, block. (Cart is uniform
+  // by induction, so checking any one row is enough.)
+  const cartSample = db.prepare(`
+    SELECT i.category FROM cart_items c
+    JOIN items_cache i ON i.item_no = c.item_no
+    WHERE c.user_id = ? LIMIT 1
+  `).get(req.user.id);
+  if (cartSample) {
+    const existingGroup = categoryGroupSrv(cartSample.category);
+    const newGroup = categoryGroupSrv(item.category);
+    if (existingGroup !== newGroup) {
+      return res.status(400).json({
+        error: `ห้ามสั่งของข้ามหมวด — ตะกร้าเป็น "${groupLabelTH(existingGroup)}" อยู่แล้ว ของชิ้นนี้อยู่ในหมวด "${groupLabelTH(newGroup)}" กรุณาแยกออร์เดอร์ (checkout หรือล้างตะกร้าก่อน)`,
+      });
+    }
+  }
+
   const existing = db.prepare('SELECT * FROM cart_items WHERE user_id=? AND item_no=?').get(req.user.id, item_no);
   const newQty = existing ? existing.quantity + quantity : quantity;
   if (newQty > item.inventory) return res.status(400).json({ error: `สต๊อกไม่เพียงพอ (คงเหลือ ${item.inventory} ${item.uom})` });
@@ -469,12 +495,21 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
   const { note = '' } = req.body || {};
   // Get cart
   const cartItems = db.prepare(`
-    SELECT c.item_no, c.quantity, c.unit_price, i.name as item_name, i.inventory, i.uom
+    SELECT c.item_no, c.quantity, c.unit_price, i.name as item_name, i.inventory, i.uom, i.category
     FROM cart_items c LEFT JOIN items_cache i ON i.item_no=c.item_no
     WHERE c.user_id=?
   `).all(req.user.id);
 
   if (!cartItems.length) return res.status(400).json({ error: 'ตะกร้าว่าง' });
+
+  // Single-group enforcement — defense in depth (also blocked at /cart/add).
+  // Catches legacy carts built before this rule was added, e.g. from a reorder.
+  const groups = new Set(cartItems.map(ci => categoryGroupSrv(ci.category)));
+  if (groups.size > 1) {
+    return res.status(400).json({
+      error: 'ห้ามสั่งของข้ามหมวดในออร์เดอร์เดียว — ตะกร้ามีทั้ง "สินค้าทั่วไป" และ "ผลไม้สด" กรุณาแยกออร์เดอร์',
+    });
+  }
 
   // Validate stock
   for (const ci of cartItems) {

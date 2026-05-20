@@ -48,7 +48,16 @@ function render() {
     </div>`;
     return;
   }
+  // Cart is uniform by the no-mixed-categories rule, so the first item's
+  // group represents the whole cart.
+  const firstCat = cartData.items[0] && cartData.items[0].category;
+  const grp = firstCat ? categoryGroup(firstCat) : '';
+  const grpLabel = grp ? t('shop.group_' + grp) : '';
+  const banner = grp
+    ? `<div style="margin-bottom:16px;padding:10px 14px;background:rgba(173,156,130,.12);border-left:3px solid var(--gold);border-radius:6px;font-size:13px;color:var(--text)">${t('cart.group_locked', { grp: grpLabel })}</div>`
+    : '';
   el.innerHTML = `
+    ${banner}
     <table class="cart-table">
       <thead><tr>
         <th>${t('cart.col.item')}</th><th>${t('cart.col.price_unit')}</th><th>${t('cart.col.qty')}</th><th>${t('cart.col.uom')}</th><th>${t('cart.col.total')}</th><th></th>
