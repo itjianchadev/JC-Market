@@ -146,14 +146,21 @@ async function showDetail(id) {
     html += `<hr style="border-color:var(--border);margin:12px 0">
       <h4 style="margin-bottom:12px">${t('orders.pay')}</h4>`;
     if (isCredit) {
-      // Credit orders skip the 30-min cancel timer entirely. Show due date
-      // (and a red "เกินกำหนด" badge if past it) instead of countdown.
+      // Credit orders count down to credit_due_at (7 days from checkout)
+      // instead of the 30-min cancel timer. data-expire lets the existing
+      // startCountdownTimer() loop refresh the text every second. Past the
+      // due date the countdown shows "⚠ เกินกำหนด" but stays interactive —
+      // FC can still upload a slip, they just can't place new fruit orders
+      // until everything outstanding is settled.
       const dueMs = o.credit_due_at ? new Date(o.credit_due_at.replace(' ', 'T')).getTime() : 0;
+      const remainingCredit = Math.max(0, dueMs - Date.now());
       const overdue = dueMs && Date.now() > dueMs;
       html += `<div style="text-align:center;padding:14px;margin-bottom:12px;background:${overdue?'#fee2e2':'#fef3c7'};border-radius:8px">
         <div style="font-size:14px;color:${overdue?'#991b1b':'#92400e'};font-weight:600">${overdue ? '⚠ ' + t('orders.credit_overdue') : '📅 ' + t('orders.credit_due')}</div>
-        <div style="font-size:13px;margin-top:4px">${o.credit_due_at || ''}</div>
+        <div style="font-size:13px;margin-top:4px" data-expire="${dueMs}" data-credit-due="1">${overdue ? (o.credit_due_at || '') : '⏱ ' + fmtCountdown(remainingCredit)}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">${o.credit_due_at || ''}</div>
       </div>`;
+      setTimeout(() => startCountdownTimer(), 100);
     } else if (remaining > 0) {
       html += `<div style="text-align:center;margin-bottom:12px">
         <div class="countdown ${urgent?'urgent':''}" style="font-size:18px;display:inline-flex" id="modalCountdown" data-expire="${new Date(o.created_at).getTime() + CANCEL_TIMEOUT_MIN*60*1000}">⏱ ${fmtCountdown(remaining)}</div>
@@ -508,6 +515,11 @@ function getRemaining(createdAt) {
 
 function fmtCountdown(ms) {
   if (ms <= 0) return '00:00';
+  if (ms >= 3600000) {
+    const days = Math.floor(ms / 86400000);
+    const hours = Math.floor((ms % 86400000) / 3600000);
+    return days > 0 ? `${days} วัน ${hours} ชม.` : `${hours} ชม.`;
+  }
   const min = Math.floor(ms / 60000);
   const sec = Math.floor((ms % 60000) / 1000);
   return `${String(min).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
@@ -523,11 +535,18 @@ function startCountdownTimer() {
     els.forEach(el => {
       const expire = parseInt(el.dataset.expire);
       const remaining = Math.max(0, expire - Date.now());
+      const isCreditDue = el.dataset.creditDue === '1';
       el.textContent = '⏱ ' + fmtCountdown(remaining);
-      if (remaining < 5 * 60 * 1000) el.classList.add('urgent');
+      // Credit countdown stays calm — no urgent pulse, no expiry redirect.
+      // The order-listing reloads on its own pace and the FC can still pay.
+      if (!isCreditDue && remaining < 5 * 60 * 1000) el.classList.add('urgent');
       if (remaining <= 0) {
-        el.textContent = t('orders.expired');
-        needReload = true;
+        if (isCreditDue) {
+          el.textContent = t('orders.credit_overdue');
+        } else {
+          el.textContent = t('orders.expired');
+          needReload = true;
+        }
       }
     });
     if (needReload) {

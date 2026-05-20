@@ -151,12 +151,20 @@ const CANCEL_TIMEOUT_MIN = 30;
 
 function fmtCountdown(ms) {
   if (ms <= 0) return '00:00';
+  // For durations longer than an hour (credit_7d), show day+hour granularity.
+  // Under an hour falls back to MM:SS so the immediate-pay timer still feels
+  // urgent.
+  if (ms >= 3600000) {
+    const days = Math.floor(ms / 86400000);
+    const hours = Math.floor((ms % 86400000) / 3600000);
+    return days > 0 ? `${days} วัน ${hours} ชม.` : `${hours} ชม.`;
+  }
   const min = Math.floor(ms / 60000);
   const sec = Math.floor((ms % 60000) / 1000);
   return `${String(min).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
 }
 
-function startPayCountdown(createdAtStr, timeoutMin) {
+function startPayCountdown(createdAtStr, timeoutMin, isCredit) {
   const createdMs = createdAtStr ? new Date(createdAtStr).getTime() : Date.now();
   const validCreated = isNaN(createdMs) ? Date.now() : createdMs;
   payExpireAt = validCreated + (timeoutMin || CANCEL_TIMEOUT_MIN) * 60 * 1000;
@@ -165,19 +173,32 @@ function startPayCountdown(createdAtStr, timeoutMin) {
   const textEl = document.getElementById('payTimerText');
   timerEl.style.display = 'flex';
   subEl.style.display = 'block';
+  if (isCredit) {
+    // Credit orders aren't auto-cancelled — replace the "or it gets cancelled"
+    // sub-text with a less alarming credit note. ⏱ icon is still useful since
+    // we are counting down to a due date.
+    subEl.textContent = t('checkout.credit_msg', { due: '' }).replace(' · upload the slip from the Orders page once paid.', '').replace(' · เมื่อโอนแล้วอัปสลิปได้ที่หน้าคำสั่งซื้อ', '');
+  }
   if (payTimerInterval) clearInterval(payTimerInterval);
   const tick = () => {
     const remaining = Math.max(0, payExpireAt - Date.now());
     textEl.textContent = fmtCountdown(remaining);
-    timerEl.classList.toggle('urgent', remaining > 0 && remaining < 5 * 60 * 1000);
+    // "urgent" pulse: under 5 min for immediate, under 12 h for credit
+    const urgentThreshold = isCredit ? 12 * 60 * 60 * 1000 : 5 * 60 * 1000;
+    timerEl.classList.toggle('urgent', remaining > 0 && remaining < urgentThreshold);
     if (remaining <= 0) {
       clearInterval(payTimerInterval);
       payTimerInterval = null;
       timerEl.classList.remove('urgent');
       timerEl.classList.add('expired');
-      timerEl.innerHTML = t('checkout.pay_expired');
+      timerEl.innerHTML = isCredit ? t('checkout.credit_overdue') : t('checkout.pay_expired');
+      if (isCredit) {
+        // Overdue but slip upload still allowed — no auto-redirect.
+        subEl.textContent = t('checkout.credit_overdue_sub');
+        return;
+      }
       subEl.textContent = t('checkout.pay_cancelled_sub');
-      // Disable upload controls
+      // Disable upload controls for immediate orders only
       const uploadArea = document.getElementById('dropArea');
       const uploadBtn = document.getElementById('uploadBtn');
       if (uploadArea) uploadArea.style.pointerEvents = 'none', uploadArea.style.opacity = '0.5';
@@ -234,35 +255,14 @@ async function placeOrder() {
     lastOrderResp = r;
     updateCartBadge();
 
-    // Credit-7d: skip the QR/slip step entirely — order is locked in, BC SO+PO
-    // already created. Go straight to the success page with credit info.
-    if (r.payment_method === 'credit_7d') {
-      document.getElementById('step1').style.display = 'none';
-      document.getElementById('step3').style.display = 'block';
-      document.getElementById('doneOrderNo').textContent = r.order_number;
-      document.getElementById('doneIcon').textContent = '📅';
-      document.getElementById('doneTitle').style.color = '#f59e0b';
-      document.getElementById('doneTitle').textContent = t('checkout.credit_title');
-      document.getElementById('doneMsg').textContent = t('checkout.credit_msg', { due: r.credit_due_at || '' });
-      // Show BC SO/PO numbers if returned (fruit orders create them immediately)
-      const detail = document.getElementById('verifyDetail');
-      const bcSo = r.bc_so || {};
-      const bcPo = r.bc_po || {};
-      if (bcSo.bc_so_no || bcPo.bc_po_no) {
-        detail.style.display = 'block';
-        detail.querySelector('.card').innerHTML = `
-          ${bcSo.bc_so_no ? `<div style="margin-bottom:6px"><strong>${t('checkout.bc_so')}:</strong> ${bcSo.bc_so_no}</div>` : ''}
-          ${bcPo.bc_po_no ? `<div style="margin-bottom:6px"><strong>${t('checkout.bc_po')}:</strong> ${bcPo.bc_po_no}</div>` : ''}
-        `;
-      }
-      return;
-    }
-
-    // Immediate payment: continue to step 2 (QR + slip upload)
+    // Both immediate and credit_7d go through step 2 (QR + slip). Credit
+    // orders just have a 7-day countdown instead of 30-min and no auto-cancel
+    // when it hits zero.
+    const isCredit = r.payment_method === 'credit_7d';
     document.getElementById('step1').style.display = 'none';
     document.getElementById('step2').style.display = 'block';
     renderStep1Label();
-    startPayCountdown(r.created_at, r.cancel_timeout_min);
+    startPayCountdown(r.created_at, r.cancel_timeout_min, isCredit);
     document.getElementById('qrAmount').textContent = `฿${r.total.toLocaleString()}`;
     document.getElementById('qrImg').src = r.qr_data_url;
     document.getElementById('doneOrderNo').textContent = r.order_number;

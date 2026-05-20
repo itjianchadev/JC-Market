@@ -402,6 +402,21 @@ const FRUIT_CATEGORIES_SRV = new Set(['Fruit fresh']);
 const categoryGroupSrv = cat => FRUIT_CATEGORIES_SRV.has(cat) ? 'fruit' : 'general';
 const groupLabelTH = g => g === 'fruit' ? 'ผลไม้สด' : 'สินค้าทั่วไป';
 
+// Block-list helper: a FC with any past-due credit order can't place new
+// fruit orders until they've settled. Returns the count of outstanding
+// overdue credits — 0 means clear to order fruit.
+function overdueCreditCount(userId) {
+  const row = db.prepare(`
+    SELECT COUNT(*) AS c FROM orders
+    WHERE user_id = ?
+      AND payment_method = 'credit_7d'
+      AND payment_status NOT IN ('verified', 'cancelled')
+      AND credit_due_at != ''
+      AND credit_due_at < datetime('now', 'localtime')
+  `).get(userId);
+  return row ? row.c : 0;
+}
+
 app.get('/api/cart', requireAuth, (req, res) => {
   const rows = db.prepare(`
     SELECT c.id, c.item_no, c.quantity, c.unit_price,
@@ -422,6 +437,17 @@ app.post('/api/cart/add', requireAuth, (req, res) => {
   const item = db.prepare('SELECT * FROM items_cache WHERE item_no=? AND active=1').get(item_no);
   if (!item) return res.status(404).json({ error: 'Item not found' });
   if (!item.unit_price || item.unit_price <= 0) return res.status(400).json({ error: 'ราคาไม่พร้อม — ติดต่อ HQ / Price unavailable — contact HQ' });
+
+  // Overdue credit block: if this is a fruit item and the FC still has
+  // past-due 7-day credit orders, refuse. General items are unaffected.
+  if (categoryGroupSrv(item.category) === 'fruit') {
+    const overdue = overdueCreditCount(req.user.id);
+    if (overdue > 0) {
+      return res.status(400).json({
+        error: `มีออร์เดอร์เครดิตเกินกำหนดค้างอยู่ ${overdue} รายการ — กรุณาชำระให้ครบก่อนสั่งผลไม้สดใหม่`,
+      });
+    }
+  }
 
   // Enforce single-group orders. Look at any one item already in this user's
   // cart — if its group differs from the new item's, block. (Cart is uniform
@@ -474,7 +500,10 @@ app.delete('/api/cart', requireAuth, (req, res) => {
 
 app.get('/api/cart/count', requireAuth, (req, res) => {
   const r = db.prepare('SELECT COALESCE(SUM(quantity),0) as count FROM cart_items WHERE user_id=?').get(req.user.id);
-  res.json({ count: r.count });
+  // overdue_credit_count lets the shop page banner appear without an extra
+  // round-trip. Branch-side users only; HQ/admin never see fruit-block.
+  const overdue = isHqAdmin(req.user) ? 0 : overdueCreditCount(req.user.id);
+  res.json({ count: r.count, overdue_credit_count: overdue });
 });
 
 // ─── Orders: Checkout ───
@@ -516,6 +545,17 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
   const isFruitOrder = groups.has('fruit');
   if (paymentMethod === 'credit_7d' && !isFruitOrder) {
     return res.status(400).json({ error: 'เครดิต 7 วันใช้ได้กับ "ผลไม้สด" เท่านั้น' });
+  }
+
+  // Defense in depth — same overdue-credit gate as /cart/add. Catches the
+  // case where items were added before a credit went overdue.
+  if (isFruitOrder) {
+    const overdue = overdueCreditCount(req.user.id);
+    if (overdue > 0) {
+      return res.status(400).json({
+        error: `มีออร์เดอร์เครดิตเกินกำหนดค้างอยู่ ${overdue} รายการ — กรุณาชำระให้ครบก่อนสั่งผลไม้สดใหม่`,
+      });
+    }
   }
 
   // Validate stock
@@ -572,16 +612,13 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
   db.prepare('UPDATE orders SET vat_amount=?, total=? WHERE id=?').run(vatAmount, total, orderId);
   db.prepare('UPDATE payments SET amount=? WHERE order_id=?').run(total, orderId);
 
-  // Generate PromptPay QR with locally-computed total.
-  // Credit-7d orders don't need a QR at checkout — the FC will upload a
-  // payment slip within the credit period.
+  // Generate PromptPay QR. Both methods get one — credit_7d users may want
+  // to scan + pay at any point during the 7-day window.
   let qrDataUrl = '';
-  if (paymentMethod !== 'credit_7d') {
-    try {
-      qrDataUrl = await generateQR(total);
-    } catch (e) {
-      console.error('[QR]', e.message);
-    }
+  try {
+    qrDataUrl = await generateQR(total);
+  } catch (e) {
+    console.error('[QR]', e.message);
   }
 
   // Fruit orders create BC SO+PO immediately at checkout (before the FC even
@@ -631,7 +668,7 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
     bc_po: bcPoResult,
     qr_data_url: qrDataUrl,
     created_at: createdRow ? createdRow.created_at : null,
-    cancel_timeout_min: paymentMethod === 'credit_7d' ? 0 : 30,
+    cancel_timeout_min: paymentMethod === 'credit_7d' ? 10080 : 30, // 10080 min = 7 days; UI uses it for countdown only — credit orders aren't auto-cancelled
     message: msgBase,
   });
 });
