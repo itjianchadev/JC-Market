@@ -30,7 +30,7 @@ const I18N = {
     // Shop (index)
     'shop.page_title':'ร้านค้า — JC-Market',
     'shop.categories':'หมวดหมู่','shop.search_placeholder':'ค้นหาสินค้า...',
-    'shop.group_general':'📦 สินค้าทั่วไป','shop.group_fruit':'🍓 ผลไม้สด',
+    'shop.group_general':'สินค้าทั่วไป','shop.group_fruit':'ผลไม้สด',
     'shop.col.code':'รหัส','shop.col.name':'ชื่อสินค้า','shop.col.price':'ราคา',
     'shop.col.stock':'คงเหลือ','shop.col.uom':'หน่วย','shop.col.action':'สั่งซื้อ',
     'shop.showing':'แสดง {n} รายการ','shop.showing_cat':'แสดง {n} รายการ ในหมวด {cat}',
@@ -231,7 +231,7 @@ const I18N = {
     // Shop
     'shop.page_title':'Shop — JC-Market',
     'shop.categories':'Categories','shop.search_placeholder':'Search items...',
-    'shop.group_general':'📦 General products','shop.group_fruit':'🍓 Fresh fruit',
+    'shop.group_general':'General products','shop.group_fruit':'Fresh fruit',
     'shop.col.code':'Code','shop.col.name':'Item Name','shop.col.price':'Price',
     'shop.col.stock':'Stock','shop.col.uom':'Unit','shop.col.action':'Order',
     'shop.showing':'Showing {n} items','shop.showing_cat':'Showing {n} items in {cat}',

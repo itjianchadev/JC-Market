@@ -14,9 +14,12 @@
 .sidebar .cat-list li .count{font-size:12px;opacity:.7}
 .sidebar .cat-list li.group-header{margin-top:8px;font-weight:700;color:var(--gold-dark);font-size:13px;letter-spacing:.3px;text-transform:none}
 .sidebar .cat-list li.group-header.active{background:var(--gold);color:#fff}
-.sidebar .cat-list li.group-header .chev{display:inline-block;font-size:10px;width:14px;color:var(--muted);transition:transform .15s}
+.sidebar .cat-list li.group-header .chev{display:inline-block;font-size:10px;width:12px;color:var(--muted);transition:transform .15s;flex-shrink:0}
 .sidebar .cat-list li.group-header.active .chev{color:#fff}
-.sidebar .cat-list li.sub{padding-left:32px;font-size:13px}
+.sidebar .cat-list li.group-header .grp-label{display:flex;align-items:center;gap:8px;flex:1}
+.sidebar .cat-list li.group-header .grp-icon{display:inline-flex;width:18px;height:18px;color:currentColor;flex-shrink:0}
+.sidebar .cat-list li.group-header .grp-icon svg{width:100%;height:100%}
+.sidebar .cat-list li.sub{padding-left:38px;font-size:13px}
 .main-area{flex:1;min-width:0}
 /* Item list table */
 .item-table{width:100%;border-collapse:separate;border-spacing:0}
@@ -170,6 +173,13 @@ let expandedGroup = '';  // which group's sub-cats are currently shown (accordio
 let allItems = [];
 let categories = [];
 
+// Inline SVG icons for the sidebar group headers — Lucide-style, currentColor
+// so they pick up the row's text colour (gold-dark normally, white when active).
+const GROUP_ICONS = {
+  general: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>`,
+  fruit:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20.94c1.5 0 2.75 1.06 4 1.06 3 0 6-8 6-12.22A4.91 4.91 0 0 0 17 5c-2.22 0-4 1.44-5 2-1-.56-2.78-2-5-2a4.9 4.9 0 0 0-5 4.78C2 14 5 22 8 22c1.25 0 2.5-1.06 4-1.06Z"/><path d="M10 2c1 .5 2 2 2 5"/></svg>`,
+};
+
 // Adjust table header for admin — replace "สั่งซื้อ" with "สั่งล่าสุด" + "ประวัติ"
 if (isAdminView) {
   const thead = document.querySelector('#items thead tr');
@@ -225,7 +235,8 @@ function renderCats() {
     const groupActive = activeGroup === groupKey;
     const isOpen = expandedGroup === groupKey;
     const chevron = isOpen ? '▼' : '▶';
-    html += `<li class="group-header ${groupActive?'active':''}" onclick="toggleGroup('${groupKey}')"><span class="chev">${chevron}</span> ${groupLabel} <span class="count">${groupTotals[groupKey]}</span></li>`;
+    const icon = GROUP_ICONS[groupKey] || '';
+    html += `<li class="group-header ${groupActive?'active':''}" onclick="toggleGroup('${groupKey}')"><span class="chev">${chevron}</span><span class="grp-label"><span class="grp-icon">${icon}</span>${groupLabel}</span><span class="count">${groupTotals[groupKey]}</span></li>`;
     if (isOpen) {
       for (const [cat, count] of buckets[groupKey]) {
         const safe = cat.replace(/'/g, "\\'");
