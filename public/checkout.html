@@ -255,14 +255,36 @@ async function placeOrder() {
     lastOrderResp = r;
     updateCartBadge();
 
-    // Both immediate and credit_7d go through step 2 (QR + slip). Credit
-    // orders just have a 7-day countdown instead of 30-min and no auto-cancel
-    // when it hits zero.
-    const isCredit = r.payment_method === 'credit_7d';
+    // Credit_7d: skip the QR/slip step — order is locked in, BC SO+PO already
+    // created. Jump to step 3 with a simple success message. The FC opens the
+    // order from /orders.html when they're ready to pay (QR + upload are
+    // rendered there from /api/orders/:id/qr on demand).
+    if (r.payment_method === 'credit_7d') {
+      document.getElementById('step1').style.display = 'none';
+      document.getElementById('step3').style.display = 'block';
+      document.getElementById('doneOrderNo').textContent = r.order_number;
+      document.getElementById('doneIcon').textContent = '📅';
+      document.getElementById('doneTitle').style.color = '#f59e0b';
+      document.getElementById('doneTitle').textContent = t('checkout.credit_title');
+      document.getElementById('doneMsg').textContent = t('checkout.credit_msg', { due: r.credit_due_at || '' });
+      const detail = document.getElementById('verifyDetail');
+      const bcSo = r.bc_so || {};
+      const bcPo = r.bc_po || {};
+      if (bcSo.bc_so_no || bcPo.bc_po_no) {
+        detail.style.display = 'block';
+        detail.querySelector('.card').innerHTML = `
+          ${bcSo.bc_so_no ? `<div style="margin-bottom:6px"><strong>${t('checkout.bc_so')}:</strong> ${bcSo.bc_so_no}</div>` : ''}
+          ${bcPo.bc_po_no ? `<div style="margin-bottom:6px"><strong>${t('checkout.bc_po')}:</strong> ${bcPo.bc_po_no}</div>` : ''}
+        `;
+      }
+      return;
+    }
+
+    // Immediate payment: continue to step 2 (QR + slip upload)
     document.getElementById('step1').style.display = 'none';
     document.getElementById('step2').style.display = 'block';
     renderStep1Label();
-    startPayCountdown(r.created_at, r.cancel_timeout_min, isCredit);
+    startPayCountdown(r.created_at, r.cancel_timeout_min, false);
     document.getElementById('qrAmount').textContent = `฿${r.total.toLocaleString()}`;
     document.getElementById('qrImg').src = r.qr_data_url;
     document.getElementById('doneOrderNo').textContent = r.order_number;
