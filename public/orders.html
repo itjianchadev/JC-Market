@@ -86,10 +86,23 @@ async function load() {
     const isCancelled = o.payment_status === 'cancelled';
     let countdownHtml = '';
     if (o.payment_status === 'pending') {
-      const remaining = getRemaining(o.created_at);
-      if (remaining > 0) {
-        const urgent = remaining < 5 * 60 * 1000;
-        countdownHtml = `<span class="countdown ${urgent?'urgent':''}" data-expire="${new Date(o.created_at).getTime() + CANCEL_TIMEOUT_MIN*60*1000}">⏱ ${fmtCountdown(remaining)}</span>`;
+      if (o.payment_method === 'credit_7d') {
+        // Credit list-row countdown points at credit_due_at instead of the
+        // 30-min auto-cancel deadline, and is marked data-credit-due so the
+        // tick loop doesn't pulse it urgent or trigger an expiry redirect.
+        const dueMs = o.credit_due_at ? new Date(o.credit_due_at.replace(' ', 'T')).getTime() : 0;
+        const remCredit = Math.max(0, dueMs - Date.now());
+        if (dueMs) {
+          countdownHtml = remCredit > 0
+            ? `<span class="countdown" data-expire="${dueMs}" data-credit-due="1">⏱ ${fmtCountdown(remCredit)}</span>`
+            : `<span class="countdown" style="background:#fee2e2;color:#991b1b">⚠ ${t('orders.credit_overdue')}</span>`;
+        }
+      } else {
+        const remaining = getRemaining(o.created_at);
+        if (remaining > 0) {
+          const urgent = remaining < 5 * 60 * 1000;
+          countdownHtml = `<span class="countdown ${urgent?'urgent':''}" data-expire="${new Date(o.created_at).getTime() + CANCEL_TIMEOUT_MIN*60*1000}">⏱ ${fmtCountdown(remaining)}</span>`;
+        }
       }
     }
     return `<div class="card order-card" style="${isCancelled?'opacity:.6':''}" onclick="showDetail('${o.id}')">
