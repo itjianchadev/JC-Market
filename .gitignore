@@ -5,3 +5,7 @@ data/*.db-*
 *.log
 .DS_Store
 uploads/
+# Local-only — sensitive BC master data (vendor/item exports + run reports)
+imports/
+# Claude Code per-repo launch config (developer preference, not project state)
+.claude/
