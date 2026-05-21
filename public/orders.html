@@ -108,7 +108,7 @@ async function load() {
     return `<div class="card order-card" style="${isCancelled?'opacity:.6':''}" onclick="showDetail('${o.id}')">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
         <div>
-          <strong style="font-size:16px">${o.bc_po_no || o.order_number}</strong>
+          <strong style="font-size:16px">${o.bc_po_no || o.bc_to_no || o.order_number}</strong>
           <span style="color:var(--muted);font-size:12px;margin-left:6px">${o.order_number}</span>
           ${isAdmin ? `<span style="color:var(--muted);font-size:13px;margin-left:8px">${o.branch_name||o.user_name||''}</span>` : ''}
         </div>
@@ -134,8 +134,8 @@ async function showDetail(id) {
   const fMap = fulfillMap();
   const st = sMap[o.payment_status] || {label:o.payment_status,cls:''};
   let html = `
-    <h3 style="margin-bottom:4px">${o.bc_po_no || o.order_number}</h3>
-    ${o.bc_po_no ? `<div style="color:var(--muted);font-size:12px;margin-bottom:4px">Ref: ${o.order_number}</div>` : ''}
+    <h3 style="margin-bottom:4px">${o.bc_po_no || o.bc_to_no || o.order_number}</h3>
+    ${(o.bc_po_no || o.bc_to_no) ? `<div style="color:var(--muted);font-size:12px;margin-bottom:4px">Ref: ${o.order_number}</div>` : ''}
     <span class="status-badge ${st.cls}">${st.label}</span>
     <div style="color:var(--muted);font-size:13px;margin:8px 0">${o.created_at}${o.branch_code?' | '+o.branch_code:''}</div>
     <hr style="border-color:var(--border);margin:12px 0">
@@ -306,8 +306,11 @@ async function showDetail(id) {
   }
 
   // BC info
+  if (o.bc_to_no) {
+    html += `<div style="margin-top:12px;color:var(--ok);font-size:13px">${t('orders.bc.to')}: ${o.bc_to_no}</div>`;
+  }
   if (o.bc_po_no) {
-    html += `<div style="margin-top:12px;color:var(--ok);font-size:13px">${t('orders.bc.po')}: ${o.bc_po_no}</div>`;
+    html += `<div style="margin-top:${o.bc_to_no?4:12}px;color:var(--ok);font-size:13px">${t('orders.bc.po')}: ${o.bc_po_no}</div>`;
   }
   if (o.bc_so_no) {
     html += `<div style="margin-top:4px;color:var(--ok);font-size:13px">${t('orders.bc.so')}: ${o.bc_so_no}</div>`;
