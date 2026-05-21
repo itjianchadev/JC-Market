@@ -218,10 +218,12 @@ async function init() {
     renderCartItems();
     document.getElementById('subtotal').textContent = `฿${cartData.subtotal.toLocaleString()}`;
     document.getElementById('grandTotal').textContent = `฿${cartData.subtotal.toLocaleString()}`;
-    // Show payment method picker only for fruit carts. Cart is uniform by the
-    // no-mixed-categories rule, so the first item's group represents all.
+    // Payment method picker shows ONLY for FC fruit carts. JC master branches
+    // never pay (Transfer Order / internal PO), so the radio doesn't apply.
+    const me = getUser() || {};
+    const isJc = me.branch_type === 'jc';
     const firstCat = cartData.items[0] && cartData.items[0].category;
-    if (firstCat && categoryGroup(firstCat) === 'fruit') {
+    if (!isJc && firstCat && categoryGroup(firstCat) === 'fruit') {
       document.getElementById('payMethodBox').style.display = 'block';
     }
   } catch (e) { alert(e.message); }
