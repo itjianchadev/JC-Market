@@ -9,12 +9,19 @@ function login(username, password) {
   const user = db.prepare('SELECT * FROM users WHERE username=? AND active=1').get(username);
   if (!user) return null;
   if (!bcrypt.compareSync(password, user.password)) return null;
-  const token = jwt.sign({ id: user.id, username: user.username, role: user.role, branch_code: user.branch_code }, SECRET, { expiresIn: EXPIRES });
+  // Resolve branch_type via the branches table — used by the frontend to
+  // hide payment-method pickers / receipt UI for JC master outlets.
+  const branchRow = user.branch_code
+    ? db.prepare('SELECT branch_type FROM branches WHERE code = ?').get(user.branch_code)
+    : null;
+  const branch_type = (branchRow && branchRow.branch_type) || 'fc';
+  const token = jwt.sign({ id: user.id, username: user.username, role: user.role, branch_code: user.branch_code, branch_type }, SECRET, { expiresIn: EXPIRES });
   return {
     token,
     user: {
       id: user.id, username: user.username, full_name: user.full_name,
       role: user.role, branch_code: user.branch_code, branch_name: user.branch_name,
+      branch_type,
       bc_customer_no: user.bc_customer_no,
       can_order: !!user.can_order,
     },
