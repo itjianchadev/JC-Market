@@ -13,10 +13,10 @@ function denyFinance(){const u=getUser();if(u&&u.role==='finance'){location.href
 const I18N = {
   th: {
     // Nav
-    'nav.shop':'🛒 ร้านค้า','nav.cart':'🧺 ตะกร้า','nav.orders':'📋 คำสั่งซื้อ',
-    'nav.stock':'📊 Stock','nav.admin':'⚙️ Admin','nav.logout':'ออกจากระบบ',
-    'nav.team':'👥 จัดการผู้ใช้',
-    'nav.pending_approvals':'⏳ รายการต้องอนุมัติ','nav.approved_list':'✅ รายการที่อนุมัติแล้ว','nav.rejected_list':'❌ ปฏิเสธ',
+    'nav.shop':'ร้านค้า','nav.cart':'ตะกร้า','nav.orders':'คำสั่งซื้อ',
+    'nav.stock':'Stock','nav.admin':'Admin','nav.logout':'ออกจากระบบ',
+    'nav.team':'จัดการผู้ใช้',
+    'nav.pending_approvals':'รายการต้องอนุมัติ','nav.approved_list':'รายการที่อนุมัติแล้ว','nav.rejected_list':'ปฏิเสธ',
     // Common
     'common.loading':'กำลังโหลด...','common.close':'ปิด','common.confirm':'ยืนยัน','common.cancel':'ยกเลิก',
     'common.search':'ค้นหา','common.note':'หมายเหตุ','common.no_data':'ยังไม่มีข้อมูล','common.all':'ทั้งหมด',
@@ -217,7 +217,7 @@ const I18N = {
     'role.cashier':'แคชเชียร์','role.stock':'พนักงานสต๊อก','role.staff':'พนักงาน','role.fc':'สมาชิกสาขา',
     // legacy aliases (เผื่อข้อมูลเก่า)
     'role.admin':'SCM Admin','role.branch_admin':'Branch Owner','role.manager':'Store Manager',
-    'nav.team':'👥 จัดการผู้ใช้',
+    'nav.team':'จัดการผู้ใช้',
     // Admin product history
     'shop.col.last_order':'สั่งล่าสุด','shop.last_by':'{branch} · {date}',
     'shop.btn_history':'📋 ประวัติ','shop.never_ordered':'ยังไม่มี',
@@ -229,10 +229,10 @@ const I18N = {
   },
   en: {
     // Nav
-    'nav.shop':'🛒 Shop','nav.cart':'🧺 Cart','nav.orders':'📋 Orders',
-    'nav.stock':'📊 Stock','nav.admin':'⚙️ Admin','nav.logout':'Logout',
-    'nav.team':'👥 Users',
-    'nav.pending_approvals':'⏳ Pending Approval','nav.approved_list':'✅ Approved','nav.rejected_list':'❌ Rejected',
+    'nav.shop':'Shop','nav.cart':'Cart','nav.orders':'Orders',
+    'nav.stock':'Stock','nav.admin':'Admin','nav.logout':'Logout',
+    'nav.team':'Users',
+    'nav.pending_approvals':'Pending Approval','nav.approved_list':'Approved','nav.rejected_list':'Rejected',
     // Common
     'common.loading':'Loading...','common.close':'Close','common.confirm':'Confirm','common.cancel':'Cancel',
     'common.search':'Search','common.note':'Note','common.no_data':'No data','common.all':'All',
@@ -433,7 +433,7 @@ const I18N = {
     'role.cashier':'Cashier','role.stock':'Stock Keeper','role.staff':'Staff','role.fc':'Member',
     // legacy aliases
     'role.admin':'SCM Admin','role.branch_admin':'Branch Owner','role.manager':'Store Manager',
-    'nav.team':'👥 Team',
+    'nav.team':'Team',
     // Admin product history
     'shop.col.last_order':'Last Order','shop.last_by':'{branch} · {date}',
     'shop.btn_history':'📋 History','shop.never_ordered':'Never',
@@ -595,6 +595,21 @@ async function updateCartBadge() {
   } catch {}
 }
 
+// Inline SVG nav icons (Lucide-style, 24×24 viewBox, currentColor stroke so
+// they inherit the link colour and switch when .active is applied).
+const NAV_ICONS = {
+  'nav.shop':              `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 9-1.5-4.5h-15L3 9"/><path d="M3 9h18v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9Z"/><path d="M9 13h6"/></svg>`,
+  'nav.cart':              `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M3 4h2l2.4 12.4a2 2 0 0 0 2 1.6h8.2a2 2 0 0 0 2-1.6L21 8H6"/></svg>`,
+  'nav.orders':            `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4v3h6V4"/><path d="M9 12h6"/><path d="M9 16h4"/></svg>`,
+  'nav.stock':             `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73L13 2.27a2 2 0 0 0-2 0L4 6.27A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73L11 21.73a2 2 0 0 0 2 0L20 17.73A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>`,
+  'nav.team':              `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
+  'nav.admin':             `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>`,
+  'nav.pending_approvals': `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`,
+  'nav.approved_list':     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>`,
+  'nav.rejected_list':     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m9 9 6 6"/><path d="m15 9-6 6"/></svg>`,
+  'nav.logout':            `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>`,
+};
+
 function renderNav(active) {
   const u = getUser();
   if (!u) return '';
@@ -626,18 +641,21 @@ function renderNav(active) {
   const lang = getLang();
   const otherLang = lang === 'th' ? 'en' : 'th';
   const flag = lang === 'th' ? '🇹🇭 TH' : '🇬🇧 EN';
+  const navLink = (h, k) => {
+    const icon = NAV_ICONS[k] || '';
+    const cls = active === h ? 'active' : '';
+    if (h === 'cart.html') {
+      return `<a href="${h}" class="${cls}">${icon}<span data-i18n="${k}">${t(k)}</span><span id="cartBadge" class="cart-badge" style="display:none"></span></a>`;
+    }
+    return `<a href="${h}" class="${cls}">${icon}<span data-i18n="${k}">${t(k)}</span></a>`;
+  };
   const html = `<div class="nav">
     <div class="brand">JC-Market</div>
-    ${links.map(([h,k])=>{
-      if (h === 'cart.html') {
-        return `<a href="${h}" class="${active===h?'active':''}"><span data-i18n="${k}">${t(k)}</span><span id="cartBadge" class="cart-badge" style="display:none"></span></a>`;
-      }
-      return `<a href="${h}" class="${active===h?'active':''}" data-i18n="${k}">${t(k)}</a>`;
-    }).join('')}
+    ${links.map(([h,k]) => navLink(h, k)).join('')}
     <div class="spacer"></div>
     <a href="#" id="langToggle" title="Switch language" style="padding:4px 10px;border:1px solid var(--border);border-radius:8px">${flag}</a>
     <div class="user">${u.full_name} (${u.branch_name||u.role})</div>
-    <a href="#" onclick="clearAuth();return false" data-i18n="nav.logout">${t('nav.logout')}</a>
+    <a href="#" onclick="clearAuth();return false">${NAV_ICONS['nav.logout']}<span data-i18n="nav.logout">${t('nav.logout')}</span></a>
   </div>`;
   setTimeout(() => {
     updateCartBadge();

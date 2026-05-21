@@ -26,9 +26,10 @@ a{color:var(--gold-dark);text-decoration:none}
 .container{max-width:1280px;margin:0 auto;padding:20px}
 
 /* ─── Navigation — white surface with gold accent ─── */
-.nav{background:#ffffff;border-bottom:1px solid var(--border);padding:14px 20px;display:flex;align-items:center;gap:20px;flex-wrap:wrap;box-shadow:var(--shadow-sm)}
-.nav .brand{font-weight:700;font-size:18px;color:var(--gold-dark);letter-spacing:.3px}
-.nav a{color:var(--text);padding:7px 12px;border-radius:8px;font-size:14px;transition:background .15s,color .15s;font-weight:500}
+.nav{background:#ffffff;border-bottom:1px solid var(--border);padding:14px 20px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;box-shadow:var(--shadow-sm)}
+.nav .brand{font-weight:700;font-size:18px;color:var(--gold-dark);letter-spacing:.3px;margin-right:12px}
+.nav a{color:var(--text);padding:7px 12px;border-radius:8px;font-size:14px;transition:background .15s,color .15s;font-weight:500;display:inline-flex;align-items:center;gap:7px}
+.nav a svg{width:18px;height:18px;flex-shrink:0}
 .nav a:hover{background:var(--beige);color:var(--gold-dark)}
 .nav a.active{background:var(--gold);color:#ffffff}
 .nav .spacer{flex:1}
