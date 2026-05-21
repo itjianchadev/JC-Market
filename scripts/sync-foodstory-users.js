@@ -45,14 +45,17 @@ const IMPORTS_DIR = path.join(__dirname, '..', 'imports');
 fs.mkdirSync(IMPORTS_DIR, { recursive: true });
 
 // ─── Helpers ──────────────────────────────────────────────────────────
-// 8-digit numeric — easier to type on mobile / dictate over the phone than
-// a 12-char alphanumeric. Trade-off: smaller key space (10^8) but the
-// branch_owner accounts are behind a username and rate-limited by the app,
-// so brute force isn't a realistic threat for this use case.
-function randomPassword(len = 8) {
-  const bytes = crypto.randomBytes(len);
+// 8 chars: 2 uppercase letters followed by 6 digits — keeps the password
+// short enough to dictate but stops Excel from chewing the leading zero
+// off a pure-numeric string. Letters exclude I/L/O so they can't be
+// confused with 1/0 on a printed credentials sheet.
+function randomPassword() {
+  const LETTERS = 'ABCDEFGHJKMNPQRSTUVWXYZ'; // 23 chars, no I/L/O
+  const bytes = crypto.randomBytes(8);
   let out = '';
-  for (let i = 0; i < len; i++) out += String(bytes[i] % 10);
+  out += LETTERS[bytes[0] % LETTERS.length];
+  out += LETTERS[bytes[1] % LETTERS.length];
+  for (let i = 2; i < 8; i++) out += String(bytes[i] % 10);
   return out;
 }
 
@@ -145,7 +148,7 @@ function applyBranches(branches) {
     if (!DRY_RUN) upsertBranch.run(b.code, b.name, b.type);
     const username = b.code.toLowerCase();
     const existing = findUser.get(username);
-    const password = randomPassword(8);
+    const password = randomPassword();
     const tag = DRY_RUN ? ' (dry-run, not written)' : '';
 
     if (existing) {
