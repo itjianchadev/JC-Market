@@ -12,7 +12,8 @@
 .sidebar-item{display:flex;align-items:center;gap:10px;padding:10px 16px;cursor:pointer;transition:.15s;font-size:14px;color:var(--text);border-left:3px solid transparent}
 .sidebar-item:hover{background:var(--beige)}
 .sidebar-item.active{background:rgba(173,156,130,.12);border-left-color:var(--gold);color:var(--gold-dark);font-weight:600}
-.sidebar-item .icon{font-size:18px;width:24px;text-align:center}
+.sidebar-item .icon{width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;color:currentColor}
+.sidebar-item .icon svg{width:18px;height:18px}
 .sidebar-item .count{margin-left:auto;background:var(--border);padding:1px 8px;border-radius:10px;font-size:11px;color:var(--muted)}
 .main-content{flex:1;padding:20px 24px;overflow-y:auto}
 .stock-table{width:100%;border-collapse:collapse;font-size:14px}
@@ -83,16 +84,16 @@
     <h3 data-i18n="stock.title">Stock สาขา</h3>
     <div class="branch-info" id="branchInfo"></div>
     <div class="sidebar-item active" onclick="switchTab('stock')" id="tabStock">
-      <span class="icon">📦</span> <span data-i18n="stock.items">รายการสินค้าในคลัง</span> <span class="count" id="stockCount">0</span>
+      <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73L13 2.27a2 2 0 0 0-2 0L4 6.27A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73L11 21.73a2 2 0 0 0 2 0L20 17.73A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg></span> <span data-i18n="stock.items">รายการสินค้าในคลัง</span> <span class="count" id="stockCount">0</span>
     </div>
     <div class="sidebar-item" onclick="switchTab('gr')" id="tabGR">
-      <span class="icon">📋</span> <span data-i18n="stock.gr_history">ประวัติการรับ</span> <span class="count" id="grCount">0</span>
+      <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/></svg></span> <span data-i18n="stock.gr_history">ประวัติการรับ</span> <span class="count" id="grCount">0</span>
     </div>
     <div class="sidebar-item" onclick="switchTab('issue')" id="tabIssue">
-      <span class="icon">📤</span> <span data-i18n="stock.issue_history">ประวัติการเบิก</span> <span class="count" id="issueCount">0</span>
+      <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21V9"/><path d="m7 14 5-5 5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/></svg></span> <span data-i18n="stock.issue_history">ประวัติการเบิก</span> <span class="count" id="issueCount">0</span>
     </div>
     <div class="sidebar-item" onclick="switchTab('movements')" id="tabMovements">
-      <span class="icon">📊</span> <span>ความเคลื่อนไหวสต๊อก</span> <span class="count" id="movCount">0</span>
+      <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m7 14 4-4 4 4 5-5"/></svg></span> <span>ความเคลื่อนไหวสต๊อก</span> <span class="count" id="movCount">0</span>
     </div>
   </div>
   <div class="main-content">
