@@ -19,5 +19,8 @@
     "promptpay-qr": "^0.5.0",
     "qrcode": "^1.5.4",
     "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "marked": "^18.0.4"
   }
 }
