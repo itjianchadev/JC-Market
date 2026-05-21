@@ -255,6 +255,31 @@ async function placeOrder() {
     lastOrderResp = r;
     updateCartBadge();
 
+    // JC master branch: no payment, no Finance — BC TO (general) or PO (fruit)
+    // was already created at checkout. Jump straight to step 3 with the
+    // appropriate document number.
+    if (r.is_jc) {
+      document.getElementById('step1').style.display = 'none';
+      document.getElementById('step3').style.display = 'block';
+      document.getElementById('doneOrderNo').textContent = r.order_number;
+      document.getElementById('doneIcon').textContent = '✅';
+      document.getElementById('doneTitle').style.color = 'var(--ok)';
+      document.getElementById('doneTitle').textContent = t('checkout.jc_done_title');
+      const isTransfer = r.order_type === 'jc_transfer';
+      document.getElementById('doneMsg').textContent = t(isTransfer ? 'checkout.jc_transfer_msg' : 'checkout.jc_purchase_msg');
+      const detail = document.getElementById('verifyDetail');
+      const bcPo = r.bc_po || {};
+      const bcTo = r.bc_to || {};
+      const lines = [];
+      if (bcTo.bc_to_no) lines.push(`<div style="margin-bottom:6px"><strong>${t('checkout.bc_to')}:</strong> ${bcTo.bc_to_no}</div>`);
+      if (bcPo.bc_po_no) lines.push(`<div style="margin-bottom:6px"><strong>${t('checkout.bc_po')}:</strong> ${bcPo.bc_po_no}</div>`);
+      if (bcTo.error || bcPo.error) lines.push(`<div style="color:var(--err);font-size:12px">⚠ ${bcTo.error || bcPo.error}</div>`);
+      lines.push(`<div style="font-size:12px;color:var(--muted);margin-top:6px">${t('checkout.jc_total_info', { total: r.total.toLocaleString() })}</div>`);
+      detail.style.display = 'block';
+      detail.querySelector('.card').innerHTML = lines.join('');
+      return;
+    }
+
     // Credit_7d: skip the QR/slip step — order is locked in, BC SO+PO already
     // created. Jump to step 3 with a simple success message. The FC opens the
     // order from /orders.html when they're ready to pay (QR + upload are

@@ -98,6 +98,38 @@ async function listItemUnitsOfMeasure() {
   return odataGet(`/ItemUnitOfMeasure?$select=Item_No,Code,Qty_per_Unit_of_Measure&$top=10000`);
 }
 
+// ─── Transfer Orders (Page 5740) — JC master outlets receive general goods
+// from CTI via Transfer Orders (no Sales Order, no payment). Service names
+// live in env vars so the user can fix typos in BC's "Web Services" page
+// without touching code (e.g. the published name today is "Transfer0rder"
+// with a zero where an O should be).
+const TO_HEADER_SVC = process.env.BC_WS_TRANSFER_ORDER || 'TransferOrder';
+const TO_LINE_SVC = process.env.BC_WS_TRANSFER_ORDER_LINE || 'TransferOrderLine';
+
+async function createTransferOrder(payload) {
+  if (MOCK) return { mock: true, No: 'TRO-MOCK-' + Date.now() };
+  const tok = await getToken();
+  const r = await fetch(`${odataBase()}/${TO_HEADER_SVC}`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${tok}`, 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!r.ok) throw new Error(`BC POST /${TO_HEADER_SVC} → ${r.status}: ${(await r.text()).slice(0, 500)}`);
+  return r.json();
+}
+
+async function addTransferOrderLine(payload) {
+  if (MOCK) return { mock: true, Line_No: payload.Line_No };
+  const tok = await getToken();
+  const r = await fetch(`${odataBase()}/${TO_LINE_SVC}`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${tok}`, 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!r.ok) throw new Error(`BC POST /${TO_LINE_SVC} → ${r.status}: ${(await r.text()).slice(0, 500)}`);
+  return r.json();
+}
+
 // ─── Sales Order ───
 async function createSalesOrder(payload) {
   if (MOCK) return { mock: true, id: 'MOCK-SO-' + Date.now(), number: 'SO-MOCK-' + Date.now() };
@@ -267,4 +299,4 @@ async function listPurchaseReceipts(orderNumber) {
   return bcFetch(`/purchaseReceipts?$filter=orderNumber eq '${orderNumber}'&$expand=purchaseReceiptLines`);
 }
 
-module.exports = { MOCK, getToken, listItems, listItemCategories, listItemCards, listSalesPrices, listItemUnitsOfMeasure, createSalesOrder, getSalesOrder, addSalesOrderLine, shipAndInvoiceSalesOrder, findPostedInvoiceByExternalDoc, createSalesInvoice, addInvoiceLine, postInvoice, deleteSalesInvoice, deleteSalesOrder, listVendors, createPurchaseOrder, getPurchaseOrder, addPurchaseOrderLine, patchPurchaseOrderLine, getPurchaseOrderLines, listPurchaseReceipts };
+module.exports = { MOCK, getToken, listItems, listItemCategories, listItemCards, listSalesPrices, listItemUnitsOfMeasure, createSalesOrder, getSalesOrder, addSalesOrderLine, shipAndInvoiceSalesOrder, findPostedInvoiceByExternalDoc, createSalesInvoice, addInvoiceLine, postInvoice, deleteSalesInvoice, deleteSalesOrder, listVendors, createPurchaseOrder, getPurchaseOrder, addPurchaseOrderLine, patchPurchaseOrderLine, getPurchaseOrderLines, listPurchaseReceipts, createTransferOrder, addTransferOrderLine };

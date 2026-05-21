@@ -226,6 +226,12 @@ try { db.exec("ALTER TABLE branches ADD COLUMN license_key TEXT DEFAULT ''"); } 
 try { db.exec("ALTER TABLE branches ADD COLUMN license_issued_at TEXT"); } catch (e) {}
 try { db.exec("ALTER TABLE branches ADD COLUMN license_expires_at TEXT"); } catch (e) {}
 
+// branch_type: 'fc' (franchise — pays, goes through Finance, SO+PO in BC) or
+// 'jc' (master — company-owned outlet, no payment, Transfer Order for general
+// goods and PO for fresh fruit in BC). branches.code for JC branches equals
+// the BC location code (JC001-JCxxx).
+try { db.exec("ALTER TABLE branches ADD COLUMN branch_type TEXT DEFAULT 'fc'"); } catch (e) {}
+
 // ─── Strict-mode Finance gate: record SlipOK auto-verify outcome on the
 // payment but DON'T let it auto-promote the order. Finance review (via
 // /api/orders/:id/verify) is now the single approval channel.
@@ -245,6 +251,14 @@ try { db.exec("ALTER TABLE orders ADD COLUMN slip_retry_count INTEGER DEFAULT 0"
 // 'credit_7d' is chosen.
 try { db.exec("ALTER TABLE orders ADD COLUMN payment_method TEXT DEFAULT 'immediate'"); } catch (e) {}
 try { db.exec("ALTER TABLE orders ADD COLUMN credit_due_at TEXT DEFAULT ''"); } catch (e) {}
+
+// order_type marks which workflow created the order in BC:
+//   fc_purchase  — FC franchise ordering through Finance (SO + PO)
+//   jc_transfer  — JC master outlet, general goods (Transfer Order CTI→JC0xx)
+//   jc_purchase  — JC master outlet, fresh fruit (PO only, no SO)
+try { db.exec("ALTER TABLE orders ADD COLUMN order_type TEXT DEFAULT 'fc_purchase'"); } catch (e) {}
+try { db.exec("ALTER TABLE orders ADD COLUMN bc_to_id TEXT DEFAULT ''"); } catch (e) {}
+try { db.exec("ALTER TABLE orders ADD COLUMN bc_to_no TEXT DEFAULT ''"); } catch (e) {}
 
 // ─── Migrate: cancel fields ───
 try { db.exec("ALTER TABLE orders ADD COLUMN cancelled_at TEXT"); } catch (e) {}
@@ -367,6 +381,41 @@ if (userCount === 0) {
   stmt.run(uid(), 'jf049', hash('fc1234'), 'Owner JF049', 'branch_owner', 'JF049', 'สาขา JF049', 'JF002', 1);
   console.log('[db] Seeded users: itmanager/it1234 (super_admin), admin/admin1234 (admin_scm), finance/fin1234 (finance), jf039/jf049 (branch_owner)');
 }
+
+// ─── Seed JC master branches + users (idempotent) ──────────────────────────
+// Company-owned outlets. branches.code = BC location code, so the Transfer
+// Order at checkout time targets the right warehouse directly.
+try {
+  const JC_BRANCHES = [
+    ['JC002', 'JC002 DGT'],
+    ['JC003', 'JC003 CTW'],
+    ['JC004', 'JC004 Atthenee'],
+    ['JC005', 'JC005 Mega Bangna'],
+    ['JC006', 'JC006 Siam Discovery'],
+    ['JC007', 'JC007 Siam Paragon 5th floor'],
+    ['JC008', 'JC008'],
+    ['JC009', 'JC009'],
+    ['JC010', 'JC010'],
+  ];
+  const insBranch = db.prepare(`INSERT OR IGNORE INTO branches (code, name, branch_type, bc_customer_no) VALUES (?, ?, 'jc', '')`);
+  for (const [code, name] of JC_BRANCHES) insBranch.run(code, name);
+  // Promote any pre-existing rows with these codes to branch_type='jc' too
+  // (safe for re-seed — won't downgrade FC branches).
+  const promoteStmt = db.prepare("UPDATE branches SET branch_type='jc' WHERE code = ? AND branch_type != 'jc'");
+  for (const [code] of JC_BRANCHES) promoteStmt.run(code);
+
+  // Seed one owner per JC branch if none exists
+  const insUser = db.prepare(`INSERT INTO users (id, username, password, full_name, role, branch_code, branch_name, bc_customer_no, can_order)
+    VALUES (?,?,?,?,?,?,?,?,1)`);
+  const hash = (p) => bcrypt.hashSync(p, 10);
+  for (const [code, name] of JC_BRANCHES) {
+    const username = code.toLowerCase(); // jc002, jc003, ...
+    const exists = db.prepare('SELECT 1 FROM users WHERE username = ?').get(username);
+    if (!exists) {
+      insUser.run(crypto.randomUUID(), username, hash('jc1234'), 'Owner ' + code, 'branch_owner', code, name, '');
+    }
+  }
+} catch (e) { console.error('[db] JC seed failed:', e.message); }
 
 // ─── Seed super_admin "IT Manager" ถ้ายังไม่มี ───
 try {
