@@ -522,7 +522,14 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
   const u = db.prepare('SELECT can_order FROM users WHERE id=?').get(req.user.id);
   if (!u || !u.can_order) return res.status(403).json({ error: 'ไม่มีสิทธิ์สั่งซื้อ / Not allowed to order' });
   const { note = '', payment_method: rawMethod = 'immediate' } = req.body || {};
-  const paymentMethod = (rawMethod === 'credit_7d') ? 'credit_7d' : 'immediate';
+  // Detect whether the FC/JC user is in a master (JC) branch — drives the
+  // payment-skip + Transfer-Order routing later in this function.
+  const branchRow = req.user.branch_code
+    ? db.prepare('SELECT branch_type FROM branches WHERE code = ?').get(req.user.branch_code)
+    : null;
+  const isJcBranch = branchRow && branchRow.branch_type === 'jc';
+  // JC branches don't pay — force immediate (credit_7d makes no sense without payment).
+  const paymentMethod = (!isJcBranch && rawMethod === 'credit_7d') ? 'credit_7d' : 'immediate';
   // Get cart
   const cartItems = db.prepare(`
     SELECT c.item_no, c.quantity, c.unit_price, i.name as item_name, i.inventory, i.uom, i.category
@@ -574,10 +581,20 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
     ? db.prepare("SELECT datetime('now', '+7 days', 'localtime') AS d").get().d
     : '';
 
+  // Order type drives which BC document we'll create later in this function
+  // and whether the order goes through the Finance pipeline at all.
+  const orderType = isJcBranch
+    ? (isFruitOrder ? 'jc_purchase' : 'jc_transfer')
+    : 'fc_purchase';
+  // JC orders skip Finance entirely — flip straight to 'verified' so they
+  // never appear in the Finance approval queue and aren't subject to the
+  // 30-min auto-cancel timer.
+  const initialPaymentStatus = isJcBranch ? 'verified' : 'pending';
+
   const tx = db.transaction(() => {
     // Create order (VAT=0 ก่อน จะอัพเดทจาก BC ทีหลัง)
-    db.prepare(`INSERT INTO orders (id, order_number, user_id, branch_code, subtotal, vat_amount, total, note, payment_method, credit_due_at)
-      VALUES (?,?,?,?,?,0,?,?,?,?)`).run(orderId, orderNumber, req.user.id, req.user.branch_code || '', subtotal, subtotal, note, paymentMethod, creditDueAt);
+    db.prepare(`INSERT INTO orders (id, order_number, user_id, branch_code, subtotal, vat_amount, total, note, payment_method, credit_due_at, order_type, payment_status)
+      VALUES (?,?,?,?,?,0,?,?,?,?,?,?)`).run(orderId, orderNumber, req.user.id, req.user.branch_code || '', subtotal, subtotal, note, paymentMethod, creditDueAt, orderType, initialPaymentStatus);
 
     // Create order lines
     const insLine = db.prepare('INSERT INTO order_lines (order_id, item_no, item_name, quantity, unit_price, line_total) VALUES (?,?,?,?,?,?)');
@@ -612,22 +629,25 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
   db.prepare('UPDATE orders SET vat_amount=?, total=? WHERE id=?').run(vatAmount, total, orderId);
   db.prepare('UPDATE payments SET amount=? WHERE order_id=?').run(total, orderId);
 
-  // Generate PromptPay QR. Both methods get one — credit_7d users may want
-  // to scan + pay at any point during the 7-day window.
+  // Generate PromptPay QR for FC only — JC branches don't pay.
   let qrDataUrl = '';
-  try {
-    qrDataUrl = await generateQR(total);
-  } catch (e) {
-    console.error('[QR]', e.message);
+  if (!isJcBranch) {
+    try {
+      qrDataUrl = await generateQR(total);
+    } catch (e) {
+      console.error('[QR]', e.message);
+    }
   }
 
-  // Fruit orders create BC SO+PO immediately at checkout (before the FC even
-  // sees the payment screen) per the new flow. Non-fruit orders keep the
-  // existing strict-mode behaviour: BC is created only when Finance approves
-  // the slip.
-  let bcSoResult = null;
-  let bcPoResult = null;
-  if (isFruitOrder) {
+  // BC document creation depends on the orderType:
+  //   fc_purchase + general  → no BC at checkout (Finance approve creates SO+PO)
+  //   fc_purchase + fruit    → BC SO + BC PO immediately
+  //   jc_transfer            → BC Transfer Order (CTI → JC0xx)
+  //   jc_purchase            → BC PO only (no SO — internal, not a sale)
+  let bcSoResult = null, bcPoResult = null, bcToResult = null;
+  const defaultVendor = (process.env.BC_DEFAULT_VENDOR_NO || '').trim();
+
+  if (orderType === 'fc_purchase' && isFruitOrder) {
     try {
       bcSoResult = await postOrderToBC(orderId);
     } catch (e) {
@@ -635,7 +655,6 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
       db.prepare("UPDATE orders SET bc_sync_error=? WHERE id=?").run(e.message, orderId);
       bcSoResult = { ok: false, error: e.message };
     }
-    const defaultVendor = (process.env.BC_DEFAULT_VENDOR_NO || '').trim();
     if (bcSoResult && bcSoResult.bc_so_no && defaultVendor) {
       try {
         bcPoResult = await postPOToBC(orderId, defaultVendor);
@@ -645,14 +664,39 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
         bcPoResult = { ok: false, error: e.message };
       }
     }
+  } else if (orderType === 'jc_transfer') {
+    try {
+      bcToResult = await postTransferOrderToBC(orderId, req.user.branch_code);
+    } catch (e) {
+      console.error('[checkout → BC TO]', e.message);
+      db.prepare("UPDATE orders SET bc_sync_error=? WHERE id=?").run('[TO] ' + e.message, orderId);
+      bcToResult = { ok: false, error: e.message };
+    }
+  } else if (orderType === 'jc_purchase') {
+    if (defaultVendor) {
+      try {
+        bcPoResult = await postPOToBC(orderId, defaultVendor);
+      } catch (e) {
+        console.error('[checkout → BC PO (JC)]', e.message);
+        db.prepare("UPDATE orders SET bc_sync_error=? WHERE id=?").run('[PO] ' + e.message, orderId);
+        bcPoResult = { ok: false, error: e.message };
+      }
+    }
   }
 
   // Grab created_at (set by SQLite DEFAULT) so client can sync countdown with server time
   const createdRow = db.prepare('SELECT created_at FROM orders WHERE id=?').get(orderId);
 
-  const msgBase = paymentMethod === 'credit_7d'
-    ? `สร้างคำสั่งซื้อ ${orderNumber} (เครดิต 7 วัน) — กำหนดชำระภายใน ${creditDueAt}`
-    : `สร้างคำสั่งซื้อ ${orderNumber} — โอนชำระเงินและส่งสลิปเพื่อให้ Finance ตรวจสอบ`;
+  let msgBase;
+  if (orderType === 'jc_transfer') {
+    msgBase = `สร้างคำสั่งซื้อ ${orderNumber} (สาขา JC) — ${bcToResult && bcToResult.bc_to_no ? 'BC TO ' + bcToResult.bc_to_no : 'BC TO ค้าง (retry)'}`;
+  } else if (orderType === 'jc_purchase') {
+    msgBase = `สร้างคำสั่งซื้อ ${orderNumber} (สาขา JC · ผลไม้สด) — ${bcPoResult && bcPoResult.bc_po_no ? 'BC PO ' + bcPoResult.bc_po_no : 'BC PO ค้าง (retry)'}`;
+  } else if (paymentMethod === 'credit_7d') {
+    msgBase = `สร้างคำสั่งซื้อ ${orderNumber} (เครดิต 7 วัน) — กำหนดชำระภายใน ${creditDueAt}`;
+  } else {
+    msgBase = `สร้างคำสั่งซื้อ ${orderNumber} — โอนชำระเงินและส่งสลิปเพื่อให้ Finance ตรวจสอบ`;
+  }
 
   res.json({
     ok: true,
@@ -664,8 +708,11 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
     payment_method: paymentMethod,
     credit_due_at: creditDueAt,
     is_fruit: isFruitOrder,
+    is_jc: isJcBranch,
+    order_type: orderType,
     bc_so: bcSoResult,
     bc_po: bcPoResult,
+    bc_to: bcToResult,
     qr_data_url: qrDataUrl,
     created_at: createdRow ? createdRow.created_at : null,
     cancel_timeout_min: paymentMethod === 'credit_7d' ? 10080 : 30, // 10080 min = 7 days; UI uses it for countdown only — credit orders aren't auto-cancelled
@@ -1054,10 +1101,12 @@ async function postOrderToBC(orderId) {
 async function postPOToBC(orderId, vendorNo) {
   const order = db.prepare('SELECT * FROM orders WHERE id=?').get(orderId);
   if (!order) throw new Error('Order not found');
-  // Fruit orders create BC SO+PO at checkout (before Finance ever sees them) —
-  // so the 'verified' status gate doesn't apply. The bc_so_no gate is enough:
-  // we just need the SO to exist so the PO can mirror its lines.
-  if (!order.bc_so_no) throw new Error('Order ยังไม่มี BC SO — สร้าง SO ให้สำเร็จก่อน');
+  // FC fruit orders create BC SO before PO, so the SO must exist. JC master
+  // orders (jc_purchase) skip the SO entirely — they're internal, not a sale —
+  // so we let those through without an SO.
+  if (order.order_type !== 'jc_purchase' && !order.bc_so_no) {
+    throw new Error('Order ยังไม่มี BC SO — สร้าง SO ให้สำเร็จก่อน');
+  }
   if (order.bc_po_no) return { already: true, bc_po_id: order.bc_po_id, bc_po_no: order.bc_po_no };
   // Fallback to env default if caller didn't pass a vendor explicitly
   vendorNo = (vendorNo || process.env.BC_DEFAULT_VENDOR_NO || '').trim();
@@ -1099,6 +1148,57 @@ async function postPOToBC(orderId, vendorNo) {
     .run('purchase_order', 'ok', `Created PO ${poNo} for ${order.order_number} (vendor ${vendorNo})`, 1);
 
   return { ok: true, bc_po_id: poId, bc_po_no: poNo, vendor_no: vendorNo };
+}
+
+// ─── BC: Create Transfer Order for a JC master outlet ─────────────────────
+// Used when a JC branch orders general goods. The Transfer Order moves stock
+// from CTI (HQ warehouse) → JC0xx (the outlet) through the IN-TRANSIT
+// in-transit location. No payment, no SO, no PO — just a TO.
+//
+// Implemented over OData (Page 5740 header + 5741 lines published as Web
+// Services). Service names come from bc-client which reads them from env so
+// the user can rename in BC without code changes.
+async function postTransferOrderToBC(orderId, transferToCode) {
+  const order = db.prepare('SELECT * FROM orders WHERE id=?').get(orderId);
+  if (!order) throw new Error('Order not found');
+  if (order.bc_to_no) return { already: true, bc_to_no: order.bc_to_no };
+  if (!transferToCode) throw new Error('ต้องระบุ Transfer_to_Code (JC branch code)');
+
+  const lines = db.prepare('SELECT * FROM order_lines WHERE order_id=?').all(orderId);
+  if (!lines.length) throw new Error('Order has no lines');
+
+  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const header = await bc.createTransferOrder({
+    Transfer_from_Code: 'CTI',
+    Transfer_to_Code: transferToCode,
+    In_Transit_Code: 'IN-TRANSIT',
+    Posting_Date: today,
+    Shipment_Date: today,
+  });
+  const toNo = header.No;
+
+  // Lines are added with explicit Line_No (10000, 20000, ...) since the
+  // Subform page uses that as part of its key. unitOfMeasureCode is looked up
+  // from items_cache because BC requires it on the line.
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const cached = db.prepare('SELECT uom FROM items_cache WHERE item_no=?').get(line.item_no);
+    await bc.addTransferOrderLine({
+      Document_No: toNo,
+      Line_No: (i + 1) * 10000,
+      Item_No: line.item_no,
+      Quantity: line.quantity,
+      Unit_of_Measure_Code: cached && cached.uom ? cached.uom : '',
+    });
+  }
+
+  db.prepare("UPDATE orders SET bc_to_id=?, bc_to_no=? WHERE id=?")
+    .run(header['@odata.etag'] || '', toNo, orderId);
+
+  db.prepare('INSERT INTO sync_log (kind, status, message, count) VALUES (?,?,?,?)')
+    .run('transfer_order', 'ok', `Created TO ${toNo} for ${order.order_number} (CTI → ${transferToCode})`, 1);
+
+  return { ok: true, bc_to_no: toNo };
 }
 
 // ─── Fulfillment: Sync from BC Purchase Receipts ───
