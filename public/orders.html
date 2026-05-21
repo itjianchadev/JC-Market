@@ -24,7 +24,7 @@
 .receive-line{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);font-size:14px}
 .receive-line .name{flex:1}
 .receive-line input[type=number]{width:80px;text-align:center}
-.detail-modal{position:fixed;inset:0;background:rgba(24,24,24,.5);backdrop-filter:blur(4px);z-index:999;display:none;align-items:center;justify-content:center;overflow-y:auto;padding:20px}
+.detail-modal{position:fixed;inset:0;background:rgba(42,33,24,.5);backdrop-filter:blur(4px);z-index:999;display:none;align-items:center;justify-content:center;overflow-y:auto;padding:20px}
 .detail-box{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:24px;max-width:600px;width:100%;max-height:90vh;overflow-y:auto;position:relative}
 </style>
 </head><body data-i18n-title="orders.page_title">
@@ -605,7 +605,7 @@ async function showReceipt(orderId) {
     const buyer = rc.buyer || {};
     let html = `
       <div id="receiptDoc">
-        <div style="text-align:center;margin-bottom:20px;border-bottom:2px solid var(--primary);padding-bottom:16px">
+        <div style="text-align:center;margin-bottom:20px;border-bottom:2px solid var(--gold-dark);padding-bottom:16px">
           <h2 style="margin-bottom:2px">${t('orders.receipt.title')}</h2>
           <p style="color:var(--muted);font-size:13px">${t('orders.receipt.subtitle')}</p>
           <p style="color:var(--gold-dark);font-weight:700;font-size:18px;margin-top:8px">${rc.receipt_number}</p>
@@ -637,7 +637,7 @@ async function showReceipt(orderId) {
 
         <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px">
           <thead>
-            <tr style="border-bottom:2px solid var(--primary)">
+            <tr style="border-bottom:2px solid var(--gold-dark)">
               <th style="text-align:left;padding:8px 6px;font-size:12px;color:var(--muted)">${t('orders.receipt.no')}</th>
               <th style="text-align:left;padding:8px 6px;font-size:12px;color:var(--muted)">${t('orders.receipt.code')}</th>
               <th style="text-align:left;padding:8px 6px;font-size:12px;color:var(--muted)">${t('orders.receipt.item')}</th>
@@ -666,7 +666,7 @@ async function showReceipt(orderId) {
             ${rc.vat_amount > 0 ? `<div style="display:flex;justify-content:space-between;font-size:14px;color:var(--muted);margin-bottom:4px">
               <span>${t('orders.receipt.vat')}</span><span>฿${rc.vat_amount.toLocaleString()}</span>
             </div>` : ''}
-            <div style="display:flex;justify-content:space-between;font-size:18px;font-weight:700;border-top:2px solid var(--primary);padding-top:8px;margin-top:4px">
+            <div style="display:flex;justify-content:space-between;font-size:18px;font-weight:700;border-top:2px solid var(--gold-dark);padding-top:8px;margin-top:4px">
               <span>${t('orders.receipt.grand')}</span><span style="color:var(--gold-dark)">฿${rc.total.toLocaleString()}</span>
             </div>
           </div>

@@ -9,7 +9,7 @@
 .stat-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;text-align:center;transition:.2s}
 .stat-card:hover{border-color:var(--gold);box-shadow:0 4px 12px rgba(0,0,0,.06)}
 .stat-card .icon{font-size:28px;margin-bottom:8px}
-.stat-card .num{font-size:28px;font-weight:700;color:var(--primary)}
+.stat-card .num{font-size:28px;font-weight:700;color:var(--text)}
 .stat-card .num.gold{color:var(--gold-dark)}
 .stat-card .num.green{color:var(--ok)}
 .stat-card .num.red{color:var(--err)}
@@ -22,7 +22,7 @@
 .dash-full{grid-column:1/-1}
 
 .dtable{width:100%;border-collapse:collapse;font-size:13px}
-.dtable thead th{background:var(--primary);color:var(--gold);padding:8px 10px;text-align:left;font-size:12px;font-weight:600}
+.dtable thead th{background:var(--beige);color:var(--gold-dark);padding:8px 10px;text-align:left;font-size:12px;font-weight:600;border-bottom:1px solid var(--gold)}
 .dtable tbody td{padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
 .dtable tbody tr:hover{background:rgba(173,156,130,.08)}
 .dtable tbody tr:nth-child(even){background:var(--beige)}
@@ -51,7 +51,7 @@
 .bar-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px}
 .bar-fill{width:100%;min-width:30px;background:var(--gold);border-radius:6px 6px 0 0;transition:.3s;min-height:4px}
 .bar-label{font-size:10px;color:var(--muted);white-space:nowrap}
-.bar-value{font-size:11px;font-weight:700;color:var(--primary)}
+.bar-value{font-size:11px;font-weight:700;color:var(--text)}
 
 .fulfill-row{display:flex;gap:12px;flex-wrap:wrap}
 .fulfill-item{flex:1;min-width:100px;text-align:center;padding:12px;border-radius:10px}
@@ -59,7 +59,7 @@
 .fulfill-item .label{font-size:11px;margin-top:2px}
 
 /* Slip preview modal */
-.slip-modal{position:fixed;inset:0;background:rgba(24,24,24,.5);backdrop-filter:blur(4px);z-index:1000;display:none;align-items:center;justify-content:center}
+.slip-modal{position:fixed;inset:0;background:rgba(42,33,24,.5);backdrop-filter:blur(4px);z-index:1000;display:none;align-items:center;justify-content:center}
 .slip-modal img{max-width:90vw;max-height:80vh;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.3)}
 
 @media(max-width:1024px){.dash-layout{grid-template-columns:1fr}}

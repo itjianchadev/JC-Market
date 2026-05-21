@@ -1,42 +1,53 @@
-/* ─── Jiancha Brand CI ─── */
+/* ─── Jiancha Brand CI — White + Gold sharp ─── */
+/* No black anywhere on screen. PDF/print views keep their dark text since
+ * a printed receipt that's not legible on paper helps nobody — those styles
+ * live inline on the pages that build the print HTML. */
 :root{
-  --primary:#181818;
+  --primary:#ffffff;            /* surface — was #181818 */
   --gold:#AD9C82;
   --gold-dark:#8a7d66;
-  --bg:#f5f3f0;
+  --gold-light:#d6c6a8;
+  --bg:#fafaf8;                 /* page bg — was #f5f3f0 */
   --card:#ffffff;
-  --text:#181818;
-  --muted:#525252;
-  --border:#e0ddd8;
+  --text:#2a2118;               /* warm dark — was pure-black #181818 */
+  --muted:#7a6e62;              /* warmer muted — was #525252 */
+  --border:#ebe6dd;
+  --border-strong:#d6cfc1;
   --ok:#2e7d32;
   --err:#c62828;
-  --beige:#EBE9E6;
+  --beige:#f5efe5;
+  --shadow-sm:0 1px 2px rgba(42,33,24,.06);
+  --shadow-md:0 4px 12px rgba(42,33,24,.08);
+  --shadow-lg:0 8px 24px rgba(42,33,24,.12);
 }
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Sarabun','Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
 a{color:var(--gold-dark);text-decoration:none}
 .container{max-width:1280px;margin:0 auto;padding:20px}
 
-/* ─── Navigation ─── */
-.nav{background:var(--primary);border-bottom:1px solid #2a2a2a;padding:14px 20px;display:flex;align-items:center;gap:20px;flex-wrap:wrap}
-.nav .brand{font-weight:700;font-size:18px;color:var(--gold)}
-.nav a{color:#EBE9E6;padding:6px 12px;border-radius:6px;font-size:14px;transition:.15s}
-.nav a:hover,.nav a.active{background:rgba(173,156,130,.2);color:var(--gold)}
+/* ─── Navigation — white surface with gold accent ─── */
+.nav{background:#ffffff;border-bottom:1px solid var(--border);padding:14px 20px;display:flex;align-items:center;gap:20px;flex-wrap:wrap;box-shadow:var(--shadow-sm)}
+.nav .brand{font-weight:700;font-size:18px;color:var(--gold-dark);letter-spacing:.3px}
+.nav a{color:var(--text);padding:7px 12px;border-radius:8px;font-size:14px;transition:background .15s,color .15s;font-weight:500}
+.nav a:hover{background:var(--beige);color:var(--gold-dark)}
+.nav a.active{background:var(--gold);color:#ffffff}
 .nav .spacer{flex:1}
-.nav .user{color:#999;font-size:14px}
+.nav .user{color:var(--muted);font-size:14px}
 
 /* ─── Card ─── */
-.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:16px;box-shadow:var(--shadow-sm)}
 
 /* ─── Buttons ─── */
-.btn{background:var(--gold);color:#fff;border:none;border-radius:8px;padding:10px 18px;font-weight:600;cursor:pointer;font-family:inherit;transition:.15s}
-.btn:hover{background:var(--gold-dark)}
-.btn.ghost{background:transparent;color:var(--gold-dark);border:1px solid var(--gold)}
-.btn.ghost:hover{background:rgba(173,156,130,.1)}
+.btn{background:var(--gold);color:#ffffff;border:none;border-radius:8px;padding:10px 18px;font-weight:600;cursor:pointer;font-family:inherit;transition:background .15s,transform .1s,box-shadow .15s}
+.btn:hover{background:var(--gold-dark);box-shadow:var(--shadow-sm)}
+.btn:active{transform:translateY(1px)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn.ghost{background:transparent;color:var(--gold-dark);border:1px solid var(--border-strong)}
+.btn.ghost:hover{background:var(--beige);border-color:var(--gold)}
 .btn.sm{padding:6px 12px;font-size:13px}
 
 /* ─── Form elements ─── */
-input,select,textarea{width:100%;background:#fff;border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:8px;font-family:inherit;font-size:14px}
+input,select,textarea{width:100%;background:#fff;border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:8px;font-family:inherit;font-size:14px;transition:border-color .15s,box-shadow .15s}
 input:focus,select:focus,textarea:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 3px rgba(173,156,130,.15)}
 label{display:block;margin-bottom:6px;color:var(--muted);font-size:13px}
 
@@ -45,8 +56,8 @@ label{display:block;margin-bottom:6px;color:var(--muted);font-size:13px}
 .grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}
 
 /* ─── Item card (legacy) ─── */
-.item-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;transition:.2s}
-.item-card:hover{border-color:var(--gold);transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.06)}
+.item-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;transition:border-color .2s,transform .2s,box-shadow .2s}
+.item-card:hover{border-color:var(--gold);transform:translateY(-2px);box-shadow:var(--shadow-md)}
 .item-card h3{font-size:15px;margin-bottom:6px}
 .item-card .price{color:var(--gold-dark);font-size:20px;font-weight:700;margin:8px 0}
 .item-card .meta{color:var(--muted);font-size:12px}
@@ -56,17 +67,17 @@ label{display:block;margin-bottom:6px;color:var(--muted);font-size:13px}
 .badge.ok{background:#e8f5e9;color:var(--ok)}
 .badge.low{background:#ffebee;color:var(--err)}
 
-/* ─── Login ─── */
-.login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;background:var(--primary)}
-.login-box{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:40px;width:100%;max-width:400px;box-shadow:0 8px 30px rgba(0,0,0,.15)}
-.login-box h1{color:var(--gold);margin-bottom:6px;text-align:center}
+/* ─── Login — light cream gradient (no more black bg) ─── */
+.login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;background:linear-gradient(135deg,#fafaf8 0%,#f5efe5 60%,#e8dfcd 100%)}
+.login-box{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:40px;width:100%;max-width:400px;box-shadow:var(--shadow-lg)}
+.login-box h1{color:var(--gold-dark);margin-bottom:6px;text-align:center}
 .login-box p.sub{color:var(--muted);text-align:center;margin-bottom:24px;font-size:14px}
 .login-box input{margin-bottom:14px}
 .login-box .btn{width:100%}
 
 /* ─── Toast ─── */
-.toast{position:fixed;bottom:24px;right:24px;background:var(--primary);color:#fff;border:1px solid var(--gold);padding:14px 20px;border-radius:8px;z-index:1000;animation:slide .3s;box-shadow:0 4px 16px rgba(0,0,0,.15)}
-@keyframes slide{from{transform:translateX(100%)}to{transform:translateX(0)}}
+.toast{position:fixed;bottom:24px;right:24px;background:#ffffff;color:var(--text);border:1px solid var(--gold);padding:14px 20px;border-radius:10px;z-index:1000;animation:slide .3s;box-shadow:var(--shadow-lg)}
+@keyframes slide{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
 
 /* ─── Errors & Cart ─── */
 .err{color:var(--err);font-size:13px;margin-top:8px;min-height:18px}
