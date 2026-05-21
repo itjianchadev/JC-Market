@@ -29,6 +29,11 @@ const bcrypt = require('bcryptjs');
 const DRY_RUN = process.argv.includes('--dry-run');
 const JF_ONLY = process.argv.includes('--jf-only');
 const JC_ONLY = process.argv.includes('--jc-only');
+// --reset also overwrites passwords of users that already exist. Use this when
+// bootstrapping a new credentials sheet for the whole network. Default is to
+// leave existing users alone — safer because anyone already logged in keeps
+// working.
+const RESET = process.argv.includes('--reset');
 
 const FS_PROJECT = '/Users/jiancha/AgenAi_Jiancha/FoodStory';
 const fsLogin = require(path.join(FS_PROJECT, 'foodstory_login'));
@@ -40,13 +45,14 @@ const IMPORTS_DIR = path.join(__dirname, '..', 'imports');
 fs.mkdirSync(IMPORTS_DIR, { recursive: true });
 
 // ─── Helpers ──────────────────────────────────────────────────────────
-function randomPassword(len = 12) {
-  // url-safe base64 trimmed to len — no ambiguous 0/O/l/1, no symbols that
-  // confuse copy-paste from a CSV.
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
-  let out = '';
+// 8-digit numeric — easier to type on mobile / dictate over the phone than
+// a 12-char alphanumeric. Trade-off: smaller key space (10^8) but the
+// branch_owner accounts are behind a username and rate-limited by the app,
+// so brute force isn't a realistic threat for this use case.
+function randomPassword(len = 8) {
   const bytes = crypto.randomBytes(len);
-  for (let i = 0; i < len; i++) out += alphabet[bytes[i] % alphabet.length];
+  let out = '';
+  for (let i = 0; i < len; i++) out += String(bytes[i] % 10);
   return out;
 }
 
@@ -130,26 +136,37 @@ function applyBranches(branches) {
     INSERT INTO users (id, username, password, full_name, role, branch_code, branch_name, bc_customer_no, can_order)
     VALUES (?,?,?,?,?,?,?,?,1)
   `);
+  const resetPassword = db.prepare('UPDATE users SET password = ?, branch_name = ? WHERE id = ?');
 
   const report = []; // rows for CSV
-  let newUsers = 0, existingUsers = 0;
+  let newUsers = 0, resetUsers = 0, skippedUsers = 0;
 
   const processOne = (b) => {
     if (!DRY_RUN) upsertBranch.run(b.code, b.name, b.type);
     const username = b.code.toLowerCase();
     const existing = findUser.get(username);
+    const password = randomPassword(8);
+    const tag = DRY_RUN ? ' (dry-run, not written)' : '';
+
     if (existing) {
-      existingUsers++;
-      report.push({ code: b.code, name: b.name, type: b.type, username, password: '(unchanged — user already exists)' });
+      if (!RESET) {
+        skippedUsers++;
+        report.push({ code: b.code, name: b.name, type: b.type, username, password: '(unchanged — pass --reset to overwrite)' });
+        return;
+      }
+      // --reset: regenerate password for the existing user. Branch name also
+      // refreshed so the CSV/credentials sheet stays consistent with whatever
+      // FoodStory says today.
+      if (!DRY_RUN) resetPassword.run(bcrypt.hashSync(password, 10), b.name, existing.id);
+      resetUsers++;
+      report.push({ code: b.code, name: b.name, type: b.type, username, password: password + tag });
       return;
     }
-    const password = randomPassword(12);
     if (!DRY_RUN) {
-      const hashed = bcrypt.hashSync(password, 10);
       insertUser.run(
         crypto.randomUUID(),
         username,
-        hashed,
+        bcrypt.hashSync(password, 10),
         'Owner ' + b.code,
         'branch_owner',
         b.code,
@@ -158,7 +175,7 @@ function applyBranches(branches) {
       );
     }
     newUsers++;
-    report.push({ code: b.code, name: b.name, type: b.type, username, password: DRY_RUN ? `${password} (dry-run, not written)` : password });
+    report.push({ code: b.code, name: b.name, type: b.type, username, password: password + tag });
   };
 
   if (DRY_RUN) {
@@ -166,7 +183,7 @@ function applyBranches(branches) {
   } else {
     db.transaction((rows) => rows.forEach(processOne))(branches);
   }
-  return { report, newUsers, existingUsers };
+  return { report, newUsers, resetUsers, skippedUsers };
 }
 
 // ─── CSV ──────────────────────────────────────────────────────────────
@@ -190,11 +207,12 @@ function writeCsv(report) {
   const branches = await fetchBranches();
   console.log(`\n📋 ${branches.length} active branches (JF=${branches.filter(b=>b.type==='fc').length}, JC=${branches.filter(b=>b.type==='jc').length})`);
 
-  const { report, newUsers, existingUsers } = applyBranches(branches);
+  const { report, newUsers, resetUsers, skippedUsers } = applyBranches(branches);
 
   const file = writeCsv(report);
   console.log(`\n✅ Done`);
-  console.log(`   New users:      ${newUsers}`);
-  console.log(`   Existing users: ${existingUsers} (passwords NOT changed)`);
-  console.log(`   CSV:            ${file}`);
+  console.log(`   New users:        ${newUsers}`);
+  console.log(`   Reset passwords:  ${resetUsers}${RESET ? '' : ' (skipped — use --reset)'}`);
+  console.log(`   Unchanged:        ${skippedUsers}`);
+  console.log(`   CSV:              ${file}`);
 })().catch(e => { console.error('❌', e.message); console.error(e.stack); process.exit(1); });
