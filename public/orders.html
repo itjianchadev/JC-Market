@@ -291,7 +291,7 @@ async function showDetail(id) {
       html += `<div style="margin-top:12px"><h5 style="margin-bottom:8px;color:var(--muted)">${t('orders.history')}</h5>`;
       for (const r of o.receipts) {
         html += `<div class="card" style="padding:10px;margin-bottom:6px;font-size:13px">
-          <div style="display:flex;justify-content:space-between"><strong>${r.receipt_number}</strong><span style="color:var(--muted)">${r.created_at}</span></div>
+          <div style="display:flex;justify-content:space-between"><strong>${r.receipt_number}</strong><span style="color:var(--muted)">${r.received_date || r.created_at}</span></div>
           <div style="color:var(--muted)">${t('orders.received_by')}: ${r.received_by_name||''}${r.note ? ' | '+r.note : ''}</div>
         </div>`;
       }
@@ -423,10 +423,14 @@ async function loadReceiveForm(id) {
   section.innerHTML = `<p style="color:var(--muted);text-align:center">${t('common.loading')}</p>`;
   try {
     const data = await api('/api/orders/' + id + '/receivable');
+    const selectable = data.lines.filter(l => l.remaining > 0);
     let html = `<div style="margin-bottom:12px">
       <h5 style="margin-bottom:8px">${t('orders.rcv.item')}</h5>
       <table style="width:100%;font-size:13px;margin-bottom:8px">
         <tr style="color:var(--muted);font-size:11px;text-align:center">
+          <th style="text-align:left;width:24px">${selectable.length > 1
+            ? `<input type="checkbox" id="rcvAll_${id}" checked onchange="toggleAllReceive('${id}', this.checked)" title="${t('orders.rcv.select_all')}">`
+            : ''}</th>
           <th style="text-align:left">${t('orders.rcv.item')}</th>
           <th>${t('orders.rcv.order')}</th>
           <th>${t('orders.rcv.fc_rcv')}</th>
@@ -435,13 +439,15 @@ async function loadReceiveForm(id) {
     for (const l of data.lines) {
       if (l.remaining <= 0) {
         html += `<tr style="opacity:0.5">
+          <td></td>
           <td>${itemName(l)}<br><span style="color:var(--muted);font-size:11px">${l.item_no}</span></td>
           <td style="text-align:center">${l.quantity}</td>
           <td style="text-align:center;color:var(--ok)">${l.already_received}</td>
           <td style="text-align:center;color:var(--ok)">✓</td>
         </tr>`;
       } else {
-        html += `<tr>
+        html += `<tr id="rcvRow_${l.id}">
+          <td style="text-align:center"><input type="checkbox" id="rcvPick_${l.id}" checked onchange="toggleReceiveRow('${id}','${l.id}', this.checked)"></td>
           <td>${itemName(l)}<br><span style="color:var(--muted);font-size:11px">${l.item_no}</span></td>
           <td style="text-align:center">${l.quantity}</td>
           <td style="text-align:center">${l.already_received}</td>
@@ -449,20 +455,60 @@ async function loadReceiveForm(id) {
         </tr>`;
       }
     }
-    html += `</table>`;
+    html += `</table>
+      <div id="rcvSummary_${id}" style="font-size:12px;color:var(--muted);margin-bottom:8px;text-align:right"></div>`;
+    const today = new Date().toISOString().slice(0,10);
     html += `</div>
+      <label style="display:block;font-size:13px;font-weight:600;margin-bottom:4px">${t('orders.rcv.date')}</label>
+      <input type="date" id="rcvDate_${id}" value="${today}" max="${today}" style="width:100%;margin-bottom:4px;padding:8px;border:1px solid var(--border);border-radius:8px">
+      <p style="font-size:11px;color:var(--muted);margin:0 0 8px">${t('orders.rcv.date_hint')}</p>
       <textarea id="rcvNote_${id}" rows="2" placeholder="${t('orders.rcv.note_placeholder')}" style="margin-bottom:8px"></textarea>
-      <button class="btn" style="width:100%" onclick="confirmReceive('${id}', ${JSON.stringify(data.lines.filter(l=>l.remaining>0).map(l=>l.id))})">${t('orders.rcv.confirm')}</button>
+      <button class="btn" style="width:100%" onclick="confirmReceive('${id}', ${JSON.stringify(selectable.map(l=>l.id))})">${t('orders.rcv.confirm')}</button>
       <div class="err" id="rcvErr_${id}"></div>`;
     section.innerHTML = html;
+    updateReceiveSummary(id);
   } catch (e) {
     section.innerHTML = `<p style="color:var(--err)">${e.message}</p>`;
   }
 }
 
+// Visual: when a row's checkbox is off we grey it out + disable the qty input
+// so it's obvious the line is skipped. Doesn't touch the value — flipping the
+// checkbox back on keeps whatever number the user had typed.
+function toggleReceiveRow(orderId, lineId, picked) {
+  const row = document.getElementById('rcvRow_' + lineId);
+  const qty = document.getElementById('rcv_' + lineId);
+  if (row) row.style.opacity = picked ? '1' : '0.4';
+  if (qty) qty.disabled = !picked;
+  updateReceiveSummary(orderId);
+  // Keep the header checkbox in sync (becomes unchecked if any row is off)
+  const head = document.getElementById('rcvAll_' + orderId);
+  if (head) {
+    const all = [...document.querySelectorAll(`[id^="rcvPick_"]`)];
+    head.checked = all.every(c => c.checked);
+  }
+}
+
+function toggleAllReceive(orderId, picked) {
+  document.querySelectorAll(`[id^="rcvPick_"]`).forEach(cb => {
+    if (cb.checked !== picked) cb.checked = picked;
+    const lid = cb.id.replace('rcvPick_', '');
+    toggleReceiveRow(orderId, lid, picked);
+  });
+}
+
+function updateReceiveSummary(orderId) {
+  const summary = document.getElementById('rcvSummary_' + orderId);
+  if (!summary) return;
+  const picked = [...document.querySelectorAll(`[id^="rcvPick_"]`)].filter(c => c.checked);
+  summary.textContent = t('orders.rcv.summary').replace('{n}', picked.length);
+}
+
 async function confirmReceive(orderId, lineIds) {
   const lines = [];
   for (const lid of lineIds) {
+    const pick = document.getElementById('rcvPick_' + lid);
+    if (pick && !pick.checked) continue; // user unchecked → skip this item
     const input = document.getElementById('rcv_' + lid);
     if (input && parseFloat(input.value) > 0) {
       lines.push({ order_line_id: lid, received_qty: parseFloat(input.value) });
@@ -470,10 +516,11 @@ async function confirmReceive(orderId, lineIds) {
   }
   if (!lines.length) { toast(t('orders.rcv.no_items')); return; }
   const note = document.getElementById('rcvNote_' + orderId)?.value || '';
+  const received_date = document.getElementById('rcvDate_' + orderId)?.value || '';
   try {
     const r = await api('/api/orders/' + orderId + '/receive', {
       method: 'POST',
-      body: JSON.stringify({ lines, note }),
+      body: JSON.stringify({ lines, note, received_date }),
     });
     toast(r.message);
     // Show GR document instead of closing
@@ -500,7 +547,7 @@ async function showGRDocument(receiptId) {
           <span style="color:var(--gold);font-weight:700">${gr.receipt_number}</span>
         </div>
         <div style="font-size:13px;color:var(--muted);margin-bottom:4px">${t('orders.gr.order')}: ${gr.order_number || ''} ${gr.bc_po_no ? '| BC PO: ' + gr.bc_po_no : ''}</div>
-        <div style="font-size:13px;color:var(--muted);margin-bottom:12px">${t('orders.gr.date')}: ${gr.created_at} | ${t('orders.received_by')}: ${gr.received_by_name || ''}</div>
+        <div style="font-size:13px;color:var(--muted);margin-bottom:12px">${t('orders.gr.date')}: ${gr.received_date || gr.created_at} | ${t('orders.received_by')}: ${gr.received_by_name || ''}</div>
         <table style="width:100%;font-size:13px">
           <tr style="color:var(--muted);font-size:11px"><th style="text-align:left">${t('common.item')}</th><th>${t('orders.rcv.order')}</th><th style="color:var(--ok)">${t('stock.gr.col.received')}</th></tr>
           ${gr.lines.map(l => `<tr>

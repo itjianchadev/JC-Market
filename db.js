@@ -131,6 +131,14 @@ try { db.exec("ALTER TABLE orders ADD COLUMN fully_received_at TEXT"); } catch (
 // ─── Migrate: bc_po_line_id on order_lines ───
 try { db.exec("ALTER TABLE order_lines ADD COLUMN bc_po_line_id TEXT DEFAULT ''"); } catch (e) {}
 
+// ─── Migrate: received_date on goods_receipts ───
+// Business date of when goods arrived at the branch. Distinct from created_at
+// (which records when the user pressed "Confirm receive" in the app — they
+// may enter goods received yesterday into the app today). When the order
+// becomes fully received, orders.fully_received_at is set to the GR's
+// received_date rather than NOW(), so reports line up with reality.
+try { db.exec("ALTER TABLE goods_receipts ADD COLUMN received_date TEXT DEFAULT ''"); } catch (e) {}
+
 // ─── Goods Receipts ───
 db.exec(`
 CREATE TABLE IF NOT EXISTS goods_receipts (
