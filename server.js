@@ -1095,9 +1095,17 @@ async function postOrderToBC(orderId) {
 
 // ─── BC: Create Purchase Order from a verified order ───
 // Decoupled from Finance approval — Finance picks a vendor on the "Approved"
-// tab and triggers this. Sales price is reused on the PO (same unit_price as
-// the SO line) per the current design; if cost-tracking is added later this
-// can switch to BC Item Card's directUnitCost.
+// tab and triggers this. PO line cost (directUnitCost) is pulled from
+// items_cache.unit_cost — BC's Item.unitCost (per base UoM) converted to the
+// purchase UoM during sync. We do NOT reuse line.unit_price here: that's the
+// branch sales price, not the vendor purchase cost.
+//
+// BC quirk: a single POST /purchaseOrderLines triggers Purchase Price lookup
+// and OVERRIDES whatever directUnitCost is in the body — items with a matching
+// Purchase Price entry get that price, items without get 0. So we POST + PATCH:
+// POST creates the line (cost = whatever BC's lookup produces, often 0), then
+// PATCH writes our cached cost over it. PATCH does not re-run price lookup so
+// the value sticks. See the line loop below for the two-step.
 async function postPOToBC(orderId, vendorNo) {
   const order = db.prepare('SELECT * FROM orders WHERE id=?').get(orderId);
   if (!order) throw new Error('Order not found');
@@ -1126,17 +1134,36 @@ async function postPOToBC(orderId, vendorNo) {
   const poId = po.id;
   const poNo = po.number || '';
 
-  // 2. Add lines (mirror SO lines — same items, qty, sales price)
+  // 2. Add lines. Two-step per line because BC runs Purchase Price lookup
+  // during POST and OVERRIDES whatever directUnitCost we send: items with a
+  // matching Purchase Price entry get that price, items without get 0. So we
+  // POST the line first (BC fills its own number), then PATCH directUnitCost
+  // from items_cache.unit_cost — PATCH does not re-run the price lookup so
+  // the value sticks. NOT using line.unit_price here: that's the branch sales
+  // price, not the vendor purchase cost.
+  //
+  // Location: stamp the ordering branch (e.g. JC002 → Location Code JC002)
+  // when BC has a matching Location, so the PO shows who it's for. FC branches
+  // (JF***) don't exist as BC Locations today → fall back to INTRANSIT, which
+  // is also the safe default for any new branch we haven't set up in BC yet.
+  const INTRANSIT_LOCATION_ID = '814291d6-d13e-f011-be59-000d3a086703';
+  const branchLocId = await bc.findLocationIdByCode(order.branch_code).catch(() => null);
+  const lineLocationId = branchLocId || INTRANSIT_LOCATION_ID;
   for (const line of lines) {
-    const item = db.prepare('SELECT id FROM items_cache WHERE item_no=?').get(line.item_no);
-    await bc.addPurchaseOrderLine(poId, {
+    const item = db.prepare('SELECT id, unit_cost FROM items_cache WHERE item_no=?').get(line.item_no);
+    const created = await bc.addPurchaseOrderLine(poId, {
       itemId: item ? item.id : undefined,
       lineType: 'Item',
       quantity: line.quantity,
-      directUnitCost: line.unit_price,
       description: line.item_name,
-      locationId: '814291d6-d13e-f011-be59-000d3a086703', // INTRANSIT — goods sit here until put-away to CTI
+      locationId: lineLocationId,
     });
+    const desiredCost = item ? (item.unit_cost || 0) : 0;
+    if (desiredCost > 0 && created && created.id && created['@odata.etag']) {
+      await bc.patchPurchaseOrderLine(poId, created.id, created['@odata.etag'], {
+        directUnitCost: desiredCost,
+      });
+    }
   }
 
   // Clear any stale [PO]-prefixed sync error from a previous failed attempt.

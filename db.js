@@ -327,6 +327,19 @@ try {
   }
 } catch (e) { console.error('[db] name_en migration failed:', e.message); }
 
+// ─── Migration: add unit_cost column to items_cache if missing ───
+// unit_cost is the BC Item Card "Unit Cost" pre-converted to Purchase UoM
+// (BC stores it per Base UoM, sync.js multiplies by qty-per-purch-uom).
+// Used as directUnitCost on Purchase Order lines so PO totals reflect the
+// actual vendor cost instead of the branch sales price.
+try {
+  const cols = db.prepare("PRAGMA table_info(items_cache)").all();
+  if (!cols.some(c => c.name === 'unit_cost')) {
+    db.exec("ALTER TABLE items_cache ADD COLUMN unit_cost REAL DEFAULT 0");
+    console.log('[db] Migration: added items_cache.unit_cost');
+  }
+} catch (e) { console.error('[db] unit_cost migration failed:', e.message); }
+
 // ─── Migration: add can_order to users if missing ───
 try {
   const cols = db.prepare("PRAGMA table_info(users)").all();
