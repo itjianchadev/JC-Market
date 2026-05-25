@@ -1158,6 +1158,11 @@ async function postPOToBC(orderId, vendorNo) {
       description: line.item_name,
       locationId: lineLocationId,
     });
+    // Persist BC line id so the receive flow can PATCH receiveQuantity per
+    // line via bc.receivePurchaseOrderLines without re-fetching/matching.
+    if (created && created.id) {
+      db.prepare('UPDATE order_lines SET bc_po_line_id=? WHERE id=?').run(created.id, line.id);
+    }
     const desiredCost = item ? (item.unit_cost || 0) : 0;
     if (desiredCost > 0 && created && created.id && created['@odata.etag']) {
       await bc.patchPurchaseOrderLine(poId, created.id, created['@odata.etag'], {
@@ -1577,8 +1582,20 @@ app.post('/api/orders/:id/receive', requireAuth, async (req, res) => {
     return res.status(400).json({ error: `ต้องชำระเงินก่อน (สถานะ: ${order.payment_status})` });
   }
 
-  const { lines: receiveLines = [], note = '' } = req.body || {};
+  const { lines: receiveLines = [], note = '', received_date: receivedDateInput = '' } = req.body || {};
   if (!receiveLines.length) return res.status(400).json({ error: 'ไม่มีรายการรับของ' });
+
+  // received_date = business date of arrival (chosen by user). Default to
+  // today if omitted (back-compat with older clients). Reject future dates —
+  // we never receive tomorrow's goods today. Accept only YYYY-MM-DD.
+  const today = new Date().toISOString().slice(0, 10);
+  let receivedDate = (receivedDateInput || today).trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(receivedDate)) {
+    return res.status(400).json({ error: 'received_date ต้องเป็นรูปแบบ YYYY-MM-DD' });
+  }
+  if (receivedDate > today) {
+    return res.status(400).json({ error: 'วันรับของห้ามอยู่ในอนาคต' });
+  }
 
   const orderLines = db.prepare('SELECT * FROM order_lines WHERE order_id=?').all(order.id);
   const orderLineMap = {};
@@ -1607,8 +1624,8 @@ app.post('/api/orders/:id/receive', requireAuth, async (req, res) => {
   const grId = crypto.randomUUID();
 
   const tx = db.transaction(() => {
-    db.prepare('INSERT INTO goods_receipts (id, order_id, receipt_number, received_by, note) VALUES (?,?,?,?,?)')
-      .run(grId, order.id, grNumber, req.user.id, note);
+    db.prepare('INSERT INTO goods_receipts (id, order_id, receipt_number, received_by, note, received_date) VALUES (?,?,?,?,?,?)')
+      .run(grId, order.id, grNumber, req.user.id, note, receivedDate);
 
     const insLine = db.prepare('INSERT INTO goods_receipt_lines (receipt_id, order_line_id, item_no, item_name, ordered_qty, received_qty, note) VALUES (?,?,?,?,?,?,?)');
     for (const rl of receiveLines) {
@@ -1628,7 +1645,10 @@ app.post('/api/orders/:id/receive', requireAuth, async (req, res) => {
     `).get(order.id).total;
 
     if (totalReceived >= totalOrdered) {
-      db.prepare("UPDATE orders SET fulfillment_status='received', fully_received_at=datetime('now','localtime') WHERE id=?").run(order.id);
+      // Business date: use the just-saved GR's received_date so the order's
+      // fully_received_at reflects when goods physically arrived, not the
+      // moment the last partial was keyed in.
+      db.prepare("UPDATE orders SET fulfillment_status='received', fully_received_at=? WHERE id=?").run(receivedDate, order.id);
     } else {
       db.prepare("UPDATE orders SET fulfillment_status='partial' WHERE id=?").run(order.id);
     }
@@ -1636,6 +1656,51 @@ app.post('/api/orders/:id/receive', requireAuth, async (req, res) => {
   tx();
 
   const finalOrder = db.prepare('SELECT * FROM orders WHERE id=?').get(order.id);
+
+  // Post a Posted Purchase Receipt in BC mirroring this partial. Best-effort:
+  // any failure stays out of the response — local GR is the FC's truth, and
+  // the sync_log entry lets admin spot + retry. Skipped when:
+  //   • order has no bc_po_id (older order, or JC TRO flow without a PO)
+  //   • none of the received lines map to a known BC PO line (bc_po_line_id
+  //     wasn't recorded — typical for POs created before postPOToBC started
+  //     saving it; admin needs to re-post the PO or backfill).
+  let bcReceiptNo = '';
+  if (order.bc_po_id) {
+    try {
+      const lineQtyMap = {};
+      for (const rl of receiveLines) {
+        if (rl.received_qty <= 0) continue;
+        const ol = orderLineMap[rl.order_line_id];
+        if (ol && ol.bc_po_line_id) {
+          lineQtyMap[ol.bc_po_line_id] = (lineQtyMap[ol.bc_po_line_id] || 0) + rl.received_qty;
+        }
+      }
+      if (Object.keys(lineQtyMap).length > 0) {
+        await bc.receivePurchaseOrderLines(order.bc_po_id, lineQtyMap);
+        // Find the receipt we just produced — orderNumber on Posted Purchase
+        // Receipt matches the originating PO number. Sort by NUMBER desc
+        // (sequential, monotonically increasing per posting) — postingDate is
+        // date-only and ties when multiple partials post the same day, which
+        // made the first call's number leak onto every subsequent GR.
+        const recs = await bc.listPurchaseReceipts(order.bc_po_no);
+        const latest = (recs.value || [])
+          .sort((a, b) => (b.number || '').localeCompare(a.number || ''))[0];
+        if (latest && latest.number) {
+          bcReceiptNo = latest.number;
+          db.prepare("UPDATE goods_receipts SET bc_receipt_no=?, bc_posted=1 WHERE id=?")
+            .run(bcReceiptNo, grId);
+        }
+        db.prepare('INSERT INTO sync_log (kind, status, message, count) VALUES (?,?,?,?)')
+          .run('po_receive', 'ok', `Posted Receipt ${bcReceiptNo || '(unmatched)'} for ${grNumber} (PO ${order.bc_po_no})`, 1);
+      } else {
+        db.prepare('INSERT INTO sync_log (kind, status, message, count) VALUES (?,?,?,?)')
+          .run('po_receive', 'warn', `Skipped BC post for ${grNumber}: no order_lines have bc_po_line_id`, 0);
+      }
+    } catch (e) {
+      db.prepare('INSERT INTO sync_log (kind, status, message, count) VALUES (?,?,?,?)')
+        .run('po_receive', 'error', `BC receive failed for ${grNumber} (PO ${order.bc_po_no}): ${e.message}`, 0);
+    }
+  }
 
   // When the order is now fully received, kick off the BC Invoice posting.
   // Failure leaves the local GR intact (FC's truth) and saves the error to
@@ -1650,8 +1715,9 @@ app.post('/api/orders/:id/receive', requireAuth, async (req, res) => {
     receipt_id: grId,
     receipt_number: grNumber,
     fulfillment_status: finalOrder.fulfillment_status,
+    bc_receipt_no: bcReceiptNo,
     bc_post: bcPost,
-    message: `บันทึกรับของ ${grNumber} สำเร็จ${bcPost?.ok ? ` · BC Invoice ${bcPost.bc_invoice_no}` : ''}`,
+    message: `บันทึกรับของ ${grNumber} สำเร็จ${bcReceiptNo ? ` · BC Receipt ${bcReceiptNo}` : ''}${bcPost?.ok ? ` · BC Invoice ${bcPost.bc_invoice_no}` : ''}`,
   });
 });
 

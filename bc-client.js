@@ -315,4 +315,52 @@ async function listPurchaseReceipts(orderNumber) {
   return bcFetch(`/purchaseReceipts?$filter=orderNumber eq '${orderNumber}'&$expand=purchaseReceiptLines`);
 }
 
-module.exports = { MOCK, getToken, listItems, listItemCategories, listItemCards, listSalesPrices, listItemUnitsOfMeasure, createSalesOrder, getSalesOrder, addSalesOrderLine, shipAndInvoiceSalesOrder, findPostedInvoiceByExternalDoc, createSalesInvoice, addInvoiceLine, postInvoice, deleteSalesInvoice, deleteSalesOrder, listVendors, findLocationIdByCode, createPurchaseOrder, getPurchaseOrder, addPurchaseOrderLine, patchPurchaseOrderLine, getPurchaseOrderLines, listPurchaseReceipts, createTransferOrder, addTransferOrderLine };
+// Post a partial receive on a PO.
+// `lineQtyMap`: { [bcPoLineId]: receiveQuantity } — qty to receive on each line
+//   (any line not in the map gets 0 so it isn't touched this round).
+// BC v2.0 exposes only Microsoft.NAV.receiveAndInvoice (no plain `receive`).
+// To get a Posted Purchase Receipt without a Posted Purchase Invoice we set
+// invoiceQuantity = 0 on every line first — BC then posts only the receipt
+// half and leaves vendor invoicing for finance to handle later when the
+// vendor's actual invoice arrives. Returns the bound action result; the
+// caller can call listPurchaseReceipts(orderNumber) to find the new receipt.
+async function receivePurchaseOrderLines(poId, lineQtyMap) {
+  if (MOCK) return { mock: true };
+  const token = await getToken();
+  const base = baseUrl();
+  const authHeaders = {
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
+  };
+
+  // Pull lines + etags fresh — receive may run a long time after PO was made.
+  const linesRes = await fetch(`${base}/purchaseOrders(${poId})/purchaseOrderLines`, { headers: authHeaders });
+  if (!linesRes.ok) throw new Error(`BC fetch PO lines → ${linesRes.status}: ${await linesRes.text()}`);
+  const lines = (await linesRes.json()).value || [];
+  if (!lines.length) throw new Error('PO has no lines on BC');
+
+  // PATCH every line — explicit 0 for items not being received this round so
+  // BC doesn't fall back to whatever Qty. to Receive was previously set to.
+  for (const l of lines) {
+    if (l.lineType !== 'Item' && l.lineType !== 'G/L Account') continue;
+    const desired = Number(lineQtyMap[l.id] || 0);
+    const r = await fetch(`${base}/purchaseOrders(${poId})/purchaseOrderLines(${l.id})`, {
+      method: 'PATCH',
+      headers: { ...authHeaders, 'If-Match': l['@odata.etag'] },
+      body: JSON.stringify({ receiveQuantity: desired, invoiceQuantity: 0 }),
+    });
+    if (!r.ok) throw new Error(`BC PATCH PO line ${l.id} → ${r.status}: ${await r.text()}`);
+  }
+
+  // Trigger the bound action — receiveAndInvoice posts only what each line's
+  // receive/invoice qty asks for, so with invoiceQuantity = 0 throughout we
+  // get a Posted Purchase Receipt and no invoice.
+  const r = await fetch(`${base}/purchaseOrders(${poId})/Microsoft.NAV.receiveAndInvoice`, {
+    method: 'POST', headers: authHeaders, body: '{}',
+  });
+  if (!r.ok && r.status !== 204) throw new Error(`BC receiveAndInvoice → ${r.status}: ${await r.text()}`);
+  return { ok: true };
+}
+
+module.exports = { MOCK, getToken, listItems, listItemCategories, listItemCards, listSalesPrices, listItemUnitsOfMeasure, createSalesOrder, getSalesOrder, addSalesOrderLine, shipAndInvoiceSalesOrder, findPostedInvoiceByExternalDoc, createSalesInvoice, addInvoiceLine, postInvoice, deleteSalesInvoice, deleteSalesOrder, listVendors, findLocationIdByCode, createPurchaseOrder, getPurchaseOrder, addPurchaseOrderLine, patchPurchaseOrderLine, getPurchaseOrderLines, listPurchaseReceipts, receivePurchaseOrderLines, createTransferOrder, addTransferOrderLine };
