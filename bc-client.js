@@ -251,6 +251,22 @@ async function listVendors() {
   return bcFetch('/vendors?$top=500');
 }
 
+// ─── Locations ───
+// In-memory code → id cache. Locations rarely change so we lookup-then-cache
+// indefinitely for the process lifetime. Lets PO creation stamp the branch's
+// Location Code without an extra round trip on every order.
+const _locCache = new Map();
+async function findLocationIdByCode(code) {
+  if (!code) return null;
+  if (MOCK) return null;
+  if (_locCache.has(code)) return _locCache.get(code);
+  const enc = encodeURIComponent(code);
+  const j = await bcFetch(`/locations?$filter=code eq '${enc}'&$select=id,code&$top=1`);
+  const id = (j.value && j.value[0] && j.value[0].id) || null;
+  _locCache.set(code, id);
+  return id;
+}
+
 // ─── Purchase Order ───
 async function createPurchaseOrder(payload) {
   if (MOCK) return { mock: true, id: 'MOCK-PO-' + Date.now(), number: 'PO-MOCK-' + Date.now() };
@@ -299,4 +315,4 @@ async function listPurchaseReceipts(orderNumber) {
   return bcFetch(`/purchaseReceipts?$filter=orderNumber eq '${orderNumber}'&$expand=purchaseReceiptLines`);
 }
 
-module.exports = { MOCK, getToken, listItems, listItemCategories, listItemCards, listSalesPrices, listItemUnitsOfMeasure, createSalesOrder, getSalesOrder, addSalesOrderLine, shipAndInvoiceSalesOrder, findPostedInvoiceByExternalDoc, createSalesInvoice, addInvoiceLine, postInvoice, deleteSalesInvoice, deleteSalesOrder, listVendors, createPurchaseOrder, getPurchaseOrder, addPurchaseOrderLine, patchPurchaseOrderLine, getPurchaseOrderLines, listPurchaseReceipts, createTransferOrder, addTransferOrderLine };
+module.exports = { MOCK, getToken, listItems, listItemCategories, listItemCards, listSalesPrices, listItemUnitsOfMeasure, createSalesOrder, getSalesOrder, addSalesOrderLine, shipAndInvoiceSalesOrder, findPostedInvoiceByExternalDoc, createSalesInvoice, addInvoiceLine, postInvoice, deleteSalesInvoice, deleteSalesOrder, listVendors, findLocationIdByCode, createPurchaseOrder, getPurchaseOrder, addPurchaseOrderLine, patchPurchaseOrderLine, getPurchaseOrderLines, listPurchaseReceipts, createTransferOrder, addTransferOrderLine };

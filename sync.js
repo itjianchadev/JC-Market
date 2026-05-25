@@ -84,11 +84,12 @@ async function syncItems() {
       }
     }
 
-    const upsert = db.prepare(`INSERT INTO items_cache (id, item_no, name, name_en, description, category, unit_price, inventory, uom, active, synced_at)
-      VALUES (?,?,?,?,?,?,?,?,?,1,datetime('now','localtime'))
+    const upsert = db.prepare(`INSERT INTO items_cache (id, item_no, name, name_en, description, category, unit_price, unit_cost, inventory, uom, active, synced_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,1,datetime('now','localtime'))
       ON CONFLICT(item_no) DO UPDATE SET
         name=excluded.name, name_en=excluded.name_en, description=excluded.description, category=excluded.category,
         unit_price=excluded.unit_price,
+        unit_cost=excluded.unit_cost,
         inventory=excluded.inventory, uom=excluded.uom,
         active=1, synced_at=excluded.synced_at`);
 
@@ -110,6 +111,9 @@ async function syncItems() {
         const baseInv = it.inventory || 0;
         const qtyPerPurch = (uomConvMap[itemNo] && uomConvMap[itemNo][uom]) || 1;
         const inventory = qtyPerPurch > 1 ? Math.round((baseInv / qtyPerPurch) * 100) / 100 : baseInv;
+        // ราคาทุน (BC unitCost = ต่อ base UoM) แปลงเป็น Purch UoM เพื่อใช้บน PO line
+        // เช่น ส้มนาเวล unitCost 0.06724 ต่อ G × 1000 = 67.24 ต่อ KG
+        const cost = (it.unitCost || 0) * qtyPerPurch;
         upsert.run(
           it.id || crypto.randomUUID(),
           itemNo,
@@ -118,6 +122,7 @@ async function syncItems() {
           it.description2 || '',
           catName,
           price,
+          cost,
           inventory,
           uom,
         );
