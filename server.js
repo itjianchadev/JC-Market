@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const multer = require('multer');
 const db = require('./db');
 const bcrypt = require('bcryptjs');
-const { login, requireAuth, requireAdmin, requireSuperAdmin, canManageBranch, isHqAdmin, isSuperAdmin, HQ_ROLES, BRANCH_ROLES } = require('./auth');
+const { login, requireAuth, requireAdmin, requireSuperAdmin, canManageBranch, isHqAdmin, isSuperAdmin, HQ_ROLES, BRANCH_ROLES, driverLogin, requireDriver } = require('./auth');
 const bc = require('./bc-client');
 const { syncItems, getLastSync } = require('./sync');
 const { generateQR } = require('./qr');
@@ -2904,6 +2904,106 @@ app.delete('/api/tms/trips/:id', requireAuth, requireAdmin, (req, res) => {
     db.prepare("UPDATE trips SET status='cancelled' WHERE id=?").run(req.params.id);
   })();
   res.json({ ok: true, cancelled: true });
+});
+
+// ─── Driver PWA (Phase 1.4a — login + trip view) ───
+// Drivers authenticate against carrier_drivers, get a JWT with kind='driver'
+// that requireDriver checks. The endpoints below scope every query to the
+// driver's own carrier so one carrier's driver can never see another
+// carrier's trips/stops.
+app.post('/api/tms/driver/login', (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || !password) return res.status(400).json({ error: 'username/password required' });
+  const r = driverLogin(username, password);
+  if (!r) return res.status(401).json({ error: 'Invalid credentials' });
+  res.json(r);
+});
+
+app.get('/api/tms/driver/me', requireDriver, (req, res) => {
+  const d = db.prepare(`
+    SELECT d.id, d.username, d.full_name, d.phone, d.vehicle_plate, d.active,
+           d.carrier_id, c.code as carrier_code, c.name as carrier_name
+    FROM carrier_drivers d
+    LEFT JOIN carriers c ON c.id = d.carrier_id
+    WHERE d.id = ?
+  `).get(req.driver.id);
+  res.json(d);
+});
+
+// List trips for this driver. Default: today + future planned/dispatched.
+// Pass ?date=YYYY-MM-DD for one specific day, ?range=all for history.
+app.get('/api/tms/driver/trips', requireDriver, (req, res) => {
+  const { date, range } = req.query;
+  const wheres = ['t.driver_id = ?'];
+  const params = [req.driver.id];
+  if (date) { wheres.push('t.scheduled_date = ?'); params.push(date); }
+  else if (range !== 'all') {
+    // Today onward by default — past trips clutter the driver view.
+    wheres.push("t.scheduled_date >= date('now','localtime')");
+  }
+  const rows = db.prepare(`
+    SELECT t.*, c.code as carrier_code, c.name as carrier_name,
+           (SELECT COUNT(*) FROM shipments s WHERE s.trip_id=t.id) AS stop_count
+    FROM trips t
+    LEFT JOIN carriers c ON c.id = t.carrier_id
+    WHERE ${wheres.join(' AND ')}
+    ORDER BY t.scheduled_date ASC, t.id ASC
+  `).all(...params);
+  res.json(rows);
+});
+
+// Driver's "today" — the single planned/dispatched trip that should be on
+// their phone right now. Returns null if none. Tomorrow's trips don't
+// appear here; use /trips for the wider list.
+app.get('/api/tms/driver/today', requireDriver, (req, res) => {
+  const trip = db.prepare(`
+    SELECT t.*, c.code as carrier_code, c.name as carrier_name
+    FROM trips t
+    LEFT JOIN carriers c ON c.id = t.carrier_id
+    WHERE t.driver_id = ?
+      AND t.scheduled_date = date('now','localtime')
+      AND t.status IN ('planned','dispatched')
+    ORDER BY t.id ASC
+    LIMIT 1
+  `).get(req.driver.id);
+  if (!trip) return res.json(null);
+  // Eager-load stops with destination branch info. POD presence is left
+  // to Phase 1.4b — for now just whatever is on the shipment row.
+  trip.stops = db.prepare(`
+    SELECT s.id, s.shipment_number, s.order_id, s.dest_branch_code, s.stop_seq,
+           s.status, s.delivered_at, s.note,
+           o.order_number, b.name as branch_name, b.address as branch_address, b.phone as branch_phone
+    FROM shipments s
+    LEFT JOIN orders o ON o.id = s.order_id
+    LEFT JOIN branches b ON b.code = s.dest_branch_code
+    WHERE s.trip_id = ?
+    ORDER BY s.stop_seq ASC, s.id ASC
+  `).all(trip.id);
+  res.json(trip);
+});
+
+// Trip detail (any date) — used when the driver taps a trip from /trips.
+// Scoped to driver_id so foreign trips return 404, not 403, to avoid
+// leaking trip existence.
+app.get('/api/tms/driver/trips/:id', requireDriver, (req, res) => {
+  const trip = db.prepare(`
+    SELECT t.*, c.code as carrier_code, c.name as carrier_name
+    FROM trips t
+    LEFT JOIN carriers c ON c.id = t.carrier_id
+    WHERE t.id = ? AND t.driver_id = ?
+  `).get(req.params.id, req.driver.id);
+  if (!trip) return res.status(404).json({ error: 'Trip not found' });
+  trip.stops = db.prepare(`
+    SELECT s.id, s.shipment_number, s.order_id, s.dest_branch_code, s.stop_seq,
+           s.status, s.delivered_at, s.note,
+           o.order_number, b.name as branch_name, b.address as branch_address, b.phone as branch_phone
+    FROM shipments s
+    LEFT JOIN orders o ON o.id = s.order_id
+    LEFT JOIN branches b ON b.code = s.dest_branch_code
+    WHERE s.trip_id = ?
+    ORDER BY s.stop_seq ASC, s.id ASC
+  `).all(trip.id);
+  res.json(trip);
 });
 
 // ─── BC connection test ───
