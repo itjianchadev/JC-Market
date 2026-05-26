@@ -132,6 +132,7 @@ function driverLogin(phone) {
       full_name: driver.full_name,
       phone: driver.phone,
       vehicle_plate: driver.vehicle_plate,
+      vehicle_province: driver.vehicle_province || '',
       carrier_id: driver.carrier_id,
       carrier_code: driver.carrier_code,
       carrier_name: driver.carrier_name,

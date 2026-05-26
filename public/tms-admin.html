@@ -244,7 +244,10 @@
         <div class="form-row"><label>เบอร์มือถือ <span style="color:var(--muted);font-weight:400">(ใช้ login)</span></label><input name="phone" type="tel" inputmode="numeric" pattern="[0-9 +\-()]+" placeholder="0812345678" required></div>
       </div>
       <div class="form-row"><label data-i18n="tms.col.full_name">ชื่อ-นามสกุล</label><input name="full_name" required></div>
-      <div class="form-row"><label data-i18n="tms.col.plate">ทะเบียนรถ</label><input name="vehicle_plate"></div>
+      <div class="form-grid2">
+        <div class="form-row"><label data-i18n="tms.col.plate">ทะเบียนรถ</label><input name="vehicle_plate" placeholder="กข-1234"></div>
+        <div class="form-row"><label>จังหวัดทะเบียน</label><input name="vehicle_province" placeholder="เชียงใหม่"></div>
+      </div>
       <p id="driverErr" style="color:var(--err);font-size:12px;min-height:18px;margin:8px 0"></p>
       <div style="display:flex;gap:8px;justify-content:flex-end">
         <button type="button" class="btn ghost" onclick="closeDriver()" data-i18n="common.cancel">ยกเลิก</button>
@@ -381,7 +384,7 @@ function renderDrivers() {
       <td><strong>${d.username}</strong></td>
       <td>${d.full_name}</td>
       <td>${d.phone || '-'}</td>
-      <td>${d.vehicle_plate || '-'}</td>
+      <td>${d.vehicle_plate || '-'}${d.vehicle_province ? `<br><small style="color:var(--muted)">${d.vehicle_province}</small>` : ''}</td>
       <td>${d.active ? `<span class="pill-on">${t('tms.active')}</span>` : `<span class="pill-off">${t('tms.inactive')}</span>`}</td>
       <td>
         <button class="btn sm ghost" onclick='openDriverModal(${JSON.stringify(d).replace(/'/g,"&#39;")})'>${t('common.edit')}</button>
@@ -461,6 +464,7 @@ function openDriverModal(d) {
     form.full_name.value = d.full_name || '';
     form.phone.value = d.phone || '';
     form.vehicle_plate.value = d.vehicle_plate || '';
+    form.vehicle_province.value = d.vehicle_province || '';
     form.dataset.editId = d.id;
   } else {
     form.username.readOnly = false;

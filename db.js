@@ -541,6 +541,13 @@ CREATE INDEX IF NOT EXISTS idx_trips_driver ON trips(driver_id);
 CREATE INDEX IF NOT EXISTS idx_pings_trip_time ON driver_pings(trip_id, recorded_at);
 `);
 
+// ─── Driver vehicle metadata ───
+// Province where the vehicle is registered (จังหวัดทะเบียนรถ). Optional
+// free-text — drivers may swap vehicles between trips, so this is the
+// driver's "default vehicle" tagging; the per-trip plate on trips.vehicle_plate
+// still wins when a particular run uses a different vehicle.
+try { db.exec("ALTER TABLE carrier_drivers ADD COLUMN vehicle_province TEXT DEFAULT ''"); } catch (e) { /* already exists */ }
+
 // ─── Driver login is phone-based (Phase 1.4b) ───
 // Normalize stored phones to digits-only so users can enter "081-234-5678",
 // "081 234 5678", "+66812345678" and we still find the row.

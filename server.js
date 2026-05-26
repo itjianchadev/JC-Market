@@ -2616,14 +2616,14 @@ app.delete('/api/tms/carriers/:id', requireAuth, requireSuperAdmin, (req, res) =
 // ─── Carrier drivers ───
 // List drivers of a carrier (admin only).
 app.get('/api/tms/carriers/:id/drivers', requireAuth, requireAdmin, (req, res) => {
-  const rows = db.prepare('SELECT id, carrier_id, username, full_name, phone, vehicle_plate, active, created_at FROM carrier_drivers WHERE carrier_id=? ORDER BY username').all(req.params.id);
+  const rows = db.prepare('SELECT id, carrier_id, username, full_name, phone, vehicle_plate, vehicle_province, active, created_at FROM carrier_drivers WHERE carrier_id=? ORDER BY username').all(req.params.id);
   for (const d of rows) d.active = !!d.active;
   res.json(rows);
 });
 
 app.post('/api/tms/carriers/:id/drivers', requireAuth, requireAdmin, (req, res) => {
   const carrierId = req.params.id;
-  const { username, full_name, phone = '', vehicle_plate = '' } = req.body || {};
+  const { username, full_name, phone = '', vehicle_plate = '', vehicle_province = '' } = req.body || {};
   if (!username || !full_name) return res.status(400).json({ error: 'username/full_name required' });
   const normalizedPhone = normalizePhone(phone);
   if (!normalizedPhone) return res.status(400).json({ error: 'phone required (เบอร์มือถือ ใช้ login)' });
@@ -2646,15 +2646,15 @@ app.post('/api/tms/carriers/:id/drivers', requireAuth, requireAdmin, (req, res) 
   // flow. Stuff in random bytes so the column stays satisfied and is
   // useless to attackers.
   const dummy = bcrypt.hashSync(crypto.randomUUID(), 10);
-  const r = db.prepare(`INSERT INTO carrier_drivers (carrier_id, username, password, full_name, phone, vehicle_plate)
-    VALUES (?,?,?,?,?,?)`).run(carrierId, username, dummy, full_name, normalizedPhone, vehicle_plate);
+  const r = db.prepare(`INSERT INTO carrier_drivers (carrier_id, username, password, full_name, phone, vehicle_plate, vehicle_province)
+    VALUES (?,?,?,?,?,?,?)`).run(carrierId, username, dummy, full_name, normalizedPhone, vehicle_plate, vehicle_province);
   res.json({ ok: true, id: r.lastInsertRowid });
 });
 
 app.put('/api/tms/drivers/:id', requireAuth, requireAdmin, (req, res) => {
   const d = db.prepare('SELECT * FROM carrier_drivers WHERE id=?').get(req.params.id);
   if (!d) return res.status(404).json({ error: 'Driver not found' });
-  const fields = ['full_name', 'phone', 'vehicle_plate', 'active'];
+  const fields = ['full_name', 'phone', 'vehicle_plate', 'vehicle_province', 'active'];
   const sets = [], vals = [];
   for (const f of fields) {
     if (f in (req.body || {})) {
@@ -2935,7 +2935,7 @@ app.post('/api/tms/driver/login', (req, res) => {
 
 app.get('/api/tms/driver/me', requireDriver, (req, res) => {
   const d = db.prepare(`
-    SELECT d.id, d.username, d.full_name, d.phone, d.vehicle_plate, d.active,
+    SELECT d.id, d.username, d.full_name, d.phone, d.vehicle_plate, d.vehicle_province, d.active,
            d.carrier_id, c.code as carrier_code, c.name as carrier_name
     FROM carrier_drivers d
     LEFT JOIN carriers c ON c.id = d.carrier_id

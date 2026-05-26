@@ -42,6 +42,17 @@ body{padding-bottom:env(safe-area-inset-bottom)}
 .btn.danger{background:var(--err)}
 .err{color:var(--err);font-size:13px;margin-top:8px;min-height:18px}
 
+/* Driver profile card */
+.profile-card{background:linear-gradient(135deg,#fff 0%,#fdfaf3 100%);border:1px solid var(--border);border-radius:14px;padding:14px 16px;margin-bottom:14px;box-shadow:0 2px 6px rgba(0,0,0,.03)}
+.profile-card .profile-row{display:flex;align-items:center;gap:12px}
+.profile-card .avatar{width:48px;height:48px;border-radius:50%;background:var(--gold);color:#fff;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700;flex-shrink:0;box-shadow:0 2px 4px rgba(0,0,0,.1)}
+.profile-card .name{font-size:15px;font-weight:600;color:var(--text)}
+.profile-card .sub{font-size:12px;color:var(--muted);margin-top:2px}
+.profile-card .meta{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px;padding-top:12px;border-top:1px dashed var(--border)}
+.profile-card .meta .k{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-bottom:2px}
+.profile-card .meta .v{font-size:14px;font-weight:600;color:var(--text)}
+.profile-card .plate-pill{display:inline-block;background:var(--beige);color:var(--gold-dark);padding:4px 10px;border-radius:6px;font-weight:700;font-family:'Sarabun',sans-serif;letter-spacing:.5px}
+
 /* Trip card */
 .trip-head{display:flex;align-items:flex-start;gap:12px;margin-bottom:10px}
 .trip-no{background:var(--beige);color:var(--gold-dark);padding:4px 10px;border-radius:99px;font-size:12px;font-weight:600}
@@ -102,6 +113,7 @@ body{padding-bottom:env(safe-area-inset-bottom)}
     <button class="btn-logout" onclick="doLogout()">ออกจากระบบ</button>
   </div>
   <div class="wrap">
+    <div id="driverCard"></div>
     <div id="content" class="spinner">กำลังโหลด…</div>
   </div>
 </div>
@@ -178,14 +190,61 @@ function doLogout() {
 function showLogin() {
   document.getElementById('loginView').style.display = 'block';
   document.getElementById('mainView').style.display = 'none';
+  document.getElementById('driverCard').innerHTML = '';
+  document.getElementById('content').innerHTML = '';
 }
 
 async function showMain() {
   document.getElementById('loginView').style.display = 'none';
   document.getElementById('mainView').style.display = 'block';
+  // Refresh driver row from /me so a vehicle/phone change by admin shows up
+  // on the driver's next interaction without a re-login.
+  try {
+    const fresh = await api('/api/tms/driver/me');
+    if (fresh) localStorage.setItem(DRIVER_KEY, JSON.stringify(fresh));
+  } catch {}
   const d = getDriver();
   document.getElementById('whoText').textContent = d ? `${d.full_name} · ${d.carrier_code}` : '';
+  renderProfileCard(d);
   await loadToday();
+}
+
+function renderProfileCard(d) {
+  const el = document.getElementById('driverCard');
+  if (!d) { el.innerHTML = ''; return; }
+  // First-letter initial in a circle stands in for an avatar — drivers don't
+  // upload photos in this phase. Pick from full_name so it's a real letter
+  // they'd recognize ("ค" for "คนขับ ..." etc.).
+  const initial = (d.full_name || d.username || '?').trim().charAt(0);
+  el.innerHTML = `
+    <div class="profile-card">
+      <div class="profile-row">
+        <div class="avatar">${initial}</div>
+        <div style="flex:1">
+          <div class="name">${d.full_name}</div>
+          <div class="sub">${d.carrier_code}${d.carrier_name ? ' · ' + d.carrier_name : ''}</div>
+        </div>
+      </div>
+      <div class="meta">
+        <div>
+          <div class="k">ทะเบียนรถ</div>
+          <div class="v"><span class="plate-pill">${d.vehicle_plate || '—'}</span></div>
+        </div>
+        <div>
+          <div class="k">จังหวัด</div>
+          <div class="v">${d.vehicle_province || '—'}</div>
+        </div>
+        <div>
+          <div class="k">เบอร์ติดต่อ</div>
+          <div class="v"><a href="tel:${d.phone || ''}" style="color:inherit;text-decoration:none">${d.phone || '—'}</a></div>
+        </div>
+        <div>
+          <div class="k">Username</div>
+          <div class="v" style="font-family:monospace;font-size:13px">${d.username}</div>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 const STATUS_PILL = {
