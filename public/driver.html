@@ -78,15 +78,11 @@ body{padding-bottom:env(safe-area-inset-bottom)}
   <div class="wrap">
     <div class="card login-card">
       <h1>🚚 JC-Market · คนขับ</h1>
-      <p class="tag">เข้าสู่ระบบสำหรับขนส่ง</p>
+      <p class="tag">กรอกเบอร์มือถือที่ลงทะเบียนไว้</p>
       <form id="loginForm" onsubmit="return doLogin(event)">
         <div class="field">
-          <label>Username</label>
-          <input name="username" autocomplete="username" required autofocus>
-        </div>
-        <div class="field">
-          <label>รหัสผ่าน</label>
-          <input name="password" type="password" autocomplete="current-password" required>
+          <label>เบอร์มือถือ</label>
+          <input name="phone" type="tel" inputmode="numeric" autocomplete="tel" pattern="[0-9 +\-()]+" placeholder="0812345678" required autofocus>
         </div>
         <button type="submit" class="btn">เข้าสู่ระบบ</button>
         <p id="loginErr" class="err"></p>
@@ -161,7 +157,7 @@ async function doLogin(e) {
     const r = await fetch('/api/tms/driver/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: f.username.value, password: f.password.value }),
+      body: JSON.stringify({ phone: f.phone.value }),
     });
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || 'Login failed');

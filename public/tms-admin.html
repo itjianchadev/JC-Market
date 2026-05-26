@@ -241,13 +241,10 @@
     <form id="driverForm" onsubmit="return saveDriver(event)">
       <div class="form-grid2">
         <div class="form-row"><label>Username</label><input name="username" required pattern="[a-zA-Z0-9_]+"></div>
-        <div class="form-row" id="driverPasswordRow"><label data-i18n="tms.col.password">รหัสผ่าน</label><input name="password" type="text" minlength="4" required></div>
+        <div class="form-row"><label>เบอร์มือถือ <span style="color:var(--muted);font-weight:400">(ใช้ login)</span></label><input name="phone" type="tel" inputmode="numeric" pattern="[0-9 +\-()]+" placeholder="0812345678" required></div>
       </div>
       <div class="form-row"><label data-i18n="tms.col.full_name">ชื่อ-นามสกุล</label><input name="full_name" required></div>
-      <div class="form-grid2">
-        <div class="form-row"><label data-i18n="tms.col.phone">โทร</label><input name="phone"></div>
-        <div class="form-row"><label data-i18n="tms.col.plate">ทะเบียนรถ</label><input name="vehicle_plate"></div>
-      </div>
+      <div class="form-row"><label data-i18n="tms.col.plate">ทะเบียนรถ</label><input name="vehicle_plate"></div>
       <p id="driverErr" style="color:var(--err);font-size:12px;min-height:18px;margin:8px 0"></p>
       <div style="display:flex;gap:8px;justify-content:flex-end">
         <button type="button" class="btn ghost" onclick="closeDriver()" data-i18n="common.cancel">ยกเลิก</button>
@@ -388,7 +385,6 @@ function renderDrivers() {
       <td>${d.active ? `<span class="pill-on">${t('tms.active')}</span>` : `<span class="pill-off">${t('tms.inactive')}</span>`}</td>
       <td>
         <button class="btn sm ghost" onclick='openDriverModal(${JSON.stringify(d).replace(/'/g,"&#39;")})'>${t('common.edit')}</button>
-        <button class="btn sm ghost" onclick="resetDriverPassword(${d.id},'${d.username}')">${t('tms.reset_pw')}</button>
         ${isSuper ? `<button class="btn sm ghost" style="color:var(--err);border-color:var(--err);margin-left:4px" onclick="deleteDriver(${d.id},'${d.username}')">${t('common.delete')}</button>` : ''}
       </td>
     </tr>
@@ -459,9 +455,6 @@ function openDriverModal(d) {
   document.getElementById('driverErr').textContent = '';
   const isEdit = !!d;
   document.getElementById('driverModalTitle').textContent = isEdit ? t('tms.edit_driver') : t('tms.add_driver');
-  // Password is required on create, hidden on edit (use Reset PW button instead)
-  document.getElementById('driverPasswordRow').style.display = isEdit ? 'none' : 'block';
-  form.querySelector('input[name=password]').required = !isEdit;
   if (isEdit) {
     form.username.value = d.username;
     form.username.readOnly = true;
@@ -484,7 +477,7 @@ async function saveDriver(e) {
   const body = Object.fromEntries(fd.entries());
   try {
     if (form.dataset.editId) {
-      delete body.username; delete body.password;
+      delete body.username;
       await api('/api/tms/drivers/' + form.dataset.editId, { method:'PUT', body: JSON.stringify(body) });
     } else {
       await api(`/api/tms/carriers/${selectedCarrier.id}/drivers`, { method:'POST', body: JSON.stringify(body) });
@@ -497,18 +490,6 @@ async function saveDriver(e) {
     document.getElementById('driverErr').textContent = err.message;
   }
   return false;
-}
-
-async function resetDriverPassword(id, username) {
-  const p = prompt(t('tms.new_password_for', { username }));
-  if (!p || p.length < 4) {
-    if (p !== null) toast(t('tms.password_too_short'));
-    return;
-  }
-  try {
-    await api('/api/tms/drivers/' + id + '/reset-password', { method:'POST', body: JSON.stringify({ password: p }) });
-    toast(t('tms.password_reset_ok'));
-  } catch (e) { toast(e.message); }
 }
 
 async function deleteDriver(id, username) {
