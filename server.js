@@ -651,31 +651,18 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
   }
 
   // BC document creation depends on the orderType:
-  //   fc_purchase + general  → no BC at checkout (Finance approve creates SO+PO)
-  //   fc_purchase + fruit    → BC SO + BC PO immediately
-  //   jc_transfer            → BC Transfer Order (CTI → JC0xx)
-  //   jc_purchase            → BC PO only (no SO — internal, not a sale)
+  //   fc_purchase (any category) → no BC at checkout. Finance must verify the
+  //                                slip first; /api/orders/:id/verify creates
+  //                                BC SO + PO. This prevents BC orphans when
+  //                                an FC cancels before paying, and gives
+  //                                Finance a single gating point for all FC
+  //                                BC activity (fruit, general, credit_7d).
+  //   jc_transfer                → BC Transfer Order (CTI → JC0xx)
+  //   jc_purchase                → BC PO only (no SO — internal, not a sale)
   let bcSoResult = null, bcPoResult = null, bcToResult = null;
   const defaultVendor = (process.env.BC_DEFAULT_VENDOR_NO || '').trim();
 
-  if (orderType === 'fc_purchase' && isFruitOrder) {
-    try {
-      bcSoResult = await postOrderToBC(orderId);
-    } catch (e) {
-      console.error('[checkout → BC SO]', e.message);
-      db.prepare("UPDATE orders SET bc_sync_error=? WHERE id=?").run(e.message, orderId);
-      bcSoResult = { ok: false, error: e.message };
-    }
-    if (bcSoResult && bcSoResult.bc_so_no && defaultVendor) {
-      try {
-        bcPoResult = await postPOToBC(orderId, defaultVendor);
-      } catch (e) {
-        console.error('[checkout → BC PO]', e.message);
-        db.prepare("UPDATE orders SET bc_sync_error=? WHERE id=?").run('[PO] ' + e.message, orderId);
-        bcPoResult = { ok: false, error: e.message };
-      }
-    }
-  } else if (orderType === 'jc_transfer') {
+  if (orderType === 'jc_transfer') {
     try {
       bcToResult = await postTransferOrderToBC(orderId, req.user.branch_code);
     } catch (e) {
