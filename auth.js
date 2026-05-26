@@ -64,7 +64,12 @@ function requireAuth(req, res, next) {
   const token = h.startsWith('Bearer ') ? h.slice(7) : null;
   if (!token) return res.status(401).json({ error: 'No token' });
   try {
-    req.user = jwt.verify(token, SECRET);
+    const payload = jwt.verify(token, SECRET);
+    // requireAuth is for the regular user surface (users table). Driver
+    // tokens have kind='driver' — reject them here so a driver token can't
+    // reach a user-only endpoint by accident.
+    if (payload.kind === 'driver') return res.status(401).json({ error: 'Wrong token type' });
+    req.user = payload;
     next();
   } catch (e) {
     return res.status(401).json({ error: 'Invalid token' });
@@ -81,4 +86,59 @@ function requireSuperAdmin(req, res, next) {
   next();
 }
 
-module.exports = { login, requireAuth, requireAdmin, requireSuperAdmin, canManageBranch, requireBranchManage, isHqAdmin, isSuperAdmin, HQ_ROLES, BRANCH_ROLES, SECRET };
+// ─── Driver authentication (TMS Phase 1.4) ─────────────────────────────────
+// Drivers live in the separate carrier_drivers table and never reach the
+// regular `users` surface. They authenticate via /api/tms/driver/login and
+// carry a JWT with kind='driver' so the wrong middleware refuses them.
+const DRIVER_EXPIRES = '7d';
+
+function driverLogin(username, password) {
+  const driver = db.prepare(`
+    SELECT d.*, c.code as carrier_code, c.name as carrier_name
+    FROM carrier_drivers d
+    LEFT JOIN carriers c ON c.id = d.carrier_id
+    WHERE d.username = ? AND d.active = 1
+  `).get(username);
+  if (!driver) return null;
+  if (!bcrypt.compareSync(password, driver.password)) return null;
+  const token = jwt.sign({
+    kind: 'driver',
+    id: driver.id,
+    username: driver.username,
+    carrier_id: driver.carrier_id,
+    carrier_code: driver.carrier_code,
+  }, SECRET, { expiresIn: DRIVER_EXPIRES });
+  return {
+    token,
+    driver: {
+      id: driver.id,
+      username: driver.username,
+      full_name: driver.full_name,
+      phone: driver.phone,
+      vehicle_plate: driver.vehicle_plate,
+      carrier_id: driver.carrier_id,
+      carrier_code: driver.carrier_code,
+      carrier_name: driver.carrier_name,
+    },
+  };
+}
+
+function requireDriver(req, res, next) {
+  const h = req.headers.authorization || '';
+  const token = h.startsWith('Bearer ') ? h.slice(7) : null;
+  if (!token) return res.status(401).json({ error: 'No token' });
+  try {
+    const payload = jwt.verify(token, SECRET);
+    if (payload.kind !== 'driver') return res.status(401).json({ error: 'Driver token required' });
+    // Reject if the row got disabled since the token was issued; otherwise a
+    // deactivated driver could keep using their old token until expiry.
+    const row = db.prepare('SELECT active FROM carrier_drivers WHERE id=?').get(payload.id);
+    if (!row || !row.active) return res.status(401).json({ error: 'Driver inactive' });
+    req.driver = payload;
+    next();
+  } catch (e) {
+    return res.status(401).json({ error: 'Invalid token' });
+  }
+}
+
+module.exports = { login, requireAuth, requireAdmin, requireSuperAdmin, canManageBranch, requireBranchManage, isHqAdmin, isSuperAdmin, HQ_ROLES, BRANCH_ROLES, SECRET, driverLogin, requireDriver };
