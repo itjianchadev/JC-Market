@@ -450,6 +450,113 @@ try {
   }
 } catch (e) { console.error('[db] super_admin seed failed:', e.message); }
 
+// ─── TMS Phase 1: schema ───
+// Outsourced last-mile delivery from CTI (or any origin) to FC/JC branches.
+// A shipment = one order's goods movement. A trip = one carrier vehicle on one
+// day carrying multiple shipments (stops). The carrier's driver opens a PWA
+// on their phone to mark "dispatched" and upload POD per stop.
+db.exec(`
+CREATE TABLE IF NOT EXISTS carriers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  code TEXT UNIQUE NOT NULL,                  -- 'KERRY', 'FLASH', 'XYZ-LOG'
+  name TEXT NOT NULL,
+  contact_phone TEXT DEFAULT '',
+  contact_email TEXT DEFAULT '',
+  default_cost_per_trip REAL DEFAULT 0,       -- ราคาเหมาเที่ยวเริ่มต้น
+  note TEXT DEFAULT '',
+  active INTEGER DEFAULT 1,
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS carrier_drivers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  carrier_id INTEGER NOT NULL REFERENCES carriers(id) ON DELETE CASCADE,
+  username TEXT UNIQUE NOT NULL,
+  password TEXT NOT NULL,                     -- bcrypt hash
+  full_name TEXT NOT NULL,
+  phone TEXT DEFAULT '',
+  vehicle_plate TEXT DEFAULT '',              -- ทะเบียนรถประจำคนขับ (optional)
+  active INTEGER DEFAULT 1,
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS trips (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  trip_number TEXT UNIQUE NOT NULL,           -- TRP-2026-0001
+  carrier_id INTEGER NOT NULL REFERENCES carriers(id),
+  driver_id INTEGER REFERENCES carrier_drivers(id),
+  vehicle_plate TEXT DEFAULT '',
+  scheduled_date TEXT NOT NULL,               -- YYYY-MM-DD
+  cost_agreed REAL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'planned',     -- planned/dispatched/completed/cancelled
+  dispatched_at TEXT,
+  completed_at TEXT,
+  note TEXT DEFAULT '',
+  created_by TEXT,
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS shipments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  shipment_number TEXT UNIQUE NOT NULL,       -- SHP-2026-0001
+  order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  origin TEXT DEFAULT 'CTI',                  -- BC location code we ship from
+  dest_branch_code TEXT NOT NULL,             -- → branches.code
+  weight_kg REAL DEFAULT 0,
+  volume_m3 REAL DEFAULT 0,
+  trip_id INTEGER REFERENCES trips(id),       -- NULL = unassigned (in pool)
+  stop_seq INTEGER DEFAULT 0,                 -- order of visit within trip (1,2,3,...)
+  status TEXT NOT NULL DEFAULT 'pending',     -- pending/planned/intransit/delivered/failed
+  delivered_at TEXT,
+  note TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS pods (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  shipment_id INTEGER NOT NULL REFERENCES shipments(id) ON DELETE CASCADE,
+  photo_url TEXT DEFAULT '',
+  signature_url TEXT DEFAULT '',
+  signed_by_name TEXT DEFAULT '',
+  driver_lat REAL,
+  driver_lng REAL,
+  received_at TEXT DEFAULT (datetime('now','localtime')),
+  notes TEXT DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS driver_pings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  trip_id INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+  driver_id INTEGER REFERENCES carrier_drivers(id),
+  lat REAL NOT NULL,
+  lng REAL NOT NULL,
+  recorded_at TEXT DEFAULT (datetime('now','localtime'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_shipments_order ON shipments(order_id);
+CREATE INDEX IF NOT EXISTS idx_shipments_trip ON shipments(trip_id);
+CREATE INDEX IF NOT EXISTS idx_shipments_status ON shipments(status);
+CREATE INDEX IF NOT EXISTS idx_trips_date ON trips(scheduled_date);
+CREATE INDEX IF NOT EXISTS idx_trips_driver ON trips(driver_id);
+CREATE INDEX IF NOT EXISTS idx_pings_trip_time ON driver_pings(trip_id, recorded_at);
+`);
+
+// Seed a sample carrier + driver so admins can exercise the UI on day 1.
+// Idempotent: skipped if any carrier exists. Default password is 'drv1234' —
+// change after first login (driver PWA exposes /api/tms/driver/me/password later).
+try {
+  const carrierCount = db.prepare('SELECT COUNT(*) c FROM carriers').get().c;
+  if (carrierCount === 0) {
+    const insC = db.prepare(`INSERT INTO carriers (code, name, contact_phone, default_cost_per_trip, note)
+      VALUES (?,?,?,?,?)`);
+    const c1 = insC.run('DEMO-LOG', 'Demo Logistics (ตัวอย่าง)', '02-000-0000', 1500, 'sample carrier — replace with real one');
+    const insD = db.prepare(`INSERT INTO carrier_drivers (carrier_id, username, password, full_name, phone, vehicle_plate)
+      VALUES (?,?,?,?,?,?)`);
+    insD.run(c1.lastInsertRowid, 'driver01', bcrypt.hashSync('drv1234', 10), 'คนขับ ตัวอย่าง 1', '081-000-0001', 'กข-1234');
+    console.log('[db] Seeded TMS carrier DEMO-LOG + driver01/drv1234');
+  }
+} catch (e) { console.error('[db] TMS seed failed:', e.message); }
+
 // ─── Seed mock items (ใช้ก่อนยังไม่มี BC creds) ───
 const itemCount = db.prepare('SELECT COUNT(*) c FROM items_cache').get().c;
 if (itemCount === 0) {
