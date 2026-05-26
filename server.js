@@ -616,16 +616,15 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
   });
   tx();
 
-  // Local VAT calculation — Thai standard 7%. BC is NOT contacted at
-  // checkout anymore; postOrderToBC() is deferred until Finance approves
-  // the slip. This prevents orphan BC SOs from customers who cancel before
-  // paying and gives Finance the gatekeeper role they need for audit.
-  const vatRate = 0.07;
+  // Local VAT calculation — Thai standard 7% for FC sales. JC master outlets
+  // (jc_transfer / jc_purchase) are internal movements between Jiancha
+  // company-owned locations, not external sales — no output VAT charged to
+  // the branch, so subtotal === total. The BC documents for JC (Transfer
+  // Order or internal-vendor PO) carry their own VAT handling separately.
+  const vatRate = isJcBranch ? 0 : 0.07;
   const vatAmount = Math.round(subtotal * vatRate * 100) / 100;
   const total = Math.round((subtotal + vatAmount) * 100) / 100;
 
-  // Persist totals so QR / cart / receipt match what BC will later compute
-  // (BC uses the same 7% standard for these customers, so the figure tracks).
   db.prepare('UPDATE orders SET vat_amount=?, total=? WHERE id=?').run(vatAmount, total, orderId);
   db.prepare('UPDATE payments SET amount=? WHERE order_id=?').run(total, orderId);
 
