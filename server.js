@@ -2490,6 +2490,138 @@ app.post('/api/orders/:id/reorder', requireAuth, async (req, res) => {
   });
 });
 
+// ─────────────── TMS Phase 1: Admin CRUD (Carriers + Drivers) ───────────────
+// Outsourced delivery management. HQ admins (super_admin/admin_scm) maintain
+// the list of carriers and their drivers. Driver login + trip flows arrive in
+// later phases; this endpoint set only covers master-data setup.
+
+// List carriers (admin sees all; everyone else sees active only).
+app.get('/api/tms/carriers', requireAuth, (req, res) => {
+  const where = isHqAdmin(req.user) ? '' : 'WHERE active=1';
+  const rows = db.prepare(`SELECT * FROM carriers ${where} ORDER BY code`).all();
+  const cntStmt = db.prepare('SELECT COUNT(*) c FROM carrier_drivers WHERE carrier_id=? AND active=1');
+  for (const c of rows) {
+    c.active = !!c.active;
+    c.driver_count = cntStmt.get(c.id).c;
+  }
+  res.json(rows);
+});
+
+app.get('/api/tms/carriers/:id', requireAuth, requireAdmin, (req, res) => {
+  const c = db.prepare('SELECT * FROM carriers WHERE id=?').get(req.params.id);
+  if (!c) return res.status(404).json({ error: 'Carrier not found' });
+  c.active = !!c.active;
+  res.json(c);
+});
+
+app.post('/api/tms/carriers', requireAuth, requireAdmin, (req, res) => {
+  const { code, name, contact_phone = '', contact_email = '', default_cost_per_trip = 0, note = '' } = req.body || {};
+  if (!code || !name) return res.status(400).json({ error: 'code/name required' });
+  if (db.prepare('SELECT 1 FROM carriers WHERE code=?').get(code)) {
+    return res.status(400).json({ error: 'Carrier code already exists' });
+  }
+  const r = db.prepare(`INSERT INTO carriers (code, name, contact_phone, contact_email, default_cost_per_trip, note)
+    VALUES (?,?,?,?,?,?)`).run(code, name, contact_phone, contact_email, Number(default_cost_per_trip) || 0, note);
+  res.json({ ok: true, id: r.lastInsertRowid });
+});
+
+app.put('/api/tms/carriers/:id', requireAuth, requireAdmin, (req, res) => {
+  const c = db.prepare('SELECT * FROM carriers WHERE id=?').get(req.params.id);
+  if (!c) return res.status(404).json({ error: 'Carrier not found' });
+  const fields = ['name', 'contact_phone', 'contact_email', 'default_cost_per_trip', 'note', 'active'];
+  const sets = [], vals = [];
+  for (const f of fields) {
+    if (f in (req.body || {})) {
+      sets.push(`${f}=?`);
+      vals.push(f === 'active' ? (req.body[f] ? 1 : 0) : (f === 'default_cost_per_trip' ? (Number(req.body[f]) || 0) : req.body[f]));
+    }
+  }
+  if (!sets.length) return res.json({ ok: true, noop: true });
+  vals.push(req.params.id);
+  db.prepare(`UPDATE carriers SET ${sets.join(', ')} WHERE id=?`).run(...vals);
+  res.json({ ok: true });
+});
+
+app.delete('/api/tms/carriers/:id', requireAuth, requireSuperAdmin, (req, res) => {
+  // Soft-delete: deactivate. Hard-delete is blocked if any trip references it.
+  const used = db.prepare('SELECT 1 FROM trips WHERE carrier_id=? LIMIT 1').get(req.params.id);
+  if (used) {
+    db.prepare('UPDATE carriers SET active=0 WHERE id=?').run(req.params.id);
+    return res.json({ ok: true, soft_deleted: true, reason: 'has trips — deactivated instead of deleted' });
+  }
+  db.prepare('DELETE FROM carrier_drivers WHERE carrier_id=?').run(req.params.id);
+  db.prepare('DELETE FROM carriers WHERE id=?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+// ─── Carrier drivers ───
+// List drivers of a carrier (admin only).
+app.get('/api/tms/carriers/:id/drivers', requireAuth, requireAdmin, (req, res) => {
+  const rows = db.prepare('SELECT id, carrier_id, username, full_name, phone, vehicle_plate, active, created_at FROM carrier_drivers WHERE carrier_id=? ORDER BY username').all(req.params.id);
+  for (const d of rows) d.active = !!d.active;
+  res.json(rows);
+});
+
+app.post('/api/tms/carriers/:id/drivers', requireAuth, requireAdmin, (req, res) => {
+  const carrierId = req.params.id;
+  const { username, password, full_name, phone = '', vehicle_plate = '' } = req.body || {};
+  if (!username || !password || !full_name) return res.status(400).json({ error: 'username/password/full_name required' });
+  if (!db.prepare('SELECT 1 FROM carriers WHERE id=?').get(carrierId)) {
+    return res.status(404).json({ error: 'Carrier not found' });
+  }
+  if (db.prepare('SELECT 1 FROM carrier_drivers WHERE username=?').get(username)) {
+    return res.status(400).json({ error: 'Driver username already exists' });
+  }
+  // Driver usernames must NOT collide with regular users either — JC-Market
+  // single sign-in surface today is /api/login (users table). Phase 1.4 will
+  // add /api/tms/driver/login; keeping these two namespaces disjoint avoids
+  // accidental cross-login. Cheap guard for now.
+  if (db.prepare('SELECT 1 FROM users WHERE username=?').get(username)) {
+    return res.status(400).json({ error: 'Username already used by a regular user' });
+  }
+  const r = db.prepare(`INSERT INTO carrier_drivers (carrier_id, username, password, full_name, phone, vehicle_plate)
+    VALUES (?,?,?,?,?,?)`).run(carrierId, username, bcrypt.hashSync(password, 10), full_name, phone, vehicle_plate);
+  res.json({ ok: true, id: r.lastInsertRowid });
+});
+
+app.put('/api/tms/drivers/:id', requireAuth, requireAdmin, (req, res) => {
+  const d = db.prepare('SELECT * FROM carrier_drivers WHERE id=?').get(req.params.id);
+  if (!d) return res.status(404).json({ error: 'Driver not found' });
+  const fields = ['full_name', 'phone', 'vehicle_plate', 'active'];
+  const sets = [], vals = [];
+  for (const f of fields) {
+    if (f in (req.body || {})) {
+      sets.push(`${f}=?`);
+      vals.push(f === 'active' ? (req.body[f] ? 1 : 0) : req.body[f]);
+    }
+  }
+  if (sets.length) {
+    vals.push(req.params.id);
+    db.prepare(`UPDATE carrier_drivers SET ${sets.join(', ')} WHERE id=?`).run(...vals);
+  }
+  res.json({ ok: true });
+});
+
+app.post('/api/tms/drivers/:id/reset-password', requireAuth, requireAdmin, (req, res) => {
+  const { password } = req.body || {};
+  if (!password || password.length < 4) return res.status(400).json({ error: 'password too short' });
+  const r = db.prepare('UPDATE carrier_drivers SET password=? WHERE id=?').run(bcrypt.hashSync(password, 10), req.params.id);
+  if (!r.changes) return res.status(404).json({ error: 'Driver not found' });
+  res.json({ ok: true });
+});
+
+app.delete('/api/tms/drivers/:id', requireAuth, requireSuperAdmin, (req, res) => {
+  // Soft-delete if the driver has run trips; hard-delete otherwise.
+  const used = db.prepare('SELECT 1 FROM trips WHERE driver_id=? LIMIT 1').get(req.params.id);
+  if (used) {
+    db.prepare('UPDATE carrier_drivers SET active=0 WHERE id=?').run(req.params.id);
+    return res.json({ ok: true, soft_deleted: true });
+  }
+  const r = db.prepare('DELETE FROM carrier_drivers WHERE id=?').run(req.params.id);
+  if (!r.changes) return res.status(404).json({ error: 'Driver not found' });
+  res.json({ ok: true });
+});
+
 // ─── BC connection test ───
 app.get('/api/bc/status', requireAuth, requireAdmin, async (req, res) => {
   try {
