@@ -61,10 +61,6 @@
       <span data-i18n="tms.carriers">Carriers</span>
       <span class="badge" id="sideCarrierCount">0</span>
     </button>
-    <button class="tms-sidebar-item" data-tab="drivers" onclick="switchTab('drivers')">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg>
-      <span data-i18n="tms.drivers">Drivers</span>
-    </button>
     <button class="tms-sidebar-item" data-tab="trips" onclick="switchTab('trips')">
       <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17H7a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v4"/><path d="M5 12h14"/><path d="m17 21 4-4-4-4"/><path d="M13 17h8"/></svg>
       <span data-i18n="tms.trips">Trips</span>
@@ -73,7 +69,7 @@
   </aside>
 
   <main>
-    <!-- Carriers panel -->
+    <!-- Carriers panel (drivers nested inside) -->
     <div class="tms-panel active" id="panel-carriers">
       <div class="toolbar">
         <h3 style="margin:0;color:var(--gold-dark)" data-i18n="tms.carriers">ผู้ให้บริการขนส่ง (Carriers)</h3>
@@ -96,28 +92,30 @@
           <tbody id="carrierBody"></tbody>
         </table>
       </div>
-    </div>
 
-    <!-- Drivers panel -->
-    <div class="tms-panel" id="panel-drivers">
-      <div class="toolbar">
-        <h3 style="margin:0;color:var(--gold-dark)"><span data-i18n="tms.drivers">คนขับ (Drivers)</span><span id="driversFor" style="color:var(--muted);font-weight:400;font-size:14px;margin-left:6px"></span></h3>
-        <select id="drvCarrierSwitch" onchange="onDrvCarrierSwitch()" style="padding:6px 10px;width:auto"></select>
-        <div class="spacer" style="flex:1"></div>
-        <button class="btn sm" id="btnAddDriver" onclick="openDriverModal()" disabled data-i18n="tms.add_driver">+ เพิ่มคนขับ</button>
-      </div>
-      <div class="card" style="padding:0;overflow-x:auto">
-        <table class="dtable">
-          <thead><tr>
-            <th data-i18n="tms.col.username">Username</th>
-            <th data-i18n="tms.col.full_name">ชื่อ</th>
-            <th data-i18n="tms.col.phone">โทร</th>
-            <th data-i18n="tms.col.plate">ทะเบียนรถ</th>
-            <th data-i18n="tms.col.status">สถานะ</th>
-            <th data-i18n="tms.col.actions">จัดการ</th>
-          </tr></thead>
-          <tbody id="driverBody"><tr><td colspan="6" class="empty" data-i18n="tms.select_carrier_first">เลือก Carrier ด้านบนก่อน</td></tr></tbody>
-        </table>
+      <!-- Drivers sub-section: shows only when a carrier is selected -->
+      <div id="driverSection" style="display:none;margin-top:24px;padding-top:16px;border-top:2px solid var(--gold)">
+        <div class="toolbar">
+          <h4 style="margin:0;color:var(--gold-dark);font-size:15px">
+            <svg style="vertical-align:-3px;margin-right:4px" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+            <span data-i18n="tms.drivers">คนขับ</span> <span id="driversFor" style="color:var(--muted);font-weight:400;font-size:13px"></span>
+          </h4>
+          <div class="spacer" style="flex:1"></div>
+          <button class="btn sm" id="btnAddDriver" onclick="openDriverModal()" data-i18n="tms.add_driver">+ เพิ่มคนขับ</button>
+        </div>
+        <div class="card" style="padding:0;overflow-x:auto">
+          <table class="dtable">
+            <thead><tr>
+              <th data-i18n="tms.col.username">Username</th>
+              <th data-i18n="tms.col.full_name">ชื่อ</th>
+              <th data-i18n="tms.col.phone">โทร</th>
+              <th data-i18n="tms.col.plate">ทะเบียนรถ</th>
+              <th data-i18n="tms.col.status">สถานะ</th>
+              <th data-i18n="tms.col.actions">จัดการ</th>
+            </tr></thead>
+            <tbody id="driverBody"></tbody>
+          </table>
+        </div>
       </div>
     </div>
 
@@ -292,8 +290,6 @@ let selectedCarrier = null;
 function switchTab(tab) {
   document.querySelectorAll('.tms-panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + tab));
   document.querySelectorAll('.tms-sidebar-item').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
-  // Lazy-load on first visit so carriers + trips share the same SQLite read.
-  if (tab === 'drivers') populateDrvCarrierSwitch();
   if (tab === 'trips') loadTrips();
 }
 
@@ -301,7 +297,6 @@ async function loadCarriers() {
   try {
     carriersCache = await api('/api/tms/carriers');
     renderCarriers();
-    populateDrvCarrierSwitch();
   } catch (e) { toast(e.message); }
 }
 
@@ -334,42 +329,15 @@ function renderCarriers() {
 function selectCarrier(id) {
   selectedCarrier = carriersCache.find(c => c.id === id) || null;
   renderCarriers();
-  document.getElementById('driversFor').textContent = selectedCarrier ? ` · ${selectedCarrier.code} ${selectedCarrier.name}` : '';
-  document.getElementById('btnAddDriver').disabled = !selectedCarrier;
-  // Sync the drivers-tab carrier picker
-  const sw = document.getElementById('drvCarrierSwitch');
-  if (sw && selectedCarrier) sw.value = String(selectedCarrier.id);
-  if (selectedCarrier) loadDrivers();
-  // Auto-switch to drivers tab so the user sees the drivers immediately
-  if (selectedCarrier) switchTab('drivers');
-}
-
-// Drivers tab has its own carrier dropdown so users can jump between
-// carriers without bouncing back to the Carriers tab. Kept in sync with
-// selectedCarrier via selectCarrier() above.
-function populateDrvCarrierSwitch() {
-  const sw = document.getElementById('drvCarrierSwitch');
-  if (!sw) return;
-  const current = selectedCarrier ? String(selectedCarrier.id) : '';
-  sw.innerHTML = `<option value="">— เลือก Carrier —</option>` +
-    carriersCache.filter(c => c.active).map(c => `<option value="${c.id}">${c.code} — ${c.name}</option>`).join('');
-  if (current) sw.value = current;
-}
-function onDrvCarrierSwitch() {
-  const id = Number(document.getElementById('drvCarrierSwitch').value);
-  if (!id) {
-    selectedCarrier = null;
-    driversCache = [];
-    document.getElementById('driversFor').textContent = '';
-    document.getElementById('btnAddDriver').disabled = true;
-    document.getElementById('driverBody').innerHTML = `<tr><td colspan="6" class="empty">${t('tms.select_carrier_first')}</td></tr>`;
-    return;
-  }
-  selectedCarrier = carriersCache.find(c => c.id === id) || null;
-  renderCarriers();
-  document.getElementById('driversFor').textContent = selectedCarrier ? ` · ${selectedCarrier.code} ${selectedCarrier.name}` : '';
-  document.getElementById('btnAddDriver').disabled = !selectedCarrier;
-  if (selectedCarrier) loadDrivers();
+  const section = document.getElementById('driverSection');
+  if (!selectedCarrier) { section.style.display = 'none'; return; }
+  document.getElementById('driversFor').textContent = `· ${selectedCarrier.code} ${selectedCarrier.name}`;
+  section.style.display = 'block';
+  loadDrivers();
+  // Scroll the drivers section into view so the user knows where to look
+  // — without this, clicking a carrier near the top of a long list
+  // silently expands a section 800px down.
+  setTimeout(() => section.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
 }
 
 async function loadDrivers() {
