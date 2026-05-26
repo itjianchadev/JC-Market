@@ -8,7 +8,7 @@ Node.js + Express + better-sqlite3 + D365 Business Central integration.
 - **Server**: `node server.js` on port 3863 (`PORT` in `.env`)
 - **DB**: SQLite at `data/stock-market.db` — migrations are idempotent `ALTER TABLE` calls in `db.js` (safe to re-run on startup)
 - **BC environment**: `Jiancha_develop` · company `Jian Cha Co.,Ltd.` (id `88578c53-733c-f011-be59-000d3ac901b1`)
-- **BC default vendor** (auto-PO): `SP049` (env `BC_DEFAULT_VENDOR_NO` — switch to `SP163` once that vendor exists in Dev)
+- **BC default vendor** (auto-PO): `SP049` — บริษัท แพนฟู้ด จำกัด. Intended vendor is `SP163` (ทรีดี ฟู้ด แอนด์ ดริงค์); blocked until its Gen. Bus. / VAT Bus. / Vendor posting groups are filled in BC Dev (env `BC_DEFAULT_VENDOR_NO`).
 - **Item sync**: every 5 min via `sync.js`. Token cached in `bc-client.js`; refresh on startup if expired.
 
 ## Roles + branch types

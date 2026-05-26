@@ -352,6 +352,14 @@ app.get('/api/items', requireAuth, (req, res) => {
   sql += ' ORDER BY category, name';
   const items = db.prepare(sql).all(...params);
 
+  // JC outlets see vendor cost (matches what BC PO will record). FC see the
+  // branch sales price. Frontend reads unit_price for display either way.
+  if (req.user.branch_type === 'jc') {
+    for (const it of items) {
+      if (it.unit_cost && it.unit_cost > 0) it.unit_price = it.unit_cost;
+    }
+  }
+
   // HQ Admin: attach last-order info per item (latest non-cancelled order)
   if (isHqAdmin(req.user) && items.length) {
     const lastByItem = db.prepare(`
@@ -436,7 +444,11 @@ app.post('/api/cart/add', requireAuth, (req, res) => {
   if (!item_no) return res.status(400).json({ error: 'item_no required' });
   const item = db.prepare('SELECT * FROM items_cache WHERE item_no=? AND active=1').get(item_no);
   if (!item) return res.status(404).json({ error: 'Item not found' });
-  if (!item.unit_price || item.unit_price <= 0) return res.status(400).json({ error: 'ราคาไม่พร้อม — ติดต่อ HQ / Price unavailable — contact HQ' });
+  // For JC outlets, snapshot vendor cost (BC PO uses directUnitCost = unit_cost
+  // per PR #26). FC keeps the branch sales price.
+  const isJcUser = req.user.branch_type === 'jc';
+  const effectivePrice = (isJcUser && item.unit_cost > 0) ? item.unit_cost : item.unit_price;
+  if (!effectivePrice || effectivePrice <= 0) return res.status(400).json({ error: 'ราคาไม่พร้อม — ติดต่อ HQ / Price unavailable — contact HQ' });
 
   // Overdue credit block: if this is a fruit item and the FC still has
   // past-due 7-day credit orders, refuse. General items are unaffected.
@@ -471,9 +483,9 @@ app.post('/api/cart/add', requireAuth, (req, res) => {
   const newQty = existing ? existing.quantity + quantity : quantity;
   if (newQty > item.inventory) return res.status(400).json({ error: `สต๊อกไม่เพียงพอ (คงเหลือ ${item.inventory} ${item.uom})` });
   if (existing) {
-    db.prepare('UPDATE cart_items SET quantity=? WHERE id=?').run(newQty, existing.id);
+    db.prepare('UPDATE cart_items SET quantity=?, unit_price=? WHERE id=?').run(newQty, effectivePrice, existing.id);
   } else {
-    db.prepare('INSERT INTO cart_items (user_id, item_no, quantity, unit_price) VALUES (?,?,?,?)').run(req.user.id, item_no, quantity, item.unit_price);
+    db.prepare('INSERT INTO cart_items (user_id, item_no, quantity, unit_price) VALUES (?,?,?,?)').run(req.user.id, item_no, quantity, effectivePrice);
   }
   res.json({ ok: true, item_no, quantity: newQty });
 });
