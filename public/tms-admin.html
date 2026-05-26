@@ -9,9 +9,20 @@
 .dtable thead th{background:var(--beige);color:var(--gold-dark);padding:10px;text-align:left;font-size:12px;font-weight:600;border-bottom:1px solid var(--gold)}
 .dtable tbody td{padding:10px;border-bottom:1px solid var(--border);vertical-align:middle}
 .dtable tbody tr:nth-child(even){background:var(--beige)}
-.dtable tbody tr.row-selected{background:#fff9e6;outline:2px solid var(--gold);outline-offset:-2px}
+.dtable tbody tr.row-selected{background:#fff9e6}
+.dtable tbody tr.row-selected td:first-child{box-shadow:inset 3px 0 0 var(--gold)}
 .dtable tbody tr.row-clickable{cursor:pointer}
-.dtable tbody tr.row-clickable:hover{background:rgba(173,156,130,.15)}
+.dtable tbody tr.row-clickable:hover{background:rgba(173,156,130,.10)}
+
+/* Inline accordion: a per-carrier expansion row that holds the drivers
+   sub-table. Uses a single full-width td so it can carry its own header +
+   button without disturbing the parent table's column widths. */
+.dtable tbody tr.exp-row > td{background:rgba(173,156,130,.06);padding:14px 18px;border-top:none}
+.dtable tbody tr.exp-row .exp-toolbar{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.dtable tbody tr.exp-row h4{margin:0;color:var(--gold-dark);font-size:14px}
+.dtable tbody tr.exp-row .sub-empty{text-align:center;color:var(--muted);padding:14px;font-size:12px}
+.chev{width:14px;height:14px;display:inline-block;vertical-align:-2px;transition:transform .2s;color:var(--muted)}
+.row-selected .chev{transform:rotate(90deg);color:var(--gold-dark)}
 
 .pill-on{display:inline-block;padding:2px 10px;border-radius:99px;font-size:11px;font-weight:600;background:#d1fae5;color:#065f46}
 .pill-off{display:inline-block;padding:2px 10px;border-radius:99px;font-size:11px;font-weight:600;background:#f3f4f6;color:#6b7280}
@@ -29,59 +40,107 @@
 .empty{text-align:center;color:var(--muted);padding:24px;font-size:13px}
 .hint{font-size:12px;color:var(--muted);margin:0 0 12px 4px}
 
+/* Sidebar layout */
+.tms-layout{display:grid;grid-template-columns:220px 1fr;gap:20px;align-items:start}
+.tms-sidebar{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:8px;position:sticky;top:20px}
+.tms-sidebar-item{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:8px;cursor:pointer;color:var(--text);font-size:14px;border:none;background:none;width:100%;text-align:left;font-family:inherit;transition:background .15s,color .15s;position:relative}
+.tms-sidebar-item:hover{background:rgba(173,156,130,.10)}
+.tms-sidebar-item.active{background:var(--gold);color:#fff;font-weight:600;box-shadow:0 2px 6px rgba(173,156,130,.35)}
+.tms-sidebar-item.active .badge{background:#fff;color:var(--gold-dark)}
+.tms-sidebar-item .badge{margin-left:auto;background:var(--beige);color:var(--gold-dark);font-size:11px;font-weight:600;padding:1px 8px;border-radius:99px;min-width:22px;text-align:center}
+.tms-sidebar-item .icon{width:18px;height:18px;flex-shrink:0;opacity:.7}
+.tms-sidebar-item.active .icon{opacity:1;color:#fff}
+.tms-panel{display:none}
+.tms-panel.active{display:block}
+
+@media(max-width:880px){
+  .tms-layout{grid-template-columns:1fr}
+  .tms-sidebar{position:static;display:flex;flex-wrap:wrap;gap:4px}
+  .tms-sidebar-item{flex:1;min-width:120px;justify-content:center}
+}
 @media(max-width:640px){.form-grid2{grid-template-columns:1fr}}
 </style>
 </head><body data-i18n-title="tms.page_title">
 <div id="nav"></div>
 <div class="container">
 
-  <!-- Carriers panel -->
-  <div class="section-card">
-    <div class="toolbar">
-      <h3 style="margin:0;color:var(--gold-dark)" data-i18n="tms.carriers">ผู้ให้บริการขนส่ง (Carriers)</h3>
-      <span class="count-badge" id="carrierCount">0</span>
-      <div class="spacer" style="flex:1"></div>
-      <button class="btn sm" id="btnAddCarrier" onclick="openCarrierModal()" data-i18n="tms.add_carrier">+ เพิ่ม Carrier</button>
-    </div>
-    <p class="hint" data-i18n="tms.click_carrier_hint">คลิกแถวเพื่อดูคนขับใต้ Carrier นั้น</p>
-    <div class="card" style="padding:0;overflow-x:auto">
-      <table class="dtable">
-        <thead><tr>
-          <th data-i18n="tms.col.code">รหัส</th>
-          <th data-i18n="tms.col.name">ชื่อ</th>
-          <th data-i18n="tms.col.phone">โทร</th>
-          <th data-i18n="tms.col.email">อีเมล</th>
-          <th data-i18n="tms.col.cost_default">เหมาเที่ยว</th>
-          <th data-i18n="tms.col.drivers">คนขับ</th>
-          <th data-i18n="tms.col.status">สถานะ</th>
-          <th data-i18n="tms.col.actions">จัดการ</th>
-        </tr></thead>
-        <tbody id="carrierBody"></tbody>
-      </table>
-    </div>
-  </div>
+<div class="tms-layout">
+  <!-- Sidebar -->
+  <aside class="tms-sidebar">
+    <button class="tms-sidebar-item active" data-tab="carriers" onclick="switchTab('carriers')">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="14" height="10" rx="1"/><path d="M17 11h3l2 3v3h-5z"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg>
+      <span data-i18n="tms.carriers">Carriers</span>
+      <span class="badge" id="sideCarrierCount">0</span>
+    </button>
+    <button class="tms-sidebar-item" data-tab="trips" onclick="switchTab('trips')">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17H7a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v4"/><path d="M5 12h14"/><path d="m17 21 4-4-4-4"/><path d="M13 17h8"/></svg>
+      <span data-i18n="tms.trips">Trips</span>
+      <span class="badge" id="sideTripCount">0</span>
+    </button>
+  </aside>
 
-  <!-- Drivers panel -->
-  <div class="section-card">
-    <div class="toolbar">
-      <h3 style="margin:0;color:var(--gold-dark)"><span data-i18n="tms.drivers">คนขับ (Drivers)</span><span id="driversFor" style="color:var(--muted);font-weight:400;font-size:14px;margin-left:6px"></span></h3>
-      <div class="spacer" style="flex:1"></div>
-      <button class="btn sm" id="btnAddDriver" onclick="openDriverModal()" disabled data-i18n="tms.add_driver">+ เพิ่มคนขับ</button>
+  <main>
+    <!-- Carriers panel (drivers nested inside) -->
+    <div class="tms-panel active" id="panel-carriers">
+      <div class="toolbar">
+        <h3 style="margin:0;color:var(--gold-dark)" data-i18n="tms.carriers">ผู้ให้บริการขนส่ง (Carriers)</h3>
+        <div class="spacer" style="flex:1"></div>
+        <button class="btn sm" id="btnAddCarrier" onclick="openCarrierModal()" data-i18n="tms.add_carrier">+ เพิ่ม Carrier</button>
+      </div>
+      <p class="hint" data-i18n="tms.click_carrier_hint">คลิกแถวเพื่อดูคนขับใต้ Carrier นั้น</p>
+      <div class="card" style="padding:0;overflow-x:auto">
+        <table class="dtable">
+          <thead><tr>
+            <th data-i18n="tms.col.code">รหัส</th>
+            <th data-i18n="tms.col.name">ชื่อ</th>
+            <th data-i18n="tms.col.phone">โทร</th>
+            <th data-i18n="tms.col.email">อีเมล</th>
+            <th data-i18n="tms.col.cost_default">เหมาเที่ยว</th>
+            <th data-i18n="tms.col.drivers">คนขับ</th>
+            <th data-i18n="tms.col.status">สถานะ</th>
+            <th data-i18n="tms.col.actions">จัดการ</th>
+          </tr></thead>
+          <tbody id="carrierBody"></tbody>
+        </table>
+      </div>
+
     </div>
-    <div class="card" style="padding:0;overflow-x:auto">
-      <table class="dtable">
-        <thead><tr>
-          <th data-i18n="tms.col.username">Username</th>
-          <th data-i18n="tms.col.full_name">ชื่อ</th>
-          <th data-i18n="tms.col.phone">โทร</th>
-          <th data-i18n="tms.col.plate">ทะเบียนรถ</th>
-          <th data-i18n="tms.col.status">สถานะ</th>
-          <th data-i18n="tms.col.actions">จัดการ</th>
-        </tr></thead>
-        <tbody id="driverBody"><tr><td colspan="6" class="empty" data-i18n="tms.select_carrier_first">เลือก Carrier ด้านบนก่อน</td></tr></tbody>
-      </table>
+
+    <!-- Trips panel -->
+    <div class="tms-panel" id="panel-trips">
+      <div class="toolbar">
+        <h3 style="margin:0;color:var(--gold-dark)"><span data-i18n="tms.trips">เที่ยววิ่ง (Trips)</span></h3>
+        <input type="date" id="tripDateFilter" onchange="loadTrips()" style="padding:6px 10px;width:auto">
+        <select id="tripStatusFilter" onchange="loadTrips()" style="padding:6px 10px;width:auto">
+          <option value="">All status</option>
+          <option value="planned">planned</option>
+          <option value="dispatched">dispatched</option>
+          <option value="completed">completed</option>
+          <option value="cancelled">cancelled</option>
+        </select>
+        <div class="spacer" style="flex:1"></div>
+        <button class="btn sm" onclick="openTripModal()" data-i18n="tms.new_trip">+ สร้าง Trip ใหม่</button>
+      </div>
+      <div class="card" style="padding:0;overflow-x:auto">
+        <table class="dtable">
+          <thead><tr>
+            <th data-i18n="tms.col.trip_no">เลขที่</th>
+            <th data-i18n="tms.col.date">วันที่</th>
+            <th data-i18n="tms.col.carrier">Carrier</th>
+            <th data-i18n="tms.col.driver">คนขับ</th>
+            <th data-i18n="tms.col.plate">ทะเบียนรถ</th>
+            <th data-i18n="tms.col.stops">จุดส่ง</th>
+            <th data-i18n="tms.col.cost">ค่าเที่ยว</th>
+            <th data-i18n="tms.col.status">สถานะ</th>
+            <th data-i18n="tms.col.actions">จัดการ</th>
+          </tr></thead>
+          <tbody id="tripBody"></tbody>
+        </table>
+      </div>
     </div>
-  </div>
+  </main>
+</div>
+
 </div>
 
 <!-- Carrier modal (add/edit) -->
@@ -103,6 +162,71 @@
       <p id="carrierErr" style="color:var(--err);font-size:12px;min-height:18px;margin:8px 0"></p>
       <div style="display:flex;gap:8px;justify-content:flex-end">
         <button type="button" class="btn ghost" onclick="closeCarrier()" data-i18n="common.cancel">ยกเลิก</button>
+        <button type="submit" class="btn" data-i18n="common.save">บันทึก</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Trip modal (create / edit + shipment picker) -->
+<div class="modal" id="tripModal">
+  <div class="box" style="max-width:720px">
+    <button class="close" onclick="closeTrip()">×</button>
+    <h3 id="tripModalTitle" data-i18n="tms.new_trip">+ สร้าง Trip ใหม่</h3>
+    <form id="tripForm" onsubmit="return saveTrip(event)">
+      <div class="form-grid2">
+        <div class="form-row"><label data-i18n="tms.col.carrier">Carrier</label>
+          <select name="carrier_id" required onchange="onTripCarrierChange()">
+            <option value="">—</option>
+          </select>
+        </div>
+        <div class="form-row"><label data-i18n="tms.col.driver">คนขับ</label>
+          <select name="driver_id"><option value="">—</option></select>
+        </div>
+      </div>
+      <div class="form-grid2">
+        <div class="form-row"><label data-i18n="tms.col.date">วันที่</label><input name="scheduled_date" type="date" required></div>
+        <div class="form-row"><label data-i18n="tms.col.plate">ทะเบียนรถ</label><input name="vehicle_plate"></div>
+      </div>
+      <div class="form-grid2">
+        <div class="form-row"><label data-i18n="tms.col.cost">ค่าเที่ยว</label><input name="cost_agreed" type="number" step="0.01" min="0" value="0"></div>
+        <div class="form-row"><label data-i18n="tms.col.note">หมายเหตุ</label><input name="note"></div>
+      </div>
+
+      <div id="tripShipmentPicker" style="margin-top:14px">
+        <div style="font-size:13px;color:var(--muted);margin-bottom:6px"><span data-i18n="tms.pool">Shipments รอวาง trip</span> <span id="poolCount" style="color:var(--gold-dark);font-weight:600"></span></div>
+        <div class="card" style="padding:0;max-height:220px;overflow-y:auto">
+          <table class="dtable" style="font-size:12px">
+            <thead><tr>
+              <th style="width:30px"></th>
+              <th data-i18n="tms.col.shipment_no">Shipment</th>
+              <th data-i18n="tms.col.order_no">Order</th>
+              <th data-i18n="tms.col.dest">ปลายทาง</th>
+            </tr></thead>
+            <tbody id="poolBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="tripStopsSection" style="display:none;margin-top:14px">
+        <div style="font-size:13px;color:var(--muted);margin-bottom:6px" data-i18n="tms.stops_in_trip">รายการ stops ใน Trip</div>
+        <div class="card" style="padding:0;max-height:200px;overflow-y:auto">
+          <table class="dtable" style="font-size:12px">
+            <thead><tr>
+              <th style="width:30px">#</th>
+              <th data-i18n="tms.col.shipment_no">Shipment</th>
+              <th data-i18n="tms.col.order_no">Order</th>
+              <th data-i18n="tms.col.dest">ปลายทาง</th>
+              <th></th>
+            </tr></thead>
+            <tbody id="stopsBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <p id="tripErr" style="color:var(--err);font-size:12px;min-height:18px;margin:8px 0"></p>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button type="button" class="btn ghost" onclick="closeTrip()" data-i18n="common.cancel">ยกเลิก</button>
         <button type="submit" class="btn" data-i18n="common.save">บันทึก</button>
       </div>
     </form>
@@ -148,6 +272,14 @@ let carriersCache = [];
 let driversCache = [];
 let selectedCarrier = null;
 
+// Sidebar tab switching — only one panel visible at a time. Pure
+// frontend; no URL changes (avoids tripping the bfcache on back).
+function switchTab(tab) {
+  document.querySelectorAll('.tms-panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + tab));
+  document.querySelectorAll('.tms-sidebar-item').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  if (tab === 'trips') loadTrips();
+}
+
 async function loadCarriers() {
   try {
     carriersCache = await api('/api/tms/carriers');
@@ -157,16 +289,19 @@ async function loadCarriers() {
 
 function renderCarriers() {
   const el = document.getElementById('carrierBody');
-  document.getElementById('carrierCount').textContent = carriersCache.length;
+  document.getElementById('sideCarrierCount').textContent = carriersCache.length;
   if (!carriersCache.length) {
     el.innerHTML = `<tr><td colspan="8" class="empty">${t('tms.no_carriers')}</td></tr>`;
     return;
   }
-  el.innerHTML = carriersCache.map(c => `
-    <tr class="row-clickable ${selectedCarrier && selectedCarrier.id === c.id ? 'row-selected' : ''} ${c.active?'':'pill-off'}"
+  el.innerHTML = carriersCache.map(c => {
+    const isSel = selectedCarrier && selectedCarrier.id === c.id;
+    const chev = `<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>`;
+    return `
+    <tr class="row-clickable ${isSel ? 'row-selected' : ''} ${c.active?'':'pill-off'}"
         style="${c.active?'':'opacity:.55'}"
         onclick="selectCarrier(${c.id})">
-      <td><strong>${c.code}</strong></td>
+      <td>${chev}<strong style="margin-left:6px">${c.code}</strong></td>
       <td>${c.name}</td>
       <td>${c.contact_phone || '-'}</td>
       <td style="color:var(--muted)">${c.contact_email || '-'}</td>
@@ -178,14 +313,51 @@ function renderCarriers() {
         ${isSuper ? `<button class="btn sm ghost" style="color:var(--err);border-color:var(--err);margin-left:4px" onclick="deleteCarrier(${c.id},'${c.code}')">${t('common.delete')}</button>` : ''}
       </td>
     </tr>
-  `).join('');
+    ${isSel ? `
+    <tr class="exp-row">
+      <td colspan="8">
+        <div class="exp-toolbar">
+          <h4>
+            <svg style="vertical-align:-3px;margin-right:4px" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+            <span data-i18n="tms.drivers">คนขับ</span>
+            <span style="color:var(--muted);font-weight:400;font-size:12px;margin-left:6px">· ${c.code} ${c.name}</span>
+          </h4>
+          <div style="flex:1"></div>
+          <button class="btn sm" id="btnAddDriver" onclick="openDriverModal()" data-i18n="tms.add_driver">+ เพิ่มคนขับ</button>
+        </div>
+        <div class="card" style="padding:0;overflow-x:auto">
+          <table class="dtable" style="font-size:12px">
+            <thead><tr>
+              <th data-i18n="tms.col.username">Username</th>
+              <th data-i18n="tms.col.full_name">ชื่อ</th>
+              <th data-i18n="tms.col.phone">โทร</th>
+              <th data-i18n="tms.col.plate">ทะเบียนรถ</th>
+              <th data-i18n="tms.col.status">สถานะ</th>
+              <th data-i18n="tms.col.actions">จัดการ</th>
+            </tr></thead>
+            <tbody id="driverBody"></tbody>
+          </table>
+        </div>
+      </td>
+    </tr>` : ''}
+  `;}).join('');
+  // After re-render, re-attach drivers if a carrier is still selected
+  if (selectedCarrier) renderDrivers();
+  applyI18n(document.getElementById('carrierBody'));
 }
 
+// Toggle behaviour: clicking the same carrier again collapses it; clicking
+// a different one closes the prior and opens the new (renderCarriers will
+// only emit one expansion block — for whichever is selectedCarrier).
 function selectCarrier(id) {
+  if (selectedCarrier && selectedCarrier.id === id) {
+    selectedCarrier = null;
+    driversCache = [];
+    renderCarriers();
+    return;
+  }
   selectedCarrier = carriersCache.find(c => c.id === id) || null;
   renderCarriers();
-  document.getElementById('driversFor').textContent = selectedCarrier ? ` · ${selectedCarrier.code} ${selectedCarrier.name}` : '';
-  document.getElementById('btnAddDriver').disabled = !selectedCarrier;
   if (selectedCarrier) loadDrivers();
 }
 
@@ -198,9 +370,13 @@ async function loadDrivers() {
 }
 
 function renderDrivers() {
+  // The driverBody tbody lives inside the expanded carrier row; if no
+  // carrier is expanded right now (e.g. between toggles), skip silently —
+  // the next selectCarrier → renderCarriers will recreate it.
   const el = document.getElementById('driverBody');
+  if (!el) return;
   if (!driversCache.length) {
-    el.innerHTML = `<tr><td colspan="6" class="empty">${t('tms.no_drivers')}</td></tr>`;
+    el.innerHTML = `<tr><td colspan="6" class="sub-empty">${t('tms.no_drivers')}</td></tr>`;
     return;
   }
   el.innerHTML = driversCache.map(d => `
@@ -345,7 +521,209 @@ async function deleteDriver(id, username) {
   } catch (e) { toast(e.message); }
 }
 
+// ─── Trips (Phase 1.3) ───
+let tripsCache = [];
+let poolCache = [];           // unassigned shipments (for create form)
+let editingTrip = null;       // when set, modal is in edit mode
+
+const STATUS_PILL = {
+  planned:   { bg:'#fef3c7', fg:'#92400e' },
+  dispatched:{ bg:'#dbeafe', fg:'#1d4ed8' },
+  completed: { bg:'#d1fae5', fg:'#065f46' },
+  cancelled: { bg:'#f3f4f6', fg:'#6b7280' },
+};
+
+async function loadTrips() {
+  const date = document.getElementById('tripDateFilter').value;
+  const status = document.getElementById('tripStatusFilter').value;
+  const qs = new URLSearchParams();
+  if (date) qs.set('date', date);
+  if (status) qs.set('status', status);
+  try {
+    tripsCache = await api('/api/tms/trips' + (qs.toString() ? '?' + qs.toString() : ''));
+    renderTrips();
+  } catch (e) { toast(e.message); }
+}
+
+function renderTrips() {
+  const el = document.getElementById('tripBody');
+  const badge = document.getElementById('sideTripCount');
+  // Count only non-cancelled trips for the sidebar badge — cancelled trips
+  // are noise in the planner's view of "what's pending."
+  if (badge) badge.textContent = tripsCache.filter(t => t.status !== 'cancelled').length;
+  if (!tripsCache.length) {
+    el.innerHTML = `<tr><td colspan="9" class="empty">${t('tms.no_trips')}</td></tr>`;
+    return;
+  }
+  el.innerHTML = tripsCache.map(tr => {
+    const sty = STATUS_PILL[tr.status] || STATUS_PILL.planned;
+    const statusKey = `tms.trip.status.${tr.status}`;
+    const canEdit = tr.status === 'planned';
+    return `
+      <tr>
+        <td><strong>${tr.trip_number}</strong></td>
+        <td>${tr.scheduled_date || '-'}</td>
+        <td>${tr.carrier_code || '-'}<br><small style="color:var(--muted)">${tr.carrier_name || ''}</small></td>
+        <td>${tr.driver_name || '<span style="color:var(--muted)">— ยังไม่กำหนด —</span>'}<br><small style="color:var(--muted)">${tr.driver_phone || ''}</small></td>
+        <td>${tr.vehicle_plate || '-'}</td>
+        <td style="text-align:center">${tr.stop_count}</td>
+        <td>${(tr.cost_agreed||0).toLocaleString()}</td>
+        <td><span style="background:${sty.bg};color:${sty.fg};padding:2px 10px;border-radius:99px;font-size:11px;font-weight:600">${t(statusKey)}</span></td>
+        <td>
+          ${canEdit ? `<button class="btn sm ghost" onclick="openTripModal(${tr.id})">${t('common.edit')}</button>
+                       <button class="btn sm ghost" style="color:var(--err);border-color:var(--err);margin-left:4px" onclick="cancelTrip(${tr.id},'${tr.trip_number}')">${t('tms.trip.status.cancelled')}</button>`
+                    : `<button class="btn sm ghost" onclick="openTripModal(${tr.id})">${t('common.edit')}</button>`}
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+async function openTripModal(tripId) {
+  const form = document.getElementById('tripForm');
+  form.reset();
+  document.getElementById('tripErr').textContent = '';
+  editingTrip = tripId || null;
+  document.getElementById('tripModalTitle').textContent = editingTrip ? t('tms.edit_trip') : t('tms.new_trip');
+
+  // Populate Carrier dropdown
+  const carrierSel = form.querySelector('select[name=carrier_id]');
+  carrierSel.innerHTML = '<option value="">—</option>' +
+    carriersCache.filter(c => c.active).map(c => `<option value="${c.id}">${c.code} — ${c.name}</option>`).join('');
+  const driverSel = form.querySelector('select[name=driver_id]');
+  driverSel.innerHTML = '<option value="">—</option>';
+
+  if (editingTrip) {
+    // EDIT mode: pull current trip data + stops, hide pool picker (use add/remove flow separately)
+    const trip = await api('/api/tms/trips/' + editingTrip);
+    carrierSel.value = trip.carrier_id;
+    carrierSel.disabled = true;
+    await onTripCarrierChange();
+    driverSel.value = trip.driver_id || '';
+    form.scheduled_date.value = trip.scheduled_date || '';
+    form.vehicle_plate.value = trip.vehicle_plate || '';
+    form.cost_agreed.value = trip.cost_agreed || 0;
+    form.note.value = trip.note || '';
+    // Hide pool, show stops list with remove buttons
+    document.getElementById('tripShipmentPicker').style.display = 'none';
+    document.getElementById('tripStopsSection').style.display = 'block';
+    renderStops(trip.stops);
+  } else {
+    // CREATE mode: show pool picker, hide stops
+    carrierSel.disabled = false;
+    form.scheduled_date.value = new Date().toISOString().slice(0,10);
+    document.getElementById('tripShipmentPicker').style.display = 'block';
+    document.getElementById('tripStopsSection').style.display = 'none';
+    await loadPool();
+  }
+
+  document.getElementById('tripModal').style.display = 'flex';
+}
+function closeTrip() {
+  document.getElementById('tripModal').style.display = 'none';
+  document.querySelector('#tripForm select[name=carrier_id]').disabled = false;
+  editingTrip = null;
+}
+
+async function onTripCarrierChange() {
+  const form = document.getElementById('tripForm');
+  const cid = form.carrier_id.value;
+  const driverSel = form.driver_id;
+  if (!cid) { driverSel.innerHTML = '<option value="">—</option>'; return; }
+  try {
+    const drivers = await api(`/api/tms/carriers/${cid}/drivers`);
+    driverSel.innerHTML = '<option value="">—</option>' +
+      drivers.filter(d => d.active).map(d => `<option value="${d.id}">${d.username} — ${d.full_name}${d.vehicle_plate ? ' ('+d.vehicle_plate+')' : ''}</option>`).join('');
+  } catch (e) { driverSel.innerHTML = '<option value="">—</option>'; }
+}
+
+async function loadPool() {
+  try {
+    poolCache = await api('/api/tms/shipments/unassigned');
+    document.getElementById('poolCount').textContent = poolCache.length ? '(' + poolCache.length + ')' : '';
+    const el = document.getElementById('poolBody');
+    if (!poolCache.length) {
+      el.innerHTML = `<tr><td colspan="4" class="empty">${t('tms.pool_empty')}</td></tr>`;
+      return;
+    }
+    el.innerHTML = poolCache.map(s => `
+      <tr>
+        <td><input type="checkbox" class="pool-pick" value="${s.id}"></td>
+        <td><strong>${s.shipment_number}</strong></td>
+        <td>${s.order_number || '-'}</td>
+        <td>${s.dest_branch_code}<br><small style="color:var(--muted)">${s.branch_name || ''}</small></td>
+      </tr>
+    `).join('');
+  } catch (e) { toast(e.message); }
+}
+
+function renderStops(stops) {
+  const el = document.getElementById('stopsBody');
+  if (!stops || !stops.length) {
+    el.innerHTML = `<tr><td colspan="5" class="empty">—</td></tr>`;
+    return;
+  }
+  el.innerHTML = stops.map((s, idx) => `
+    <tr>
+      <td>${s.stop_seq || idx+1}</td>
+      <td><strong>${s.shipment_number}</strong></td>
+      <td>${s.order_number || '-'}</td>
+      <td>${s.dest_branch_code}<br><small style="color:var(--muted)">${s.branch_name || ''}</small></td>
+      <td>${s.status === 'planned' ? `<button type="button" class="btn sm ghost" style="color:var(--err);border-color:var(--err)" onclick="removeStop(${s.id})">${t('common.delete')}</button>` : `<span style="color:var(--muted);font-size:11px">${s.status}</span>`}</td>
+    </tr>
+  `).join('');
+}
+
+async function removeStop(shipmentId) {
+  if (!editingTrip) return;
+  try {
+    await api(`/api/tms/trips/${editingTrip}/shipments/${shipmentId}`, { method:'DELETE' });
+    const trip = await api('/api/tms/trips/' + editingTrip);
+    renderStops(trip.stops);
+    toast(t('tms.deleted'));
+    loadTrips();
+  } catch (e) { toast(e.message); }
+}
+
+async function saveTrip(e) {
+  e.preventDefault();
+  const form = e.target;
+  const fd = new FormData(form);
+  const body = Object.fromEntries(fd.entries());
+  body.cost_agreed = Number(body.cost_agreed) || 0;
+  if (body.driver_id === '') body.driver_id = null;
+  try {
+    if (editingTrip) {
+      delete body.carrier_id; // immutable on edit
+      await api('/api/tms/trips/' + editingTrip, { method:'PUT', body: JSON.stringify(body) });
+      toast('OK');
+    } else {
+      // Collect picked shipments
+      const ids = Array.from(document.querySelectorAll('.pool-pick:checked')).map(cb => Number(cb.value));
+      if (!ids.length) { document.getElementById('tripErr').textContent = t('tms.pick_at_least_one'); return false; }
+      body.shipment_ids = ids;
+      await api('/api/tms/trips', { method:'POST', body: JSON.stringify(body) });
+      toast('OK');
+    }
+    closeTrip();
+    loadTrips();
+  } catch (err) {
+    document.getElementById('tripErr').textContent = err.message;
+  }
+  return false;
+}
+
+async function cancelTrip(id, tripNo) {
+  if (!confirm(t('tms.confirm_cancel_trip', { n: tripNo }))) return;
+  try {
+    await api('/api/tms/trips/' + id, { method:'DELETE' });
+    toast(t('tms.trip.status.cancelled'));
+    loadTrips();
+  } catch (e) { toast(e.message); }
+}
+
 loadCarriers();
+loadTrips();
 applyI18n(document.body);
 </script>
 </body></html>
