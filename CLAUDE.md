@@ -32,10 +32,12 @@ Node.js + Express + better-sqlite3 + D365 Business Central integration.
 | Path | Trigger | BC docs created | Finance? | Payment? |
 |---|---|---|---|---|
 | FC + general | `verify` approve | SO + PO | yes | slip |
-| FC + fruit + immediate | checkout | SO + PO | (slip verify only) | slip |
-| FC + fruit + credit_7d | checkout | SO + PO | (slip verify when paid) | slip within 7d |
+| FC + fruit + immediate | `verify` approve | SO + PO | yes | slip |
+| FC + fruit + credit_7d | `verify` approve | SO + PO | yes | slip within 7d |
 | JC + general | checkout | **TRO** (CTI → JC0xx) | no | — |
 | JC + fruit | checkout | PO only (no SO) | no | — |
+
+All FC orders (general / fruit / credit_7d) share one rule: BC SO + PO are NOT created at checkout — Finance must verify first. This avoids BC orphans if the FC cancels before paying. JC orders bypass Finance and create BC docs immediately at checkout.
 
 - Auto-cancel timer: 30 min for FC `pending`. Skipped for `payment_method='credit_7d'` and JC orders (status flips to `verified` immediately).
 - Overdue credit (`payment_method='credit_7d'` + past `credit_due_at`): FC blocked from new fruit orders until cleared. General products still allowed.
