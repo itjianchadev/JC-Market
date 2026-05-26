@@ -29,92 +29,133 @@
 .empty{text-align:center;color:var(--muted);padding:24px;font-size:13px}
 .hint{font-size:12px;color:var(--muted);margin:0 0 12px 4px}
 
+/* Sidebar layout */
+.tms-layout{display:grid;grid-template-columns:220px 1fr;gap:20px;align-items:start}
+.tms-sidebar{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:8px;position:sticky;top:20px}
+.tms-sidebar-item{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:8px;cursor:pointer;color:var(--text);font-size:14px;border:none;background:none;width:100%;text-align:left;font-family:inherit;transition:background .15s,color .15s;position:relative}
+.tms-sidebar-item:hover{background:rgba(173,156,130,.10)}
+.tms-sidebar-item.active{background:var(--gold);color:#fff;font-weight:600;box-shadow:0 2px 6px rgba(173,156,130,.35)}
+.tms-sidebar-item.active .badge{background:#fff;color:var(--gold-dark)}
+.tms-sidebar-item .badge{margin-left:auto;background:var(--beige);color:var(--gold-dark);font-size:11px;font-weight:600;padding:1px 8px;border-radius:99px;min-width:22px;text-align:center}
+.tms-sidebar-item .icon{width:18px;height:18px;flex-shrink:0;opacity:.7}
+.tms-sidebar-item.active .icon{opacity:1;color:#fff}
+.tms-panel{display:none}
+.tms-panel.active{display:block}
+
+@media(max-width:880px){
+  .tms-layout{grid-template-columns:1fr}
+  .tms-sidebar{position:static;display:flex;flex-wrap:wrap;gap:4px}
+  .tms-sidebar-item{flex:1;min-width:120px;justify-content:center}
+}
 @media(max-width:640px){.form-grid2{grid-template-columns:1fr}}
 </style>
 </head><body data-i18n-title="tms.page_title">
 <div id="nav"></div>
 <div class="container">
 
-  <!-- Carriers panel -->
-  <div class="section-card">
-    <div class="toolbar">
-      <h3 style="margin:0;color:var(--gold-dark)" data-i18n="tms.carriers">ผู้ให้บริการขนส่ง (Carriers)</h3>
-      <span class="count-badge" id="carrierCount">0</span>
-      <div class="spacer" style="flex:1"></div>
-      <button class="btn sm" id="btnAddCarrier" onclick="openCarrierModal()" data-i18n="tms.add_carrier">+ เพิ่ม Carrier</button>
-    </div>
-    <p class="hint" data-i18n="tms.click_carrier_hint">คลิกแถวเพื่อดูคนขับใต้ Carrier นั้น</p>
-    <div class="card" style="padding:0;overflow-x:auto">
-      <table class="dtable">
-        <thead><tr>
-          <th data-i18n="tms.col.code">รหัส</th>
-          <th data-i18n="tms.col.name">ชื่อ</th>
-          <th data-i18n="tms.col.phone">โทร</th>
-          <th data-i18n="tms.col.email">อีเมล</th>
-          <th data-i18n="tms.col.cost_default">เหมาเที่ยว</th>
-          <th data-i18n="tms.col.drivers">คนขับ</th>
-          <th data-i18n="tms.col.status">สถานะ</th>
-          <th data-i18n="tms.col.actions">จัดการ</th>
-        </tr></thead>
-        <tbody id="carrierBody"></tbody>
-      </table>
-    </div>
-  </div>
+<div class="tms-layout">
+  <!-- Sidebar -->
+  <aside class="tms-sidebar">
+    <button class="tms-sidebar-item active" data-tab="carriers" onclick="switchTab('carriers')">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="14" height="10" rx="1"/><path d="M17 11h3l2 3v3h-5z"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg>
+      <span data-i18n="tms.carriers">Carriers</span>
+      <span class="badge" id="sideCarrierCount">0</span>
+    </button>
+    <button class="tms-sidebar-item" data-tab="drivers" onclick="switchTab('drivers')">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg>
+      <span data-i18n="tms.drivers">Drivers</span>
+    </button>
+    <button class="tms-sidebar-item" data-tab="trips" onclick="switchTab('trips')">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17H7a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v4"/><path d="M5 12h14"/><path d="m17 21 4-4-4-4"/><path d="M13 17h8"/></svg>
+      <span data-i18n="tms.trips">Trips</span>
+      <span class="badge" id="sideTripCount">0</span>
+    </button>
+  </aside>
 
-  <!-- Drivers panel -->
-  <div class="section-card">
-    <div class="toolbar">
-      <h3 style="margin:0;color:var(--gold-dark)"><span data-i18n="tms.drivers">คนขับ (Drivers)</span><span id="driversFor" style="color:var(--muted);font-weight:400;font-size:14px;margin-left:6px"></span></h3>
-      <div class="spacer" style="flex:1"></div>
-      <button class="btn sm" id="btnAddDriver" onclick="openDriverModal()" disabled data-i18n="tms.add_driver">+ เพิ่มคนขับ</button>
+  <main>
+    <!-- Carriers panel -->
+    <div class="tms-panel active" id="panel-carriers">
+      <div class="toolbar">
+        <h3 style="margin:0;color:var(--gold-dark)" data-i18n="tms.carriers">ผู้ให้บริการขนส่ง (Carriers)</h3>
+        <div class="spacer" style="flex:1"></div>
+        <button class="btn sm" id="btnAddCarrier" onclick="openCarrierModal()" data-i18n="tms.add_carrier">+ เพิ่ม Carrier</button>
+      </div>
+      <p class="hint" data-i18n="tms.click_carrier_hint">คลิกแถวเพื่อดูคนขับใต้ Carrier นั้น</p>
+      <div class="card" style="padding:0;overflow-x:auto">
+        <table class="dtable">
+          <thead><tr>
+            <th data-i18n="tms.col.code">รหัส</th>
+            <th data-i18n="tms.col.name">ชื่อ</th>
+            <th data-i18n="tms.col.phone">โทร</th>
+            <th data-i18n="tms.col.email">อีเมล</th>
+            <th data-i18n="tms.col.cost_default">เหมาเที่ยว</th>
+            <th data-i18n="tms.col.drivers">คนขับ</th>
+            <th data-i18n="tms.col.status">สถานะ</th>
+            <th data-i18n="tms.col.actions">จัดการ</th>
+          </tr></thead>
+          <tbody id="carrierBody"></tbody>
+        </table>
+      </div>
     </div>
-    <div class="card" style="padding:0;overflow-x:auto">
-      <table class="dtable">
-        <thead><tr>
-          <th data-i18n="tms.col.username">Username</th>
-          <th data-i18n="tms.col.full_name">ชื่อ</th>
-          <th data-i18n="tms.col.phone">โทร</th>
-          <th data-i18n="tms.col.plate">ทะเบียนรถ</th>
-          <th data-i18n="tms.col.status">สถานะ</th>
-          <th data-i18n="tms.col.actions">จัดการ</th>
-        </tr></thead>
-        <tbody id="driverBody"><tr><td colspan="6" class="empty" data-i18n="tms.select_carrier_first">เลือก Carrier ด้านบนก่อน</td></tr></tbody>
-      </table>
-    </div>
-  </div>
 
-  <!-- Trips panel (Phase 1.3) -->
-  <div class="section-card">
-    <div class="toolbar">
-      <h3 style="margin:0;color:var(--gold-dark)"><span data-i18n="tms.trips">เที่ยววิ่ง (Trips)</span></h3>
-      <input type="date" id="tripDateFilter" onchange="loadTrips()" style="padding:6px 10px;width:auto">
-      <select id="tripStatusFilter" onchange="loadTrips()" style="padding:6px 10px;width:auto">
-        <option value="">All status</option>
-        <option value="planned">planned</option>
-        <option value="dispatched">dispatched</option>
-        <option value="completed">completed</option>
-        <option value="cancelled">cancelled</option>
-      </select>
-      <div class="spacer" style="flex:1"></div>
-      <button class="btn sm" onclick="openTripModal()" data-i18n="tms.new_trip">+ สร้าง Trip ใหม่</button>
+    <!-- Drivers panel -->
+    <div class="tms-panel" id="panel-drivers">
+      <div class="toolbar">
+        <h3 style="margin:0;color:var(--gold-dark)"><span data-i18n="tms.drivers">คนขับ (Drivers)</span><span id="driversFor" style="color:var(--muted);font-weight:400;font-size:14px;margin-left:6px"></span></h3>
+        <select id="drvCarrierSwitch" onchange="onDrvCarrierSwitch()" style="padding:6px 10px;width:auto"></select>
+        <div class="spacer" style="flex:1"></div>
+        <button class="btn sm" id="btnAddDriver" onclick="openDriverModal()" disabled data-i18n="tms.add_driver">+ เพิ่มคนขับ</button>
+      </div>
+      <div class="card" style="padding:0;overflow-x:auto">
+        <table class="dtable">
+          <thead><tr>
+            <th data-i18n="tms.col.username">Username</th>
+            <th data-i18n="tms.col.full_name">ชื่อ</th>
+            <th data-i18n="tms.col.phone">โทร</th>
+            <th data-i18n="tms.col.plate">ทะเบียนรถ</th>
+            <th data-i18n="tms.col.status">สถานะ</th>
+            <th data-i18n="tms.col.actions">จัดการ</th>
+          </tr></thead>
+          <tbody id="driverBody"><tr><td colspan="6" class="empty" data-i18n="tms.select_carrier_first">เลือก Carrier ด้านบนก่อน</td></tr></tbody>
+        </table>
+      </div>
     </div>
-    <div class="card" style="padding:0;overflow-x:auto">
-      <table class="dtable">
-        <thead><tr>
-          <th data-i18n="tms.col.trip_no">เลขที่</th>
-          <th data-i18n="tms.col.date">วันที่</th>
-          <th data-i18n="tms.col.carrier">Carrier</th>
-          <th data-i18n="tms.col.driver">คนขับ</th>
-          <th data-i18n="tms.col.plate">ทะเบียนรถ</th>
-          <th data-i18n="tms.col.stops">จุดส่ง</th>
-          <th data-i18n="tms.col.cost">ค่าเที่ยว</th>
-          <th data-i18n="tms.col.status">สถานะ</th>
-          <th data-i18n="tms.col.actions">จัดการ</th>
-        </tr></thead>
-        <tbody id="tripBody"></tbody>
-      </table>
+
+    <!-- Trips panel -->
+    <div class="tms-panel" id="panel-trips">
+      <div class="toolbar">
+        <h3 style="margin:0;color:var(--gold-dark)"><span data-i18n="tms.trips">เที่ยววิ่ง (Trips)</span></h3>
+        <input type="date" id="tripDateFilter" onchange="loadTrips()" style="padding:6px 10px;width:auto">
+        <select id="tripStatusFilter" onchange="loadTrips()" style="padding:6px 10px;width:auto">
+          <option value="">All status</option>
+          <option value="planned">planned</option>
+          <option value="dispatched">dispatched</option>
+          <option value="completed">completed</option>
+          <option value="cancelled">cancelled</option>
+        </select>
+        <div class="spacer" style="flex:1"></div>
+        <button class="btn sm" onclick="openTripModal()" data-i18n="tms.new_trip">+ สร้าง Trip ใหม่</button>
+      </div>
+      <div class="card" style="padding:0;overflow-x:auto">
+        <table class="dtable">
+          <thead><tr>
+            <th data-i18n="tms.col.trip_no">เลขที่</th>
+            <th data-i18n="tms.col.date">วันที่</th>
+            <th data-i18n="tms.col.carrier">Carrier</th>
+            <th data-i18n="tms.col.driver">คนขับ</th>
+            <th data-i18n="tms.col.plate">ทะเบียนรถ</th>
+            <th data-i18n="tms.col.stops">จุดส่ง</th>
+            <th data-i18n="tms.col.cost">ค่าเที่ยว</th>
+            <th data-i18n="tms.col.status">สถานะ</th>
+            <th data-i18n="tms.col.actions">จัดการ</th>
+          </tr></thead>
+          <tbody id="tripBody"></tbody>
+        </table>
+      </div>
     </div>
-  </div>
+  </main>
+</div>
+
 </div>
 
 <!-- Carrier modal (add/edit) -->
@@ -246,16 +287,27 @@ let carriersCache = [];
 let driversCache = [];
 let selectedCarrier = null;
 
+// Sidebar tab switching — only one panel visible at a time. Pure
+// frontend; no URL changes (avoids tripping the bfcache on back).
+function switchTab(tab) {
+  document.querySelectorAll('.tms-panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + tab));
+  document.querySelectorAll('.tms-sidebar-item').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  // Lazy-load on first visit so carriers + trips share the same SQLite read.
+  if (tab === 'drivers') populateDrvCarrierSwitch();
+  if (tab === 'trips') loadTrips();
+}
+
 async function loadCarriers() {
   try {
     carriersCache = await api('/api/tms/carriers');
     renderCarriers();
+    populateDrvCarrierSwitch();
   } catch (e) { toast(e.message); }
 }
 
 function renderCarriers() {
   const el = document.getElementById('carrierBody');
-  document.getElementById('carrierCount').textContent = carriersCache.length;
+  document.getElementById('sideCarrierCount').textContent = carriersCache.length;
   if (!carriersCache.length) {
     el.innerHTML = `<tr><td colspan="8" class="empty">${t('tms.no_carriers')}</td></tr>`;
     return;
@@ -280,6 +332,39 @@ function renderCarriers() {
 }
 
 function selectCarrier(id) {
+  selectedCarrier = carriersCache.find(c => c.id === id) || null;
+  renderCarriers();
+  document.getElementById('driversFor').textContent = selectedCarrier ? ` · ${selectedCarrier.code} ${selectedCarrier.name}` : '';
+  document.getElementById('btnAddDriver').disabled = !selectedCarrier;
+  // Sync the drivers-tab carrier picker
+  const sw = document.getElementById('drvCarrierSwitch');
+  if (sw && selectedCarrier) sw.value = String(selectedCarrier.id);
+  if (selectedCarrier) loadDrivers();
+  // Auto-switch to drivers tab so the user sees the drivers immediately
+  if (selectedCarrier) switchTab('drivers');
+}
+
+// Drivers tab has its own carrier dropdown so users can jump between
+// carriers without bouncing back to the Carriers tab. Kept in sync with
+// selectedCarrier via selectCarrier() above.
+function populateDrvCarrierSwitch() {
+  const sw = document.getElementById('drvCarrierSwitch');
+  if (!sw) return;
+  const current = selectedCarrier ? String(selectedCarrier.id) : '';
+  sw.innerHTML = `<option value="">— เลือก Carrier —</option>` +
+    carriersCache.filter(c => c.active).map(c => `<option value="${c.id}">${c.code} — ${c.name}</option>`).join('');
+  if (current) sw.value = current;
+}
+function onDrvCarrierSwitch() {
+  const id = Number(document.getElementById('drvCarrierSwitch').value);
+  if (!id) {
+    selectedCarrier = null;
+    driversCache = [];
+    document.getElementById('driversFor').textContent = '';
+    document.getElementById('btnAddDriver').disabled = true;
+    document.getElementById('driverBody').innerHTML = `<tr><td colspan="6" class="empty">${t('tms.select_carrier_first')}</td></tr>`;
+    return;
+  }
   selectedCarrier = carriersCache.find(c => c.id === id) || null;
   renderCarriers();
   document.getElementById('driversFor').textContent = selectedCarrier ? ` · ${selectedCarrier.code} ${selectedCarrier.name}` : '';
@@ -469,6 +554,10 @@ async function loadTrips() {
 
 function renderTrips() {
   const el = document.getElementById('tripBody');
+  const badge = document.getElementById('sideTripCount');
+  // Count only non-cancelled trips for the sidebar badge — cancelled trips
+  // are noise in the planner's view of "what's pending."
+  if (badge) badge.textContent = tripsCache.filter(t => t.status !== 'cancelled').length;
   if (!tripsCache.length) {
     el.innerHTML = `<tr><td colspan="9" class="empty">${t('tms.no_trips')}</td></tr>`;
     return;
