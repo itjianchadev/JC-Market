@@ -670,6 +670,11 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
       db.prepare("UPDATE orders SET bc_sync_error=? WHERE id=?").run('[TO] ' + e.message, orderId);
       bcToResult = { ok: false, error: e.message };
     }
+    // TMS shipment row — only if BC TO succeeded.
+    if (bcToResult && bcToResult.bc_to_no) {
+      try { createShipmentForOrder(orderId); }
+      catch (e) { console.error('[checkout → shipment]', e.message); }
+    }
   } else if (orderType === 'jc_purchase') {
     if (defaultVendor) {
       try {
@@ -679,6 +684,11 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
         db.prepare("UPDATE orders SET bc_sync_error=? WHERE id=?").run('[PO] ' + e.message, orderId);
         bcPoResult = { ok: false, error: e.message };
       }
+    }
+    // TMS shipment row — only if BC PO succeeded.
+    if (bcPoResult && bcPoResult.bc_po_no) {
+      try { createShipmentForOrder(orderId); }
+      catch (e) { console.error('[checkout → shipment]', e.message); }
     }
   }
 
@@ -889,6 +899,43 @@ function genReceiptNumber() {
   return prefix + String(seq).padStart(4, '0');
 }
 
+// ─── TMS Phase 1.2: shipment auto-create ───
+// One shipment row per order, created the moment the goods are committed to
+// move out of CTI:
+//   - FC (fc_purchase, any category): on Finance verify approve, after BC SO
+//     succeeds → call from /api/orders/:id/verify.
+//   - JC general (jc_transfer): right after the BC Transfer Order is created
+//     at checkout.
+//   - JC fruit  (jc_purchase): right after the BC Purchase Order is created
+//     at checkout.
+// Idempotent: returns the existing shipment if one already exists for the
+// order (handles retries + repeated verify calls).
+function genShipmentNumber() {
+  const d = new Date();
+  const prefix = `SHP${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+  const last = db.prepare("SELECT shipment_number FROM shipments WHERE shipment_number LIKE ? ORDER BY shipment_number DESC LIMIT 1").get(prefix + '%');
+  const seq = last ? parseInt(last.shipment_number.slice(-4)) + 1 : 1;
+  return prefix + String(seq).padStart(4, '0');
+}
+
+function createShipmentForOrder(orderId, opts = {}) {
+  const existing = db.prepare('SELECT * FROM shipments WHERE order_id=?').get(orderId);
+  if (existing) return { already: true, shipment: existing };
+  const order = db.prepare('SELECT branch_code FROM orders WHERE id=?').get(orderId);
+  if (!order) throw new Error('Order not found: ' + orderId);
+  const shipmentNumber = genShipmentNumber();
+  const r = db.prepare(`INSERT INTO shipments
+    (shipment_number, order_id, origin, dest_branch_code, status, note)
+    VALUES (?,?,?,?,?,?)`).run(
+    shipmentNumber, orderId, opts.origin || 'CTI', order.branch_code,
+    'pending', opts.note || ''
+  );
+  return {
+    already: false,
+    shipment: db.prepare('SELECT * FROM shipments WHERE id=?').get(r.lastInsertRowid),
+  };
+}
+
 // ─── Orders: Finance / Admin verify payment ───
 // Allowed roles: super_admin, admin_scm, finance (all in HQ_ROLES so the
 // requireAdmin middleware catches them). On 'approve' we:
@@ -958,14 +1005,28 @@ app.post('/api/orders/:id/verify', requireAuth, requireAdmin, async (req, res) =
       }
     }
 
+    // TMS shipment row — only if BC SO succeeded (BC SO is the source-of-truth
+    // for the goods that need to move). PO failure does not block shipment
+    // creation: PO is procurement-side, shipment is delivery-side.
+    let shipmentResult = null;
+    if (bcResult && bcResult.bc_so_no) {
+      try {
+        shipmentResult = createShipmentForOrder(order.id);
+      } catch (e) {
+        console.error('[verify approve → shipment]', e.message);
+      }
+    }
+
     const soMsg = bcResult && bcResult.bc_so_no ? ` · BC SO ${bcResult.bc_so_no}` : (bcResult && bcResult.error ? ' · BC SO ค้าง (retry ได้)' : '');
     const poMsg = bcPoResult && bcPoResult.bc_po_no ? ` · BC PO ${bcPoResult.bc_po_no}` : (bcPoResult && bcPoResult.error ? ' · BC PO ค้าง (retry ได้)' : '');
+    const shpMsg = shipmentResult && shipmentResult.shipment ? ` · Shipment ${shipmentResult.shipment.shipment_number}` : '';
     res.json({
       ok: true,
       receipt_number: rcptNo,
       bc_so: bcResult,
       bc_po: bcPoResult,
-      message: `อนุมัติการชำระเงิน · ออกใบเสร็จ ${rcptNo}${soMsg}${poMsg}`,
+      shipment: shipmentResult ? shipmentResult.shipment : null,
+      message: `อนุมัติการชำระเงิน · ออกใบเสร็จ ${rcptNo}${soMsg}${poMsg}${shpMsg}`,
     });
   } else if (action === 'reject') {
     // Finance must give a reason — surfaces back to the FC + saves to the
@@ -2618,6 +2679,59 @@ app.delete('/api/tms/drivers/:id', requireAuth, requireSuperAdmin, (req, res) =>
   const r = db.prepare('DELETE FROM carrier_drivers WHERE id=?').run(req.params.id);
   if (!r.changes) return res.status(404).json({ error: 'Driver not found' });
   res.json({ ok: true });
+});
+
+// ─── Shipments ───
+// Admins / HQ get the full pool. A branch user sees only shipments destined
+// for their own branch (so /my-orders can show tracking without leaking other
+// branches' shipments).
+function shipmentJoinSql(extraWhere = '') {
+  return `
+    SELECT s.*, o.order_number, o.total, o.order_type,
+           b.name as branch_name,
+           t.trip_number, t.scheduled_date as trip_date, t.status as trip_status,
+           c.code as carrier_code, c.name as carrier_name,
+           d.full_name as driver_name, d.phone as driver_phone, d.vehicle_plate
+    FROM shipments s
+    LEFT JOIN orders o ON o.id = s.order_id
+    LEFT JOIN branches b ON b.code = s.dest_branch_code
+    LEFT JOIN trips t ON t.id = s.trip_id
+    LEFT JOIN carriers c ON c.id = t.carrier_id
+    LEFT JOIN carrier_drivers d ON d.id = t.driver_id
+    ${extraWhere}
+  `;
+}
+
+app.get('/api/tms/shipments', requireAuth, (req, res) => {
+  const { status, dest } = req.query;
+  const wheres = [], params = [];
+  if (!isHqAdmin(req.user)) {
+    if (!req.user.branch_code) return res.json([]);
+    wheres.push('s.dest_branch_code = ?'); params.push(req.user.branch_code);
+  } else if (dest) {
+    wheres.push('s.dest_branch_code = ?'); params.push(dest);
+  }
+  if (status) { wheres.push('s.status = ?'); params.push(status); }
+  const where = wheres.length ? `WHERE ${wheres.join(' AND ')}` : '';
+  const rows = db.prepare(shipmentJoinSql(where) + ' ORDER BY s.created_at DESC LIMIT 500').all(...params);
+  res.json(rows);
+});
+
+// Convenience endpoint for the (upcoming Phase 1.3) trip builder — return
+// shipments that don't belong to any trip yet, oldest-first so the admin
+// works through them in arrival order.
+app.get('/api/tms/shipments/unassigned', requireAuth, requireAdmin, (req, res) => {
+  const rows = db.prepare(shipmentJoinSql('WHERE s.trip_id IS NULL AND s.status IN (\'pending\',\'planned\')') + ' ORDER BY s.created_at ASC LIMIT 500').all();
+  res.json(rows);
+});
+
+app.get('/api/tms/shipments/:id', requireAuth, (req, res) => {
+  const row = db.prepare(shipmentJoinSql('WHERE s.id = ?')).get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Shipment not found' });
+  if (!isHqAdmin(req.user) && row.dest_branch_code !== req.user.branch_code) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  res.json(row);
 });
 
 // ─── BC connection test ───
