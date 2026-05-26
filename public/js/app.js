@@ -15,14 +15,32 @@ const I18N = {
     // Nav
     'nav.shop':'ร้านค้า','nav.cart':'ตะกร้า','nav.orders':'คำสั่งซื้อ',
     'nav.stock':'Stock','nav.admin':'Admin','nav.logout':'ออกจากระบบ',
-    'nav.team':'จัดการผู้ใช้',
+    'nav.team':'จัดการผู้ใช้','nav.tms':'ขนส่ง',
     'nav.pending_approvals':'รายการต้องอนุมัติ','nav.approved_list':'รายการที่อนุมัติแล้ว','nav.rejected_list':'ปฏิเสธ',
     // Common
     'common.loading':'กำลังโหลด...','common.close':'ปิด','common.confirm':'ยืนยัน','common.cancel':'ยกเลิก',
     'common.search':'ค้นหา','common.note':'หมายเหตุ','common.no_data':'ยังไม่มีข้อมูล','common.all':'ทั้งหมด',
     'common.qty':'จำนวน','common.item':'สินค้า','common.code':'รหัส','common.price':'ราคา','common.unit':'หน่วย',
-    'common.total':'รวม','common.category':'หมวด','common.save':'บันทึก','common.delete':'ลบ',
+    'common.total':'รวม','common.category':'หมวด','common.save':'บันทึก','common.delete':'ลบ','common.edit':'แก้ไข',
     'common.branch':'สาขา','common.date':'วันที่','common.status':'สถานะ','common.amount':'ยอด',
+    // TMS (Transport / ขนส่ง)
+    'tms.page_title':'ขนส่ง — JC-Market',
+    'tms.carriers':'ผู้ให้บริการขนส่ง (Carriers)','tms.drivers':'คนขับ (Drivers)',
+    'tms.add_carrier':'+ เพิ่ม Carrier','tms.edit_carrier':'แก้ไข Carrier',
+    'tms.add_driver':'+ เพิ่มคนขับ','tms.edit_driver':'แก้ไขคนขับ',
+    'tms.click_carrier_hint':'คลิกแถวเพื่อดูคนขับใต้ Carrier นั้น',
+    'tms.select_carrier_first':'เลือก Carrier ด้านบนก่อน',
+    'tms.no_carriers':'ยังไม่มี Carrier','tms.no_drivers':'ยังไม่มีคนขับใต้ Carrier นี้',
+    'tms.active':'ใช้งาน','tms.inactive':'ปิดใช้งาน',
+    'tms.reset_pw':'รีเซ็ตรหัสผ่าน',
+    'tms.soft_deleted':'ปิดใช้งานแล้ว (มีข้อมูลผูก ไม่ได้ลบจริง)','tms.deleted':'ลบเรียบร้อย',
+    'tms.confirm_delete_carrier':'ลบ Carrier {code} ใช่ไหม?','tms.confirm_delete_driver':'ลบคนขับ {username} ใช่ไหม?',
+    'tms.new_password_for':'รหัสผ่านใหม่สำหรับ {username}:','tms.password_too_short':'รหัสผ่านสั้นเกินไป (ต้อง ≥ 4 ตัว)',
+    'tms.password_reset_ok':'รีเซ็ตรหัสผ่านแล้ว',
+    'tms.col.code':'รหัส','tms.col.name':'ชื่อ','tms.col.phone':'โทร','tms.col.email':'อีเมล',
+    'tms.col.cost_default':'เหมาเที่ยว','tms.col.drivers':'คนขับ','tms.col.status':'สถานะ','tms.col.actions':'จัดการ',
+    'tms.col.username':'Username','tms.col.full_name':'ชื่อ-นามสกุล','tms.col.plate':'ทะเบียนรถ',
+    'tms.col.password':'รหัสผ่าน','tms.col.note':'หมายเหตุ',
     // Login
     'login.title':'🛍️ JC-Market','login.sub':'ระบบสั่งซื้อวัตถุดิบสำหรับสาขา FC',
     'login.username':'Username','login.password':'Password','login.submit':'เข้าสู่ระบบ',
@@ -233,14 +251,32 @@ const I18N = {
     // Nav
     'nav.shop':'Shop','nav.cart':'Cart','nav.orders':'Orders',
     'nav.stock':'Stock','nav.admin':'Admin','nav.logout':'Logout',
-    'nav.team':'Users',
+    'nav.team':'Users','nav.tms':'Transport',
     'nav.pending_approvals':'Pending Approval','nav.approved_list':'Approved','nav.rejected_list':'Rejected',
     // Common
     'common.loading':'Loading...','common.close':'Close','common.confirm':'Confirm','common.cancel':'Cancel',
     'common.search':'Search','common.note':'Note','common.no_data':'No data','common.all':'All',
     'common.qty':'Qty','common.item':'Item','common.code':'Code','common.price':'Price','common.unit':'Unit',
-    'common.total':'Total','common.category':'Category','common.save':'Save','common.delete':'Delete',
+    'common.total':'Total','common.category':'Category','common.save':'Save','common.delete':'Delete','common.edit':'Edit',
     'common.branch':'Branch','common.date':'Date','common.status':'Status','common.amount':'Amount',
+    // TMS (Transport)
+    'tms.page_title':'Transport — JC-Market',
+    'tms.carriers':'Carriers','tms.drivers':'Drivers',
+    'tms.add_carrier':'+ Add Carrier','tms.edit_carrier':'Edit Carrier',
+    'tms.add_driver':'+ Add Driver','tms.edit_driver':'Edit Driver',
+    'tms.click_carrier_hint':'Click a row to see drivers under that carrier',
+    'tms.select_carrier_first':'Select a carrier above first',
+    'tms.no_carriers':'No carriers yet','tms.no_drivers':'No drivers under this carrier yet',
+    'tms.active':'Active','tms.inactive':'Inactive',
+    'tms.reset_pw':'Reset password',
+    'tms.soft_deleted':'Deactivated (linked records — not hard-deleted)','tms.deleted':'Deleted',
+    'tms.confirm_delete_carrier':'Delete carrier {code}?','tms.confirm_delete_driver':'Delete driver {username}?',
+    'tms.new_password_for':'New password for {username}:','tms.password_too_short':'Password too short (min 4 chars)',
+    'tms.password_reset_ok':'Password reset',
+    'tms.col.code':'Code','tms.col.name':'Name','tms.col.phone':'Phone','tms.col.email':'Email',
+    'tms.col.cost_default':'Trip cost','tms.col.drivers':'Drivers','tms.col.status':'Status','tms.col.actions':'Actions',
+    'tms.col.username':'Username','tms.col.full_name':'Full name','tms.col.plate':'Plate',
+    'tms.col.password':'Password','tms.col.note':'Note',
     // Login
     'login.title':'🛍️ JC-Market','login.sub':'Raw-material ordering system for FC branches',
     'login.username':'Username','login.password':'Password','login.submit':'Sign In',
@@ -607,6 +643,7 @@ const NAV_ICONS = {
   'nav.orders':            `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4v3h6V4"/><path d="M9 12h6"/><path d="M9 16h4"/></svg>`,
   'nav.stock':             `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73L13 2.27a2 2 0 0 0-2 0L4 6.27A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73L11 21.73a2 2 0 0 0 2 0L20 17.73A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>`,
   'nav.team':              `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
+  'nav.tms':               `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 17h4V5H2v12h3"/><path d="M20 17h2v-3.34a4 4 0 0 0-1.17-2.83L19 9h-5v8h2"/><circle cx="7.5" cy="17.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/></svg>`,
   'nav.admin':             `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>`,
   'nav.pending_approvals': `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`,
   'nav.approved_list':     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>`,
@@ -641,6 +678,7 @@ function renderNav(active) {
     links.push(['stock-balance.html','nav.stock']);
   }
   if (!isFinance && (isHq || u.role === 'branch_owner')) links.push(['team.html','nav.team']);
+  if (!isFinance && isHq) links.push(['tms-admin.html','nav.tms']);
   if (!isFinance && isHq) links.push(['admin.html','nav.admin']);
   const lang = getLang();
   const otherLang = lang === 'th' ? 'en' : 'th';
