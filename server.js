@@ -2734,6 +2734,178 @@ app.get('/api/tms/shipments/:id', requireAuth, (req, res) => {
   res.json(row);
 });
 
+// ─── Trips (Phase 1.3 — admin trip builder) ───
+// A Trip = one carrier vehicle on one date carrying multiple shipments
+// (stops). Created by HQ admin after picking shipments from the unassigned
+// pool. Once dispatched (Phase 1.4 driver PWA flips it), the trip is
+// effectively read-only here — the planner can still cancel + re-plan
+// the un-dispatched leg.
+function genTripNumber() {
+  const d = new Date();
+  const prefix = `TRP${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+  const last = db.prepare("SELECT trip_number FROM trips WHERE trip_number LIKE ? ORDER BY trip_number DESC LIMIT 1").get(prefix + '%');
+  const seq = last ? parseInt(last.trip_number.slice(-4)) + 1 : 1;
+  return prefix + String(seq).padStart(4, '0');
+}
+
+function tripJoinSql(extraWhere = '') {
+  return `
+    SELECT t.*,
+           c.code as carrier_code, c.name as carrier_name,
+           d.username as driver_username, d.full_name as driver_name, d.phone as driver_phone,
+           (SELECT COUNT(*) FROM shipments s WHERE s.trip_id = t.id) as stop_count
+    FROM trips t
+    LEFT JOIN carriers c ON c.id = t.carrier_id
+    LEFT JOIN carrier_drivers d ON d.id = t.driver_id
+    ${extraWhere}
+  `;
+}
+
+app.get('/api/tms/trips', requireAuth, requireAdmin, (req, res) => {
+  const { date, status, carrier_id } = req.query;
+  const wheres = [], params = [];
+  if (date) { wheres.push('t.scheduled_date = ?'); params.push(date); }
+  if (status) { wheres.push('t.status = ?'); params.push(status); }
+  if (carrier_id) { wheres.push('t.carrier_id = ?'); params.push(carrier_id); }
+  const where = wheres.length ? `WHERE ${wheres.join(' AND ')}` : '';
+  const rows = db.prepare(tripJoinSql(where) + ' ORDER BY t.scheduled_date DESC, t.id DESC LIMIT 500').all(...params);
+  res.json(rows);
+});
+
+app.get('/api/tms/trips/:id', requireAuth, requireAdmin, (req, res) => {
+  const trip = db.prepare(tripJoinSql('WHERE t.id = ?')).get(req.params.id);
+  if (!trip) return res.status(404).json({ error: 'Trip not found' });
+  const stops = db.prepare(`
+    SELECT s.id, s.shipment_number, s.order_id, s.dest_branch_code, s.stop_seq, s.status,
+           s.delivered_at, o.order_number, b.name as branch_name
+    FROM shipments s
+    LEFT JOIN orders o ON o.id = s.order_id
+    LEFT JOIN branches b ON b.code = s.dest_branch_code
+    WHERE s.trip_id = ?
+    ORDER BY s.stop_seq ASC, s.id ASC
+  `).all(req.params.id);
+  trip.stops = stops;
+  res.json(trip);
+});
+
+// Create trip + atomically assign shipments. shipment_ids[] is required;
+// each must currently be unassigned + 'pending' (otherwise abort the tx).
+app.post('/api/tms/trips', requireAuth, requireAdmin, (req, res) => {
+  const { carrier_id, driver_id = null, vehicle_plate = '', scheduled_date,
+          cost_agreed = 0, note = '', shipment_ids = [] } = req.body || {};
+  if (!carrier_id || !scheduled_date) return res.status(400).json({ error: 'carrier_id และ scheduled_date จำเป็น' });
+  if (!Array.isArray(shipment_ids) || !shipment_ids.length) return res.status(400).json({ error: 'ต้องเลือก shipment อย่างน้อย 1 รายการ' });
+  if (!db.prepare('SELECT 1 FROM carriers WHERE id=?').get(carrier_id)) return res.status(404).json({ error: 'Carrier ไม่พบ' });
+  if (driver_id) {
+    const d = db.prepare('SELECT carrier_id FROM carrier_drivers WHERE id=?').get(driver_id);
+    if (!d) return res.status(404).json({ error: 'Driver ไม่พบ' });
+    if (d.carrier_id !== Number(carrier_id)) return res.status(400).json({ error: 'Driver ไม่ได้สังกัด Carrier นี้' });
+  }
+  const tripNumber = genTripNumber();
+  try {
+    const tripId = db.transaction(() => {
+      const r = db.prepare(`INSERT INTO trips (trip_number, carrier_id, driver_id, vehicle_plate, scheduled_date, cost_agreed, note, created_by)
+        VALUES (?,?,?,?,?,?,?,?)`).run(tripNumber, carrier_id, driver_id, vehicle_plate, scheduled_date, Number(cost_agreed)||0, note, req.user.id);
+      const newTripId = r.lastInsertRowid;
+      const checkStmt = db.prepare("SELECT id, trip_id, status FROM shipments WHERE id=?");
+      const assignStmt = db.prepare("UPDATE shipments SET trip_id=?, stop_seq=?, status='planned' WHERE id=?");
+      let seq = 1;
+      for (const sid of shipment_ids) {
+        const s = checkStmt.get(sid);
+        if (!s) throw new Error(`Shipment ${sid} ไม่พบ`);
+        if (s.trip_id) throw new Error(`Shipment ${sid} ผูกกับ trip อื่นอยู่แล้ว`);
+        if (s.status !== 'pending') throw new Error(`Shipment ${sid} status = ${s.status} (ต้อง pending)`);
+        assignStmt.run(newTripId, seq++, sid);
+      }
+      return newTripId;
+    })();
+    const trip = db.prepare(tripJoinSql('WHERE t.id=?')).get(tripId);
+    res.json({ ok: true, trip });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// Update trip header. Cannot mutate shipment list here — use the dedicated
+// /shipments endpoint below. status changes are gated: can't move out of
+// 'dispatched' or 'completed' from here (those are driver-PWA-driven).
+app.put('/api/tms/trips/:id', requireAuth, requireAdmin, (req, res) => {
+  const trip = db.prepare('SELECT * FROM trips WHERE id=?').get(req.params.id);
+  if (!trip) return res.status(404).json({ error: 'Trip not found' });
+  if (trip.status !== 'planned') return res.status(400).json({ error: `แก้ไม่ได้ — สถานะ trip = ${trip.status}` });
+  const fields = ['driver_id', 'vehicle_plate', 'scheduled_date', 'cost_agreed', 'note'];
+  const sets = [], vals = [];
+  for (const f of fields) {
+    if (f in (req.body || {})) {
+      let v = req.body[f];
+      if (f === 'cost_agreed') v = Number(v) || 0;
+      if (f === 'driver_id' && v === '') v = null;
+      sets.push(`${f}=?`); vals.push(v);
+    }
+  }
+  if (!sets.length) return res.json({ ok: true, noop: true });
+  // Driver sanity check
+  if ('driver_id' in (req.body || {}) && req.body.driver_id) {
+    const d = db.prepare('SELECT carrier_id FROM carrier_drivers WHERE id=?').get(req.body.driver_id);
+    if (!d) return res.status(404).json({ error: 'Driver ไม่พบ' });
+    if (d.carrier_id !== trip.carrier_id) return res.status(400).json({ error: 'Driver ไม่ได้สังกัด Carrier ของ trip นี้' });
+  }
+  vals.push(req.params.id);
+  db.prepare(`UPDATE trips SET ${sets.join(', ')} WHERE id=?`).run(...vals);
+  res.json({ ok: true });
+});
+
+// Add / remove shipments after a trip exists. Add: shipment must be in the
+// unassigned pool. Remove: shipment goes back to status='pending', trip_id=NULL.
+app.post('/api/tms/trips/:id/shipments', requireAuth, requireAdmin, (req, res) => {
+  const trip = db.prepare('SELECT * FROM trips WHERE id=?').get(req.params.id);
+  if (!trip) return res.status(404).json({ error: 'Trip not found' });
+  if (trip.status !== 'planned') return res.status(400).json({ error: `แก้ไม่ได้ — สถานะ trip = ${trip.status}` });
+  const { shipment_ids = [] } = req.body || {};
+  if (!Array.isArray(shipment_ids) || !shipment_ids.length) return res.status(400).json({ error: 'shipment_ids ต้องเป็น array' });
+  try {
+    db.transaction(() => {
+      // Continue numbering after current max stop_seq.
+      const max = db.prepare("SELECT COALESCE(MAX(stop_seq),0) m FROM shipments WHERE trip_id=?").get(req.params.id).m;
+      let seq = max + 1;
+      const checkStmt = db.prepare("SELECT id, trip_id, status FROM shipments WHERE id=?");
+      const assignStmt = db.prepare("UPDATE shipments SET trip_id=?, stop_seq=?, status='planned' WHERE id=?");
+      for (const sid of shipment_ids) {
+        const s = checkStmt.get(sid);
+        if (!s) throw new Error(`Shipment ${sid} ไม่พบ`);
+        if (s.trip_id) throw new Error(`Shipment ${sid} ผูกกับ trip อื่นอยู่แล้ว`);
+        if (s.status !== 'pending') throw new Error(`Shipment ${sid} status = ${s.status} (ต้อง pending)`);
+        assignStmt.run(req.params.id, seq++, sid);
+      }
+    })();
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.delete('/api/tms/trips/:id/shipments/:shipmentId', requireAuth, requireAdmin, (req, res) => {
+  const trip = db.prepare('SELECT * FROM trips WHERE id=?').get(req.params.id);
+  if (!trip) return res.status(404).json({ error: 'Trip not found' });
+  if (trip.status !== 'planned') return res.status(400).json({ error: `แก้ไม่ได้ — สถานะ trip = ${trip.status}` });
+  const r = db.prepare("UPDATE shipments SET trip_id=NULL, stop_seq=0, status='pending' WHERE id=? AND trip_id=?").run(req.params.shipmentId, req.params.id);
+  if (!r.changes) return res.status(404).json({ error: 'Shipment ไม่ได้อยู่ใน trip นี้' });
+  res.json({ ok: true });
+});
+
+// Cancel a trip — flips status='cancelled' and frees its shipments back to
+// the unassigned pool. We avoid hard-delete so audit history stays.
+app.delete('/api/tms/trips/:id', requireAuth, requireAdmin, (req, res) => {
+  const trip = db.prepare('SELECT * FROM trips WHERE id=?').get(req.params.id);
+  if (!trip) return res.status(404).json({ error: 'Trip not found' });
+  if (trip.status === 'dispatched' || trip.status === 'completed') {
+    return res.status(400).json({ error: `ยกเลิกไม่ได้ — trip ${trip.status} ไปแล้ว` });
+  }
+  db.transaction(() => {
+    db.prepare("UPDATE shipments SET trip_id=NULL, stop_seq=0, status='pending' WHERE trip_id=?").run(req.params.id);
+    db.prepare("UPDATE trips SET status='cancelled' WHERE id=?").run(req.params.id);
+  })();
+  res.json({ ok: true, cancelled: true });
+});
+
 // ─── BC connection test ───
 app.get('/api/bc/status', requireAuth, requireAdmin, async (req, res) => {
   try {
