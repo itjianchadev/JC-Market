@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const multer = require('multer');
 const db = require('./db');
 const bcrypt = require('bcryptjs');
-const { login, requireAuth, requireAdmin, requireSuperAdmin, canManageBranch, isHqAdmin, isSuperAdmin, HQ_ROLES, BRANCH_ROLES, driverLogin, requireDriver } = require('./auth');
+const { login, requireAuth, requireAdmin, requireSuperAdmin, canManageBranch, isHqAdmin, isSuperAdmin, HQ_ROLES, BRANCH_ROLES, driverLogin, requireDriver, normalizePhone } = require('./auth');
 const bc = require('./bc-client');
 const { syncItems, getLastSync } = require('./sync');
 const { generateQR } = require('./qr');
@@ -2616,42 +2616,58 @@ app.delete('/api/tms/carriers/:id', requireAuth, requireSuperAdmin, (req, res) =
 // ─── Carrier drivers ───
 // List drivers of a carrier (admin only).
 app.get('/api/tms/carriers/:id/drivers', requireAuth, requireAdmin, (req, res) => {
-  const rows = db.prepare('SELECT id, carrier_id, username, full_name, phone, vehicle_plate, active, created_at FROM carrier_drivers WHERE carrier_id=? ORDER BY username').all(req.params.id);
+  const rows = db.prepare('SELECT id, carrier_id, username, full_name, phone, vehicle_plate, vehicle_province, active, created_at FROM carrier_drivers WHERE carrier_id=? ORDER BY username').all(req.params.id);
   for (const d of rows) d.active = !!d.active;
   res.json(rows);
 });
 
 app.post('/api/tms/carriers/:id/drivers', requireAuth, requireAdmin, (req, res) => {
   const carrierId = req.params.id;
-  const { username, password, full_name, phone = '', vehicle_plate = '' } = req.body || {};
-  if (!username || !password || !full_name) return res.status(400).json({ error: 'username/password/full_name required' });
+  const { username, full_name, phone = '', vehicle_plate = '', vehicle_province = '' } = req.body || {};
+  if (!username || !full_name) return res.status(400).json({ error: 'username/full_name required' });
+  const normalizedPhone = normalizePhone(phone);
+  if (!normalizedPhone) return res.status(400).json({ error: 'phone required (เบอร์มือถือ ใช้ login)' });
   if (!db.prepare('SELECT 1 FROM carriers WHERE id=?').get(carrierId)) {
     return res.status(404).json({ error: 'Carrier not found' });
   }
   if (db.prepare('SELECT 1 FROM carrier_drivers WHERE username=?').get(username)) {
     return res.status(400).json({ error: 'Driver username already exists' });
   }
-  // Driver usernames must NOT collide with regular users either — JC-Market
-  // single sign-in surface today is /api/login (users table). Phase 1.4 will
-  // add /api/tms/driver/login; keeping these two namespaces disjoint avoids
-  // accidental cross-login. Cheap guard for now.
+  // Driver usernames must NOT collide with regular users — login surfaces
+  // are separate, but username doubles as a display identifier in admin UI
+  // and we keep them disjoint to avoid future ambiguity.
   if (db.prepare('SELECT 1 FROM users WHERE username=?').get(username)) {
     return res.status(400).json({ error: 'Username already used by a regular user' });
   }
-  const r = db.prepare(`INSERT INTO carrier_drivers (carrier_id, username, password, full_name, phone, vehicle_plate)
-    VALUES (?,?,?,?,?,?)`).run(carrierId, username, bcrypt.hashSync(password, 10), full_name, phone, vehicle_plate);
+  if (db.prepare("SELECT 1 FROM carrier_drivers WHERE phone=? AND phone<>''").get(normalizedPhone)) {
+    return res.status(400).json({ error: 'เบอร์โทรนี้มี driver ใช้แล้ว' });
+  }
+  // password column is NOT NULL in schema but no longer used by the login
+  // flow. Stuff in random bytes so the column stays satisfied and is
+  // useless to attackers.
+  const dummy = bcrypt.hashSync(crypto.randomUUID(), 10);
+  const r = db.prepare(`INSERT INTO carrier_drivers (carrier_id, username, password, full_name, phone, vehicle_plate, vehicle_province)
+    VALUES (?,?,?,?,?,?,?)`).run(carrierId, username, dummy, full_name, normalizedPhone, vehicle_plate, vehicle_province);
   res.json({ ok: true, id: r.lastInsertRowid });
 });
 
 app.put('/api/tms/drivers/:id', requireAuth, requireAdmin, (req, res) => {
   const d = db.prepare('SELECT * FROM carrier_drivers WHERE id=?').get(req.params.id);
   if (!d) return res.status(404).json({ error: 'Driver not found' });
-  const fields = ['full_name', 'phone', 'vehicle_plate', 'active'];
+  const fields = ['full_name', 'phone', 'vehicle_plate', 'vehicle_province', 'active'];
   const sets = [], vals = [];
   for (const f of fields) {
     if (f in (req.body || {})) {
-      sets.push(`${f}=?`);
-      vals.push(f === 'active' ? (req.body[f] ? 1 : 0) : req.body[f]);
+      let v = req.body[f];
+      if (f === 'active') v = v ? 1 : 0;
+      else if (f === 'phone') {
+        v = normalizePhone(v);
+        if (!v) return res.status(400).json({ error: 'phone required' });
+        // Block duplicates against any OTHER driver.
+        const dup = db.prepare("SELECT id FROM carrier_drivers WHERE phone=? AND phone<>'' AND id<>?").get(v, req.params.id);
+        if (dup) return res.status(400).json({ error: 'เบอร์โทรนี้มี driver ใช้แล้ว' });
+      }
+      sets.push(`${f}=?`); vals.push(v);
     }
   }
   if (sets.length) {
@@ -2661,12 +2677,10 @@ app.put('/api/tms/drivers/:id', requireAuth, requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+// password reset endpoint — kept as a no-op for back-compat with any old
+// client. Returns 410 (Gone) so callers update to the new phone flow.
 app.post('/api/tms/drivers/:id/reset-password', requireAuth, requireAdmin, (req, res) => {
-  const { password } = req.body || {};
-  if (!password || password.length < 4) return res.status(400).json({ error: 'password too short' });
-  const r = db.prepare('UPDATE carrier_drivers SET password=? WHERE id=?').run(bcrypt.hashSync(password, 10), req.params.id);
-  if (!r.changes) return res.status(404).json({ error: 'Driver not found' });
-  res.json({ ok: true });
+  res.status(410).json({ error: 'ระบบเปลี่ยนเป็น phone-based login แล้ว — แก้เบอร์โทรที่ Edit driver แทน' });
 });
 
 app.delete('/api/tms/drivers/:id', requireAuth, requireSuperAdmin, (req, res) => {
@@ -2912,16 +2926,16 @@ app.delete('/api/tms/trips/:id', requireAuth, requireAdmin, (req, res) => {
 // driver's own carrier so one carrier's driver can never see another
 // carrier's trips/stops.
 app.post('/api/tms/driver/login', (req, res) => {
-  const { username, password } = req.body || {};
-  if (!username || !password) return res.status(400).json({ error: 'username/password required' });
-  const r = driverLogin(username, password);
-  if (!r) return res.status(401).json({ error: 'Invalid credentials' });
+  const { phone } = req.body || {};
+  if (!phone) return res.status(400).json({ error: 'phone required' });
+  const r = driverLogin(phone);
+  if (!r) return res.status(401).json({ error: 'ไม่พบเบอร์นี้ในระบบ' });
   res.json(r);
 });
 
 app.get('/api/tms/driver/me', requireDriver, (req, res) => {
   const d = db.prepare(`
-    SELECT d.id, d.username, d.full_name, d.phone, d.vehicle_plate, d.active,
+    SELECT d.id, d.username, d.full_name, d.phone, d.vehicle_plate, d.vehicle_province, d.active,
            d.carrier_id, c.code as carrier_code, c.name as carrier_name
     FROM carrier_drivers d
     LEFT JOIN carriers c ON c.id = d.carrier_id

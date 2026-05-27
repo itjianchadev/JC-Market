@@ -541,6 +541,28 @@ CREATE INDEX IF NOT EXISTS idx_trips_driver ON trips(driver_id);
 CREATE INDEX IF NOT EXISTS idx_pings_trip_time ON driver_pings(trip_id, recorded_at);
 `);
 
+// ─── Driver vehicle metadata ───
+// Province where the vehicle is registered (จังหวัดทะเบียนรถ). Optional
+// free-text — drivers may swap vehicles between trips, so this is the
+// driver's "default vehicle" tagging; the per-trip plate on trips.vehicle_plate
+// still wins when a particular run uses a different vehicle.
+try { db.exec("ALTER TABLE carrier_drivers ADD COLUMN vehicle_province TEXT DEFAULT ''"); } catch (e) { /* already exists */ }
+
+// ─── Driver login is phone-based (Phase 1.4b) ───
+// Normalize stored phones to digits-only so users can enter "081-234-5678",
+// "081 234 5678", "+66812345678" and we still find the row.
+// Then enforce uniqueness so a duplicate phone can never make login
+// ambiguous. Partial index — empty phone (legacy / not yet set) is allowed
+// to repeat.
+try {
+  db.exec(`UPDATE carrier_drivers
+    SET phone = REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone, '-', ''), ' ', ''), '+', ''), '(', ''), ')', ''), '.', '')
+    WHERE phone <> '' AND phone GLOB '*[^0-9]*'`);
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_carrier_drivers_phone_uniq ON carrier_drivers(phone) WHERE phone <> ''");
+} catch (e) {
+  console.error('[db] driver phone unique index failed (duplicates?):', e.message);
+}
+
 // Seed a sample carrier + driver so admins can exercise the UI on day 1.
 // Idempotent: skipped if any carrier exists. Default password is 'drv1234' —
 // change after first login (driver PWA exposes /api/tms/driver/me/password later).
@@ -552,8 +574,8 @@ try {
     const c1 = insC.run('DEMO-LOG', 'Demo Logistics (ตัวอย่าง)', '02-000-0000', 1500, 'sample carrier — replace with real one');
     const insD = db.prepare(`INSERT INTO carrier_drivers (carrier_id, username, password, full_name, phone, vehicle_plate)
       VALUES (?,?,?,?,?,?)`);
-    insD.run(c1.lastInsertRowid, 'driver01', bcrypt.hashSync('drv1234', 10), 'คนขับ ตัวอย่าง 1', '081-000-0001', 'กข-1234');
-    console.log('[db] Seeded TMS carrier DEMO-LOG + driver01/drv1234');
+    insD.run(c1.lastInsertRowid, 'driver01', bcrypt.hashSync('drv1234', 10), 'คนขับ ตัวอย่าง 1', '0810000001', 'กข-1234');
+    console.log('[db] Seeded TMS carrier DEMO-LOG + driver01 (phone 0810000001)');
   }
 } catch (e) { console.error('[db] TMS seed failed:', e.message); }
 

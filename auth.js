@@ -90,17 +90,33 @@ function requireSuperAdmin(req, res, next) {
 // Drivers live in the separate carrier_drivers table and never reach the
 // regular `users` surface. They authenticate via /api/tms/driver/login and
 // carry a JWT with kind='driver' so the wrong middleware refuses them.
+//
+// Login is phone-number only (no password). carrier_drivers.phone has a
+// partial unique index — see db.js — so an ambiguous match can't happen.
+// All stored phones are pre-normalized to digits-only; we apply the same
+// normaliser to the user's input so common formats ("081-234-5678",
+// "081 234 5678", "+66 81 234 5678") all reach the same row.
 const DRIVER_EXPIRES = '7d';
 
-function driverLogin(username, password) {
+function normalizePhone(s) {
+  let n = String(s || '').replace(/[^0-9]/g, '');
+  // Thai mobile international form 66XXXXXXXXX → local 0XXXXXXXXX so the
+  // same physical number stays a single row regardless of which way the
+  // driver types it.
+  if (n.length === 11 && n.startsWith('66')) n = '0' + n.slice(2);
+  return n;
+}
+
+function driverLogin(phone) {
+  const normalized = normalizePhone(phone);
+  if (!normalized) return null;
   const driver = db.prepare(`
     SELECT d.*, c.code as carrier_code, c.name as carrier_name
     FROM carrier_drivers d
     LEFT JOIN carriers c ON c.id = d.carrier_id
-    WHERE d.username = ? AND d.active = 1
-  `).get(username);
+    WHERE d.phone = ? AND d.active = 1
+  `).get(normalized);
   if (!driver) return null;
-  if (!bcrypt.compareSync(password, driver.password)) return null;
   const token = jwt.sign({
     kind: 'driver',
     id: driver.id,
@@ -116,6 +132,7 @@ function driverLogin(username, password) {
       full_name: driver.full_name,
       phone: driver.phone,
       vehicle_plate: driver.vehicle_plate,
+      vehicle_province: driver.vehicle_province || '',
       carrier_id: driver.carrier_id,
       carrier_code: driver.carrier_code,
       carrier_name: driver.carrier_name,
@@ -141,4 +158,4 @@ function requireDriver(req, res, next) {
   }
 }
 
-module.exports = { login, requireAuth, requireAdmin, requireSuperAdmin, canManageBranch, requireBranchManage, isHqAdmin, isSuperAdmin, HQ_ROLES, BRANCH_ROLES, SECRET, driverLogin, requireDriver };
+module.exports = { login, requireAuth, requireAdmin, requireSuperAdmin, canManageBranch, requireBranchManage, isHqAdmin, isSuperAdmin, HQ_ROLES, BRANCH_ROLES, SECRET, driverLogin, requireDriver, normalizePhone };
