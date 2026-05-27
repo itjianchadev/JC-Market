@@ -79,9 +79,38 @@ body{padding-bottom:env(safe-area-inset-bottom)}
 
 .empty{text-align:center;color:var(--muted);padding:40px 20px;font-size:14px}
 .spinner{text-align:center;padding:30px;color:var(--muted)}
-.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--text);color:#fff;padding:10px 16px;border-radius:8px;font-size:13px;z-index:1000;box-shadow:0 4px 12px rgba(0,0,0,.2)}
+/* Toast pushed up so it doesn't hide behind the bottom nav (64px tall). */
+.toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:var(--text);color:#fff;padding:10px 16px;border-radius:8px;font-size:13px;z-index:1000;box-shadow:0 4px 12px rgba(0,0,0,.2)}
 
-/* POD modal */
+/* Items expansion in stop card */
+.stop .items-toggle{margin-top:10px;padding:6px 10px;background:var(--beige);border:none;border-radius:6px;font-family:inherit;font-size:12px;color:var(--gold-dark);font-weight:600;cursor:pointer;width:100%;text-align:left;display:flex;align-items:center;gap:6px}
+.stop .items-toggle .chev{transition:transform .2s}
+.stop .items-toggle.open .chev{transform:rotate(90deg)}
+.stop .items-list{display:none;margin-top:8px;padding:8px 10px;background:#fafafa;border-radius:6px;font-size:12px}
+.stop .items-list.open{display:block}
+.stop .items-list table{width:100%;border-collapse:collapse}
+.stop .items-list th{text-align:left;padding:4px 6px;color:var(--muted);font-weight:600;font-size:10px;text-transform:uppercase;border-bottom:1px solid var(--border)}
+.stop .items-list td{padding:5px 6px;border-bottom:1px solid var(--border)}
+.stop .items-list td.num{text-align:right;font-variant-numeric:tabular-nums}
+.stop .items-list tr:last-child td{border-bottom:none}
+.stop .items-list .total-row td{font-weight:700;background:var(--beige)}
+
+/* Bottom tab bar */
+.bottom-nav{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid var(--border);display:flex;z-index:100;padding-bottom:env(safe-area-inset-bottom);box-shadow:0 -2px 8px rgba(0,0,0,.04)}
+.bottom-nav .item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:8px 4px;background:none;border:none;color:var(--muted);font-family:inherit;font-size:11px;font-weight:600;cursor:pointer;transition:color .15s}
+.bottom-nav .item.active{color:var(--gold-dark)}
+.bottom-nav .item svg{width:22px;height:22px}
+#mainView{padding-bottom:64px}
+
+/* History list */
+.hist-card{background:#fff;border:1px solid var(--border);border-radius:12px;padding:12px 14px;margin-bottom:8px;cursor:pointer;transition:background .15s}
+.hist-card:active{background:var(--beige)}
+.hist-card .row1{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.hist-card .tno{font-weight:700;font-size:13px}
+.hist-card .date{color:var(--muted);font-size:11px}
+.hist-card .row2{display:flex;justify-content:space-between;font-size:12px;color:var(--muted)}
+
+/* POD modal (Phase 1.4b) */
 .pod-modal{position:fixed;inset:0;background:rgba(42,33,24,.6);z-index:1000;display:none;align-items:flex-start;justify-content:center;overflow-y:auto;padding:16px}
 .pod-modal .box{background:var(--card);border-radius:14px;padding:16px;max-width:500px;width:100%;position:relative;margin-top:20px}
 .pod-modal h3{margin:0 0 12px;color:var(--gold-dark);font-size:16px;display:flex;align-items:center;gap:8px}
@@ -129,8 +158,27 @@ body{padding-bottom:env(safe-area-inset-bottom)}
   </div>
   <div class="wrap">
     <div id="driverCard"></div>
-    <div id="content" class="spinner">กำลังโหลด…</div>
+    <!-- Today panel -->
+    <div id="todayPanel">
+      <div id="content" class="spinner">กำลังโหลด…</div>
+    </div>
+    <!-- History panel -->
+    <div id="historyPanel" style="display:none">
+      <h3 style="font-size:14px;color:var(--gold-dark);margin:8px 0 14px">📋 ประวัติงานล่าสุด</h3>
+      <div id="historyList" class="spinner">กำลังโหลด…</div>
+    </div>
   </div>
+  <!-- Bottom nav -->
+  <nav class="bottom-nav">
+    <button class="item active" id="navToday" onclick="switchView('today')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+      <span>วันนี้</span>
+    </button>
+    <button class="item" id="navHistory" onclick="switchView('history')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3 2"/></svg>
+      <span>ประวัติ</span>
+    </button>
+  </nav>
 </div>
 
 <!-- POD upload modal -->
@@ -302,8 +350,11 @@ function renderProfileCard(d) {
 const STATUS_PILL = {
   pending:    { cls:'pill-pending',    label:'รอจัดส่ง' },
   planned:    { cls:'pill-planned',    label:'รอออกรถ' },
+  dispatched: { cls:'pill-dispatched', label:'อยู่ระหว่างขนส่ง' },
   intransit:  { cls:'pill-dispatched', label:'อยู่ระหว่างขนส่ง' },
+  completed:  { cls:'pill-delivered',  label:'ส่งครบ' },
   delivered:  { cls:'pill-delivered',  label:'ส่งแล้ว' },
+  cancelled:  { cls:'pill-pending',    label:'ยกเลิก' },
   failed:     { cls:'pill-failed',     label:'ส่งไม่สำเร็จ' },
 };
 
@@ -368,6 +419,8 @@ function renderTrip(trip) {
 
     ${(trip.stops || []).map(s => {
       const sp = STATUS_PILL[s.status] || STATUS_PILL.pending;
+      const lines = s.lines || [];
+      const lineCount = lines.length;
       const canDeliver = isDispatched && s.status === 'intransit';
       const pod = s.pod || null;
       return `
@@ -382,10 +435,25 @@ function renderTrip(trip) {
             <span class="order-no">${s.order_number || s.shipment_number}</span>
             <span class="pill ${sp.cls}">${sp.label}</span>
           </div>
+          ${lineCount ? `
+          <button type="button" class="items-toggle" onclick="toggleItems(this)">
+            <svg class="chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+            <span>ดูรายการสินค้า (${lineCount})</span>
+            ${s.total ? `<span style="margin-left:auto;color:var(--gold-dark)">฿${(s.total || 0).toLocaleString()}</span>` : ''}
+          </button>
+          <div class="items-list">
+            <table>
+              <thead><tr><th>รหัส</th><th>สินค้า</th><th style="text-align:right">จำนวน</th><th style="text-align:right">รวม</th></tr></thead>
+              <tbody>
+                ${lines.map(l => `<tr><td>${l.item_no}</td><td>${l.item_name}</td><td class="num">${l.quantity}</td><td class="num">฿${(l.line_total || 0).toLocaleString()}</td></tr>`).join('')}
+                <tr class="total-row"><td colspan="3" style="text-align:right">รวม</td><td class="num">฿${(s.total || 0).toLocaleString()}</td></tr>
+              </tbody>
+            </table>
+          </div>` : ''}
           ${pod ? `
           <div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--border);display:flex;gap:10px;align-items:center">
             ${pod.photo_url ? `<a href="${pod.photo_url}" target="_blank"><img src="${pod.photo_url}" style="width:64px;height:64px;object-fit:cover;border-radius:8px"></a>` : ''}
-            ${pod.signature_url ? `<img src="${pod.signature_url}" style="width:90px;height:48px;object-fit:contain;background:#fafafa;border-radius:6px"></a>` : ''}
+            ${pod.signature_url ? `<img src="${pod.signature_url}" style="width:90px;height:48px;object-fit:contain;background:#fafafa;border-radius:6px">` : ''}
             <div style="flex:1;font-size:11px;color:var(--muted)">
               ${pod.signed_by_name ? `<div>โดย: ${pod.signed_by_name}</div>` : ''}
               <div>${pod.received_at}</div>
@@ -396,6 +464,62 @@ function renderTrip(trip) {
       </div>`;
     }).join('') || '<div class="empty">ไม่มีจุดส่งใน trip นี้</div>'}
   `;
+}
+
+// Items section per stop — expand/collapse without re-rendering the trip.
+function toggleItems(btn) {
+  btn.classList.toggle('open');
+  const list = btn.nextElementSibling;
+  if (list) list.classList.toggle('open');
+}
+
+// ─── Bottom tab nav ───────────────────────────────────────────────────────
+function switchView(view) {
+  document.getElementById('todayPanel').style.display   = view === 'today'   ? 'block' : 'none';
+  document.getElementById('historyPanel').style.display = view === 'history' ? 'block' : 'none';
+  document.getElementById('navToday').classList.toggle('active', view === 'today');
+  document.getElementById('navHistory').classList.toggle('active', view === 'history');
+  if (view === 'history') loadHistory();
+}
+
+// ─── History ──────────────────────────────────────────────────────────────
+async function loadHistory() {
+  const root = document.getElementById('historyList');
+  root.innerHTML = '<div class="spinner">กำลังโหลด…</div>';
+  try {
+    const rows = await api('/api/tms/driver/history');
+    if (!rows.length) {
+      root.innerHTML = '<div class="empty">ยังไม่มีประวัติงาน</div>';
+      return;
+    }
+    root.innerHTML = rows.map(t => {
+      const sp = STATUS_PILL[t.status] || STATUS_PILL.pending;
+      return `
+        <div class="hist-card" onclick="viewTripDetail(${t.id})">
+          <div class="row1">
+            <span class="tno">${t.trip_number}</span>
+            <span class="pill ${sp.cls}">${sp.label}</span>
+          </div>
+          <div class="row2">
+            <span>📅 ${t.scheduled_date}</span>
+            <span>📍 ส่งครบ ${t.delivered_count || 0}/${t.stop_count || 0} จุด</span>
+          </div>
+        </div>`;
+    }).join('');
+  } catch (e) {
+    root.innerHTML = `<div class="empty" style="color:var(--err)">${e.message}</div>`;
+  }
+}
+
+// Open a single past trip in the today view (read-only).
+async function viewTripDetail(id) {
+  try {
+    const trip = await api(`/api/tms/driver/trips/${id}`);
+    renderTrip(trip);
+    switchView('today');
+    // Top of page so the new content is visible above the bottom nav.
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  } catch (e) { toast(e.message); }
 }
 
 // ─── Dispatch ────────────────────────────────────────────────────────────
@@ -513,10 +637,6 @@ async function submitPod(e) {
   const form = e.target;
   const file = form.photo.files[0];
   if (!file) { document.getElementById('podErr').textContent = 'กรุณาถ่ายรูปสินค้า'; return false; }
-  // Pull the signature image data — but only if the canvas actually has
-  // strokes. Empty canvas → transparent PNG → server still writes a file.
-  // We can't easily detect "untouched" so just send whatever the canvas
-  // looks like; the planner will see no signature if user didn't sign.
   const canvas = document.getElementById('sigCanvas');
   const sigData = canvas.toDataURL('image/png');
   const fd = new FormData();
