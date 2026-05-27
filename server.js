@@ -2944,6 +2944,28 @@ app.get('/api/tms/driver/me', requireDriver, (req, res) => {
   res.json(d);
 });
 
+// Helper: attach stops (with lines + branch + order info) to a trip object.
+// Used by /today, /trips/:id, /history so all three views look identical.
+function _driverAttachStops(trip) {
+  if (!trip) return trip;
+  trip.stops = db.prepare(`
+    SELECT s.id, s.shipment_number, s.order_id, s.dest_branch_code, s.stop_seq,
+           s.status, s.delivered_at, s.note,
+           o.order_number, o.subtotal, o.total, o.order_type,
+           b.name as branch_name, b.address as branch_address, b.phone as branch_phone
+    FROM shipments s
+    LEFT JOIN orders o ON o.id = s.order_id
+    LEFT JOIN branches b ON b.code = s.dest_branch_code
+    WHERE s.trip_id = ?
+    ORDER BY s.stop_seq ASC, s.id ASC
+  `).all(trip.id);
+  const lineStmt = db.prepare("SELECT item_no, item_name, quantity, unit_price, line_total FROM order_lines WHERE order_id = ? ORDER BY id");
+  for (const s of trip.stops) {
+    s.lines = s.order_id ? lineStmt.all(s.order_id) : [];
+  }
+  return trip;
+}
+
 // List trips for this driver. Default: today + future planned/dispatched.
 // Pass ?date=YYYY-MM-DD for one specific day, ?range=all for history.
 app.get('/api/tms/driver/trips', requireDriver, (req, res) => {
@@ -2966,6 +2988,27 @@ app.get('/api/tms/driver/trips', requireDriver, (req, res) => {
   res.json(rows);
 });
 
+// Driver's "history" — past + finished trips. Anything in the window that
+// is either before today, or already completed/cancelled (so a trip the
+// driver finished earlier today shows up here, not just under "today").
+// Default window: last 90 days. ?days=N to widen up to 365.
+app.get('/api/tms/driver/history', requireDriver, (req, res) => {
+  const days = Math.max(1, Math.min(365, parseInt(req.query.days) || 90));
+  const rows = db.prepare(`
+    SELECT t.*, c.code as carrier_code, c.name as carrier_name,
+           (SELECT COUNT(*) FROM shipments s WHERE s.trip_id=t.id) AS stop_count,
+           (SELECT COUNT(*) FROM shipments s WHERE s.trip_id=t.id AND s.status='delivered') AS delivered_count
+    FROM trips t
+    LEFT JOIN carriers c ON c.id = t.carrier_id
+    WHERE t.driver_id = ?
+      AND t.scheduled_date >= date('now','localtime','-' || ? || ' day')
+      AND (t.scheduled_date < date('now','localtime') OR t.status IN ('completed','cancelled'))
+    ORDER BY t.scheduled_date DESC, t.id DESC
+    LIMIT 200
+  `).all(req.driver.id, days);
+  res.json(rows);
+});
+
 // Driver's "today" — the single planned/dispatched trip that should be on
 // their phone right now. Returns null if none. Tomorrow's trips don't
 // appear here; use /trips for the wider list.
@@ -2981,19 +3024,7 @@ app.get('/api/tms/driver/today', requireDriver, (req, res) => {
     LIMIT 1
   `).get(req.driver.id);
   if (!trip) return res.json(null);
-  // Eager-load stops with destination branch info. POD presence is left
-  // to Phase 1.4b — for now just whatever is on the shipment row.
-  trip.stops = db.prepare(`
-    SELECT s.id, s.shipment_number, s.order_id, s.dest_branch_code, s.stop_seq,
-           s.status, s.delivered_at, s.note,
-           o.order_number, b.name as branch_name, b.address as branch_address, b.phone as branch_phone
-    FROM shipments s
-    LEFT JOIN orders o ON o.id = s.order_id
-    LEFT JOIN branches b ON b.code = s.dest_branch_code
-    WHERE s.trip_id = ?
-    ORDER BY s.stop_seq ASC, s.id ASC
-  `).all(trip.id);
-  res.json(trip);
+  res.json(_driverAttachStops(trip));
 });
 
 // Trip detail (any date) — used when the driver taps a trip from /trips.
@@ -3007,17 +3038,7 @@ app.get('/api/tms/driver/trips/:id', requireDriver, (req, res) => {
     WHERE t.id = ? AND t.driver_id = ?
   `).get(req.params.id, req.driver.id);
   if (!trip) return res.status(404).json({ error: 'Trip not found' });
-  trip.stops = db.prepare(`
-    SELECT s.id, s.shipment_number, s.order_id, s.dest_branch_code, s.stop_seq,
-           s.status, s.delivered_at, s.note,
-           o.order_number, b.name as branch_name, b.address as branch_address, b.phone as branch_phone
-    FROM shipments s
-    LEFT JOIN orders o ON o.id = s.order_id
-    LEFT JOIN branches b ON b.code = s.dest_branch_code
-    WHERE s.trip_id = ?
-    ORDER BY s.stop_seq ASC, s.id ASC
-  `).all(trip.id);
-  res.json(trip);
+  res.json(_driverAttachStops(trip));
 });
 
 // ─── BC connection test ───
