@@ -2920,6 +2920,46 @@ app.delete('/api/tms/trips/:id', requireAuth, requireAdmin, (req, res) => {
   res.json({ ok: true, cancelled: true });
 });
 
+// Trip manifest payload — everything the printable trip sheet needs in one
+// payload. Includes carrier, driver, every stop with its destination branch
+// + the order's lines (so the driver/branch knows what's in the box).
+// Auth: HQ admin (planner / accounting). Driver doesn't need this endpoint
+// because they see the same data through /api/tms/driver/today.
+app.get('/api/tms/trips/:id/manifest', requireAuth, requireAdmin, (req, res) => {
+  const trip = db.prepare(`
+    SELECT t.*, c.code as carrier_code, c.name as carrier_name, c.contact_phone as carrier_phone,
+           d.username as driver_username, d.full_name as driver_name, d.phone as driver_phone,
+           d.vehicle_province as driver_province
+    FROM trips t
+    LEFT JOIN carriers c ON c.id = t.carrier_id
+    LEFT JOIN carrier_drivers d ON d.id = t.driver_id
+    WHERE t.id = ?
+  `).get(req.params.id);
+  if (!trip) return res.status(404).json({ error: 'Trip not found' });
+  const stops = db.prepare(`
+    SELECT s.id, s.shipment_number, s.order_id, s.dest_branch_code, s.stop_seq,
+           s.status, s.delivered_at, s.note,
+           o.order_number, o.subtotal, o.total, o.bc_so_no, o.bc_po_no, o.bc_to_no, o.order_type,
+           b.name as branch_name, b.address as branch_address, b.phone as branch_phone,
+           b.tax_id as branch_tax_id
+    FROM shipments s
+    LEFT JOIN orders o ON o.id = s.order_id
+    LEFT JOIN branches b ON b.code = s.dest_branch_code
+    WHERE s.trip_id = ?
+    ORDER BY s.stop_seq ASC, s.id ASC
+  `).all(req.params.id);
+  // Lines per stop (a single batched query keeps round-trips low).
+  const lineStmt = db.prepare(`
+    SELECT item_no, item_name, quantity, unit_price, line_total
+    FROM order_lines WHERE order_id = ? ORDER BY id
+  `);
+  for (const s of stops) {
+    s.lines = s.order_id ? lineStmt.all(s.order_id) : [];
+  }
+  trip.stops = stops;
+  res.json(trip);
+});
+
 // ─── Driver PWA (Phase 1.4a — login + trip view) ───
 // Drivers authenticate against carrier_drivers, get a JWT with kind='driver'
 // that requireDriver checks. The endpoints below scope every query to the
