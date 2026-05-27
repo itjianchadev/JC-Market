@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="th"><head>
+<meta charset="utf-8">
+<title>ใบนำส่งสินค้า — JC-Market</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{ --gold:#AD9C82; --gold-dark:#8a7d66; --beige:#f5efe5; --border:#181818; --text:#181818; --muted:#555; }
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;font-family:'Sarabun',sans-serif;color:var(--text);background:#eee}
+
+.toolbar{position:sticky;top:0;background:#fff;border-bottom:1px solid #ddd;padding:10px 16px;display:flex;gap:10px;align-items:center;z-index:50;box-shadow:0 1px 4px rgba(0,0,0,.05)}
+.toolbar h1{margin:0;font-size:14px;color:var(--muted);font-weight:600}
+.toolbar .spacer{flex:1}
+.btn{background:var(--gold);color:#fff;border:none;padding:8px 16px;border-radius:6px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer}
+.btn.ghost{background:#fff;color:var(--gold-dark);border:1px solid var(--gold)}
+
+/* Sheet — A4-ish */
+.sheet{background:#fff;margin:20px auto;padding:28px 32px;max-width:780px;box-shadow:0 2px 12px rgba(0,0,0,.08);font-size:13px;line-height:1.5}
+.sheet h1{margin:0 0 4px;font-size:22px;text-align:center;letter-spacing:.5px}
+.sheet h1 .en{display:block;font-size:13px;color:var(--muted);font-weight:400;margin-top:2px}
+.sheet hr{border:0;border-top:1.5px solid var(--text);margin:14px 0}
+.sheet hr.thin{border-top:1px dashed #999}
+
+.hdr-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px}
+.hdr-grid .box{border:1px solid var(--text);padding:8px 12px}
+.hdr-grid .box h3{margin:0 0 6px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:600}
+.hdr-grid .box .v{font-size:14px;font-weight:600}
+.hdr-grid .box .sub{font-size:11px;color:var(--muted)}
+
+.row-cols{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:12px;margin-top:6px}
+.row-cols .k{color:var(--muted)}
+
+table.stops{width:100%;border-collapse:collapse;margin-top:16px;font-size:12px}
+table.stops thead th{background:#181818;color:#fff;padding:6px 8px;text-align:left;font-weight:600}
+table.stops tbody td{border:1px solid var(--text);padding:8px 10px;vertical-align:top}
+table.stops tbody td.seq{width:36px;text-align:center;font-weight:700;font-size:14px}
+table.stops .branch-line{font-weight:600;font-size:13px}
+table.stops .addr{color:var(--muted);font-size:11px;margin-top:2px;line-height:1.4}
+table.stops .order-ref{font-family:monospace;font-size:11px;color:var(--muted);margin-top:4px}
+table.stops .items{margin-top:8px}
+table.stops .items table{width:100%;border-collapse:collapse;font-size:11px}
+table.stops .items th{background:#f5efe5;padding:3px 6px;text-align:left;border:1px solid #999;font-weight:600}
+table.stops .items td{padding:3px 6px;border:1px solid #999}
+table.stops .items td.num{text-align:right}
+table.stops .sign-cell{width:160px}
+table.stops .sign-box{height:60px;border:1px dashed #888;display:flex;align-items:flex-end;justify-content:center;padding:6px;font-size:10px;color:var(--muted)}
+table.stops .sign-line{margin-top:6px;font-size:10px;color:var(--muted)}
+table.stops .sign-line .blk{display:block;border-bottom:1px solid #555;height:14px}
+
+.foot-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-top:24px}
+.foot-grid .sign{text-align:center}
+.foot-grid .sign .line{border-bottom:1px solid var(--text);height:48px;margin-bottom:6px}
+.foot-grid .sign .label{font-size:12px;font-weight:600}
+.foot-grid .sign .sub{font-size:10px;color:var(--muted);margin-top:2px}
+
+.print-note{text-align:center;color:var(--muted);font-size:10px;margin-top:18px;font-style:italic}
+
+@media print {
+  body{background:#fff}
+  .toolbar{display:none}
+  .sheet{box-shadow:none;margin:0;padding:14mm;max-width:none}
+  @page{size:A4;margin:0}
+}
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <h1 id="title">กำลังโหลด…</h1>
+  <div class="spacer"></div>
+  <button class="btn ghost" onclick="window.close()">ปิด</button>
+  <button class="btn" onclick="window.print()">🖨️ พิมพ์ / Save PDF</button>
+</div>
+
+<div id="sheet"></div>
+
+<script src="/js/app.js"></script>
+<script>
+if (!requireLogin()) throw '';
+const me = getUser();
+const HQ_ROLES = ['super_admin','admin_scm'];
+if (!me || !HQ_ROLES.includes(me.role)) {
+  location.href = '/index.html'; throw '';
+}
+
+const urlParams = new URLSearchParams(location.search);
+const tripId = urlParams.get('id');
+if (!tripId) {
+  document.getElementById('sheet').innerHTML = '<div class="sheet"><p>missing ?id=</p></div>';
+  throw '';
+}
+
+const STATUS_TH = {
+  planned:'รอออกรถ', dispatched:'อยู่ระหว่างขนส่ง', completed:'ส่งครบ', cancelled:'ยกเลิก',
+  pending:'รอจัดส่ง', intransit:'อยู่ระหว่างขนส่ง', delivered:'ส่งแล้ว', failed:'ส่งไม่สำเร็จ',
+};
+const ORDER_TYPE_TH = {
+  fc_purchase: 'FC Purchase (Sales Order)',
+  jc_transfer: 'JC Transfer Order',
+  jc_purchase: 'JC Purchase (Fruit)',
+};
+
+function bcDocRef(s) {
+  // For each order type, pick the relevant BC doc number to print on the
+  // manifest so the receiving branch can match against the document handed
+  // off with the goods.
+  const parts = [];
+  if (s.bc_so_no) parts.push('SO: ' + s.bc_so_no);
+  if (s.bc_po_no) parts.push('PO: ' + s.bc_po_no);
+  if (s.bc_to_no) parts.push('TO: ' + s.bc_to_no);
+  return parts.length ? parts.join(' · ') : '<span style="color:#888">รอ BC sync</span>';
+}
+
+function fmtMoney(n) { return (n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+
+(async () => {
+  let trip;
+  try {
+    trip = await api('/api/tms/trips/' + tripId + '/manifest');
+  } catch (e) {
+    document.getElementById('sheet').innerHTML = '<div class="sheet"><p>โหลดไม่สำเร็จ: ' + e.message + '</p></div>';
+    return;
+  }
+  document.getElementById('title').textContent = `ใบนำส่งสินค้า · ${trip.trip_number}`;
+  document.title = `ใบนำส่ง · ${trip.trip_number} · ${trip.scheduled_date}`;
+
+  const stopRows = (trip.stops || []).map(s => `
+    <tr>
+      <td class="seq">${s.stop_seq || ''}</td>
+      <td>
+        <div class="branch-line">${s.dest_branch_code} · ${s.branch_name || ''}</div>
+        ${s.branch_address ? `<div class="addr">📌 ${s.branch_address}</div>` : ''}
+        ${s.branch_phone ? `<div class="addr">📞 ${s.branch_phone}</div>` : ''}
+        <div class="order-ref">
+          Shipment: ${s.shipment_number} · ${s.order_number || '-'}
+          <br>${bcDocRef(s)}
+          ${s.order_type ? `<br>Type: ${ORDER_TYPE_TH[s.order_type] || s.order_type}` : ''}
+        </div>
+        ${(s.lines || []).length ? `
+        <div class="items">
+          <table>
+            <thead><tr><th>รหัส</th><th>สินค้า</th><th style="width:60px">จำนวน</th><th style="width:80px">รวม</th></tr></thead>
+            <tbody>
+              ${s.lines.map(l => `<tr><td>${l.item_no}</td><td>${l.item_name}</td><td class="num">${l.quantity}</td><td class="num">${fmtMoney(l.line_total)}</td></tr>`).join('')}
+              <tr><td colspan="3" style="text-align:right;font-weight:600">รวม</td><td class="num" style="font-weight:600">${fmtMoney(s.total)}</td></tr>
+            </tbody>
+          </table>
+        </div>` : '<div class="addr" style="margin-top:4px">(ไม่มีรายการสินค้า)</div>'}
+      </td>
+      <td class="sign-cell">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:4px">ผู้รับสินค้า</div>
+        <div class="sign-box">ลายเซ็น</div>
+        <div class="sign-line">
+          ชื่อ <span class="blk"></span>
+          วันที่ <span class="blk"></span>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+
+  document.getElementById('sheet').innerHTML = `
+    <div class="sheet">
+      <h1>ใบนำส่งสินค้า <span class="en">TRIP MANIFEST</span></h1>
+      <hr>
+      <div class="hdr-grid">
+        <div class="box">
+          <h3>Trip</h3>
+          <div class="v">${trip.trip_number}</div>
+          <div class="sub">วันที่: ${trip.scheduled_date} · สถานะ: ${STATUS_TH[trip.status] || trip.status}</div>
+        </div>
+        <div class="box">
+          <h3>ค่าเที่ยว</h3>
+          <div class="v">฿${fmtMoney(trip.cost_agreed)}</div>
+          <div class="sub">ตกลงราคา · ใช้ออก invoice ภายหลัง</div>
+        </div>
+      </div>
+      <div class="hdr-grid">
+        <div class="box">
+          <h3>ผู้ให้บริการขนส่ง (Carrier)</h3>
+          <div class="v">${trip.carrier_code || '-'} · ${trip.carrier_name || ''}</div>
+          ${trip.carrier_phone ? `<div class="sub">📞 ${trip.carrier_phone}</div>` : ''}
+        </div>
+        <div class="box">
+          <h3>คนขับ + รถ</h3>
+          <div class="v">${trip.driver_name || trip.driver_username || '-'}</div>
+          <div class="sub">📞 ${trip.driver_phone || '-'} · ทะเบียน ${trip.vehicle_plate || '-'} ${trip.driver_province ? '(' + trip.driver_province + ')' : ''}</div>
+        </div>
+      </div>
+      <div class="row-cols">
+        <span class="k">ต้นทาง:</span><span>CTI Warehouse · Jian Cha Co.,Ltd.</span>
+        <span class="k">จำนวนจุดส่ง:</span><span>${(trip.stops || []).length} จุด</span>
+        ${trip.dispatched_at ? `<span class="k">ออกรถ:</span><span>${trip.dispatched_at}</span>` : ''}
+        ${trip.completed_at ? `<span class="k">ส่งครบ:</span><span>${trip.completed_at}</span>` : ''}
+        ${trip.note ? `<span class="k">หมายเหตุ:</span><span>${trip.note}</span>` : ''}
+      </div>
+
+      <table class="stops">
+        <thead><tr><th style="width:36px">#</th><th>ปลายทาง + สินค้า</th><th style="width:170px">ลายเซ็นรับ</th></tr></thead>
+        <tbody>${stopRows || '<tr><td colspan="3" style="text-align:center;padding:20px;color:#888">— ไม่มีจุดส่งใน trip นี้ —</td></tr>'}</tbody>
+      </table>
+
+      <div class="foot-grid">
+        <div class="sign">
+          <div class="line"></div>
+          <div class="label">ผู้ส่งสินค้า (CTI)</div>
+          <div class="sub">วันที่ ___ / ___ / ______</div>
+        </div>
+        <div class="sign">
+          <div class="line"></div>
+          <div class="label">คนขับรถ</div>
+          <div class="sub">${trip.driver_name || ''} · ${trip.vehicle_plate || ''}</div>
+        </div>
+        <div class="sign">
+          <div class="line"></div>
+          <div class="label">ผู้รับสินค้าครบทุกจุด</div>
+          <div class="sub">วันที่ ___ / ___ / ______</div>
+        </div>
+      </div>
+
+      <div class="print-note">เอกสารนี้สร้างจาก JC-Market · TRP ${trip.trip_number} · พิมพ์เมื่อ ${new Date().toLocaleString('th-TH')}</div>
+    </div>
+  `;
+})();
+</script>
+</body></html>
