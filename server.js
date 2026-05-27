@@ -3017,7 +3017,112 @@ app.get('/api/tms/driver/trips/:id', requireDriver, (req, res) => {
     WHERE s.trip_id = ?
     ORDER BY s.stop_seq ASC, s.id ASC
   `).all(trip.id);
+  // POD info per stop (for the rare delivered-already case the driver sees
+  // after a page reload). Photo / signature URLs are public-ish — they live
+  // under /uploads/pod and are protected only by knowing the URL.
+  const podsByShipment = {};
+  for (const p of db.prepare("SELECT shipment_id, photo_url, signature_url, signed_by_name, received_at FROM pods WHERE shipment_id IN (SELECT id FROM shipments WHERE trip_id=?)").all(trip.id)) {
+    podsByShipment[p.shipment_id] = p;
+  }
+  for (const s of trip.stops) s.pod = podsByShipment[s.id] || null;
   res.json(trip);
+});
+
+// ─── Driver actions (Phase 1.4b — dispatch, POD, GPS) ───
+// Driver presses "ออกรถ" → trip flips to dispatched and its planned
+// shipments to 'intransit'. Idempotent: the second call is a 400 instead
+// of mutating an already-dispatched trip (so the UI button can't push the
+// trip into a weird state).
+app.post('/api/tms/driver/trips/:id/dispatch', requireDriver, (req, res) => {
+  const trip = db.prepare('SELECT * FROM trips WHERE id=? AND driver_id=?').get(req.params.id, req.driver.id);
+  if (!trip) return res.status(404).json({ error: 'Trip not found' });
+  if (trip.status !== 'planned') return res.status(400).json({ error: `Trip ${trip.status} แล้ว ไม่สามารถออกรถซ้ำได้` });
+  db.transaction(() => {
+    db.prepare("UPDATE trips SET status='dispatched', dispatched_at=datetime('now','localtime') WHERE id=?").run(trip.id);
+    db.prepare("UPDATE shipments SET status='intransit' WHERE trip_id=? AND status='planned'").run(trip.id);
+  })();
+  res.json({ ok: true });
+});
+
+// GPS ping endpoint — used by the PWA's watchPosition loop. Tolerant:
+// silently skips if trip isn't dispatched (the loop may fire one extra
+// time after the trip completes). Returns 204 to keep the body small.
+app.post('/api/tms/driver/trips/:id/ping', requireDriver, (req, res) => {
+  const { lat, lng } = req.body || {};
+  if (typeof lat !== 'number' || typeof lng !== 'number') return res.status(400).json({ error: 'lat/lng required (number)' });
+  const trip = db.prepare("SELECT status FROM trips WHERE id=? AND driver_id=?").get(req.params.id, req.driver.id);
+  if (!trip) return res.status(404).json({ error: 'Trip not found' });
+  if (trip.status !== 'dispatched') return res.status(204).end();
+  db.prepare('INSERT INTO driver_pings (trip_id, driver_id, lat, lng) VALUES (?,?,?,?)')
+    .run(req.params.id, req.driver.id, lat, lng);
+  res.status(204).end();
+});
+
+// POD upload — multipart: photo file + signature data URL + signed_by_name
+// + optional lat/lng/notes. Signature comes in as a data: URL (canvas
+// toDataURL output) which we strip + write as a PNG file alongside the
+// photo. Once the row lands we flip the shipment to 'delivered' and
+// auto-complete the trip if every stop is now delivered.
+const podUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => {
+      const dir = path.join(__dirname, 'uploads', 'pod');
+      require('fs').mkdirSync(dir, { recursive: true });
+      cb(null, dir);
+    },
+    filename: (req, file, cb) => cb(null, `pod_${req.params.id}_${Date.now()}_${Math.random().toString(36).slice(2,6)}${path.extname(file.originalname) || '.jpg'}`),
+  }),
+  limits: { fileSize: 8 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => cb(null, /image\/(jpeg|png|webp|heic|heif)/i.test(file.mimetype)),
+});
+
+app.post('/api/tms/driver/shipments/:id/pod', requireDriver, podUpload.single('photo'), (req, res) => {
+  const shipment = db.prepare(`
+    SELECT s.*, t.driver_id, t.status as trip_status
+    FROM shipments s
+    LEFT JOIN trips t ON t.id = s.trip_id
+    WHERE s.id = ?
+  `).get(req.params.id);
+  if (!shipment) return res.status(404).json({ error: 'Shipment not found' });
+  if (shipment.driver_id !== req.driver.id) return res.status(403).json({ error: 'Not your shipment' });
+  if (shipment.status === 'delivered') return res.status(400).json({ error: 'Shipment ส่งไปแล้ว' });
+  if (shipment.trip_status !== 'dispatched') return res.status(400).json({ error: 'Trip ยังไม่ออกรถ — กด "ออกรถ" ก่อน' });
+
+  const { signature, signed_by_name = '', lat, lng, notes = '' } = req.body || {};
+  const photoUrl = req.file ? `/uploads/pod/${req.file.filename}` : '';
+  let signatureUrl = '';
+  // signature is a data URL (image/png;base64,...). Convert to a file so
+  // the UI can render <img src> on revisit and so we don't bloat the row.
+  if (signature && signature.startsWith('data:image/')) {
+    try {
+      const m = signature.match(/^data:image\/(png|jpeg);base64,(.+)$/);
+      if (m) {
+        const ext = m[1] === 'jpeg' ? '.jpg' : '.png';
+        const fname = `sig_${req.params.id}_${Date.now()}${ext}`;
+        const fp = path.join(__dirname, 'uploads', 'pod', fname);
+        require('fs').mkdirSync(path.dirname(fp), { recursive: true });
+        require('fs').writeFileSync(fp, Buffer.from(m[2], 'base64'));
+        signatureUrl = `/uploads/pod/${fname}`;
+      }
+    } catch (e) { console.error('[pod signature write]', e.message); }
+  }
+
+  const driverLat = lat !== undefined && lat !== '' ? Number(lat) : null;
+  const driverLng = lng !== undefined && lng !== '' ? Number(lng) : null;
+
+  db.transaction(() => {
+    db.prepare(`INSERT INTO pods (shipment_id, photo_url, signature_url, signed_by_name, driver_lat, driver_lng, notes)
+      VALUES (?,?,?,?,?,?,?)`).run(req.params.id, photoUrl, signatureUrl, signed_by_name, driverLat, driverLng, notes);
+    db.prepare("UPDATE shipments SET status='delivered', delivered_at=datetime('now','localtime') WHERE id=?").run(req.params.id);
+    // Auto-complete the trip when every stop is delivered. cancelled /
+    // failed stops don't block completion — those are terminal-but-not-
+    // delivered states the trip planner explicitly chose.
+    const remaining = db.prepare("SELECT COUNT(*) c FROM shipments WHERE trip_id=? AND status NOT IN ('delivered','failed','cancelled')").get(shipment.trip_id).c;
+    if (remaining === 0) {
+      db.prepare("UPDATE trips SET status='completed', completed_at=datetime('now','localtime') WHERE id=?").run(shipment.trip_id);
+    }
+  })();
+  res.json({ ok: true, photo_url: photoUrl, signature_url: signatureUrl });
 });
 
 // ─── BC connection test ───
