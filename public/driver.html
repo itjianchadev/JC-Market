@@ -79,6 +79,7 @@ body{padding-bottom:env(safe-area-inset-bottom)}
 
 .empty{text-align:center;color:var(--muted);padding:40px 20px;font-size:14px}
 .spinner{text-align:center;padding:30px;color:var(--muted)}
+/* Toast pushed up so it doesn't hide behind the bottom nav (64px tall). */
 .toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:var(--text);color:#fff;padding:10px 16px;border-radius:8px;font-size:13px;z-index:1000;box-shadow:0 4px 12px rgba(0,0,0,.2)}
 
 /* Items expansion in stop card */
@@ -108,6 +109,21 @@ body{padding-bottom:env(safe-area-inset-bottom)}
 .hist-card .tno{font-weight:700;font-size:13px}
 .hist-card .date{color:var(--muted);font-size:11px}
 .hist-card .row2{display:flex;justify-content:space-between;font-size:12px;color:var(--muted)}
+
+/* POD modal (Phase 1.4b) */
+.pod-modal{position:fixed;inset:0;background:rgba(42,33,24,.6);z-index:1000;display:none;align-items:flex-start;justify-content:center;overflow-y:auto;padding:16px}
+.pod-modal .box{background:var(--card);border-radius:14px;padding:16px;max-width:500px;width:100%;position:relative;margin-top:20px}
+.pod-modal h3{margin:0 0 12px;color:var(--gold-dark);font-size:16px;display:flex;align-items:center;gap:8px}
+.pod-modal .close{position:absolute;top:10px;right:14px;background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer}
+.pod-section{margin-bottom:14px}
+.pod-section label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;font-weight:600}
+.pod-camera-btn{display:flex;align-items:center;justify-content:center;gap:6px;padding:14px;background:#fafafa;border:2px dashed var(--border);border-radius:10px;cursor:pointer;color:var(--gold-dark);font-weight:600}
+.pod-camera-btn input{display:none}
+#podPhotoPreview img{display:block;margin-top:8px}
+#sigCanvas{width:100%;height:140px;background:#fafafa;border:1px solid var(--border);border-radius:8px;touch-action:none;display:block}
+.pod-input{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;font-family:inherit;background:#fafafa}
+.pod-input:focus{outline:none;border-color:var(--gold);background:#fff}
+.pod-geo{font-size:11px;color:var(--muted);text-align:center;padding:6px;background:var(--beige);border-radius:6px}
 </style>
 </head>
 <body>
@@ -163,6 +179,43 @@ body{padding-bottom:env(safe-area-inset-bottom)}
       <span>ประวัติ</span>
     </button>
   </nav>
+</div>
+
+<!-- POD upload modal -->
+<div class="pod-modal" id="podModal">
+  <div class="box">
+    <button class="close" onclick="closePod()">×</button>
+    <h3>📦 ส่งสินค้า · <span id="podStop"></span></h3>
+    <form id="podForm" onsubmit="return submitPod(event)">
+      <div class="pod-section">
+        <label>ถ่ายรูปสินค้า / ป้ายสาขา</label>
+        <label class="pod-camera-btn">
+          <span>📷 เปิดกล้อง / เลือกรูป</span>
+          <input type="file" name="photo" accept="image/*" capture="environment" onchange="onPhotoChange(this)" required>
+        </label>
+        <div id="podPhotoPreview"></div>
+      </div>
+      <div class="pod-section">
+        <label>ลายเซ็นผู้รับ</label>
+        <canvas id="sigCanvas"></canvas>
+        <button type="button" class="btn ghost" style="margin-top:6px;padding:6px 12px;font-size:12px;width:auto" onclick="clearSignature()">↺ ล้างลายเซ็น</button>
+      </div>
+      <div class="pod-section">
+        <label>ชื่อผู้รับ (ไม่บังคับ)</label>
+        <input class="pod-input" name="signed_by_name" placeholder="ชื่อ-นามสกุล">
+      </div>
+      <div class="pod-section">
+        <label>หมายเหตุ (ไม่บังคับ)</label>
+        <input class="pod-input" name="notes" placeholder="เช่น เซ็นแทนเจ้าของ">
+      </div>
+      <div class="pod-geo" id="podGeo">📍 กำลังหาตำแหน่ง...</div>
+      <p id="podErr" class="err"></p>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button type="button" class="btn ghost" onclick="closePod()" style="flex:1">ยกเลิก</button>
+        <button type="submit" class="btn" style="flex:2">บันทึก POD</button>
+      </div>
+    </form>
+  </div>
 </div>
 
 <script>
@@ -316,9 +369,15 @@ async function loadToday() {
   }
 }
 
+// Module-scope state shared between renderTrip and the action handlers.
+let currentTrip = null;
+let gpsWatchId = null;
+
 function renderTrip(trip) {
+  currentTrip = trip;
   const root = document.getElementById('content');
   if (!trip) {
+    stopGpsLoop();
     root.innerHTML = `
       <div class="card">
         <h2>📭 ไม่มี Trip สำหรับวันนี้</h2>
@@ -327,7 +386,15 @@ function renderTrip(trip) {
     return;
   }
   const todayStr = new Date().toISOString().slice(0,10);
-  const statusPill = STATUS_PILL[trip.status === 'dispatched' ? 'intransit' : 'planned'] || STATUS_PILL.pending;
+  const isPlanned = trip.status === 'planned';
+  const isDispatched = trip.status === 'dispatched';
+  const statusKey = isDispatched ? 'intransit' : (trip.status === 'completed' ? 'delivered' : 'planned');
+  const statusPill = STATUS_PILL[statusKey] || STATUS_PILL.pending;
+
+  // Start / stop the GPS ping loop based on the trip's current state.
+  if (isDispatched) startGpsLoop(trip.id);
+  else stopGpsLoop();
+
   root.innerHTML = `
     <div class="card">
       <div class="trip-head">
@@ -344,6 +411,8 @@ function renderTrip(trip) {
         <div><div class="k">ค่าเที่ยว</div><div class="v">฿${(trip.cost_agreed || 0).toLocaleString()}</div></div>
       </div>
       ${trip.note ? `<div style="margin-top:10px;padding:8px 10px;background:var(--beige);border-radius:8px;font-size:12px;color:var(--muted)">📝 ${trip.note}</div>` : ''}
+      ${isPlanned ? `<button class="btn" style="margin-top:14px" onclick="doDispatch()">🚚 ออกรถจาก CTI</button>` : ''}
+      ${isDispatched ? `<div style="margin-top:12px;padding:10px;background:#dbeafe;color:#1d4ed8;border-radius:8px;font-size:12px;text-align:center">🛰️ กำลังติดตามตำแหน่ง (GPS)</div>` : ''}
     </div>
 
     <h3 style="font-size:14px;color:var(--gold-dark);margin:18px 0 10px">📍 รายการจุดส่ง (${(trip.stops || []).length})</h3>
@@ -352,6 +421,8 @@ function renderTrip(trip) {
       const sp = STATUS_PILL[s.status] || STATUS_PILL.pending;
       const lines = s.lines || [];
       const lineCount = lines.length;
+      const canDeliver = isDispatched && s.status === 'intransit';
+      const pod = s.pod || null;
       return `
       <div class="stop">
         <div class="seq">${s.stop_seq || '?'}</div>
@@ -379,6 +450,16 @@ function renderTrip(trip) {
               </tbody>
             </table>
           </div>` : ''}
+          ${pod ? `
+          <div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--border);display:flex;gap:10px;align-items:center">
+            ${pod.photo_url ? `<a href="${pod.photo_url}" target="_blank"><img src="${pod.photo_url}" style="width:64px;height:64px;object-fit:cover;border-radius:8px"></a>` : ''}
+            ${pod.signature_url ? `<img src="${pod.signature_url}" style="width:90px;height:48px;object-fit:contain;background:#fafafa;border-radius:6px">` : ''}
+            <div style="flex:1;font-size:11px;color:var(--muted)">
+              ${pod.signed_by_name ? `<div>โดย: ${pod.signed_by_name}</div>` : ''}
+              <div>${pod.received_at}</div>
+            </div>
+          </div>` : ''}
+          ${canDeliver ? `<button class="btn" style="margin-top:10px" onclick="openPod(${s.id},'${s.dest_branch_code}',${s.stop_seq})">📦 ส่งแล้ว — อัปโหลด POD</button>` : ''}
         </div>
       </div>`;
     }).join('') || '<div class="empty">ไม่มีจุดส่งใน trip นี้</div>'}
@@ -439,6 +520,151 @@ async function viewTripDetail(id) {
     // Top of page so the new content is visible above the bottom nav.
     window.scrollTo({ top: 0, behavior: 'smooth' });
   } catch (e) { toast(e.message); }
+}
+
+// ─── Dispatch ────────────────────────────────────────────────────────────
+async function doDispatch() {
+  if (!currentTrip) return;
+  if (!confirm('ยืนยันออกรถจาก CTI?\nหลังจากนี้จะเริ่มติดตาม GPS')) return;
+  try {
+    await api(`/api/tms/driver/trips/${currentTrip.id}/dispatch`, { method:'POST' });
+    toast('ออกรถแล้ว · GPS เริ่มทำงาน');
+    await loadToday();
+  } catch (e) { alert(e.message); }
+}
+
+// ─── GPS ping loop ────────────────────────────────────────────────────────
+// watchPosition gives us position updates; we throttle to one upload per
+// PING_INTERVAL so we don't hammer the server. Geolocation requires a
+// secure context (https or localhost) — if the browser refuses, we silently
+// stop trying so the rest of the UI keeps working.
+const PING_INTERVAL = 30 * 1000;
+let lastPingAt = 0;
+
+function startGpsLoop(tripId) {
+  if (gpsWatchId !== null) return;
+  if (!navigator.geolocation) return;
+  gpsWatchId = navigator.geolocation.watchPosition(async (pos) => {
+    const now = Date.now();
+    if (now - lastPingAt < PING_INTERVAL) return;
+    lastPingAt = now;
+    try {
+      await api(`/api/tms/driver/trips/${tripId}/ping`, {
+        method: 'POST',
+        body: JSON.stringify({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      });
+    } catch {}
+  }, (err) => {
+    console.warn('[gps]', err.message);
+  }, { enableHighAccuracy: true, maximumAge: 15000, timeout: 20000 });
+}
+function stopGpsLoop() {
+  if (gpsWatchId !== null && navigator.geolocation) {
+    navigator.geolocation.clearWatch(gpsWatchId);
+    gpsWatchId = null;
+  }
+}
+
+// ─── POD modal (camera + signature canvas) ────────────────────────────────
+let podState = null; // { shipmentId, sigCtx, drawing, lastLatLng }
+function openPod(shipmentId, branchCode, seq) {
+  podState = { shipmentId, lastLatLng: null };
+  document.getElementById('podStop').textContent = `จุดที่ ${seq} · ${branchCode}`;
+  document.getElementById('podForm').reset();
+  document.getElementById('podPhotoPreview').innerHTML = '';
+  document.getElementById('podErr').textContent = '';
+  // Try to capture position once when opening — gives instant geotag
+  // even if the GPS loop hasn't fired yet for this shipment.
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition((p) => {
+      podState.lastLatLng = { lat: p.coords.latitude, lng: p.coords.longitude };
+      document.getElementById('podGeo').textContent = `📍 ${p.coords.latitude.toFixed(5)}, ${p.coords.longitude.toFixed(5)}`;
+    }, () => {
+      document.getElementById('podGeo').textContent = '📍 (ไม่ได้รับตำแหน่ง)';
+    });
+  }
+  setupSignatureCanvas();
+  document.getElementById('podModal').style.display = 'flex';
+}
+function closePod() {
+  document.getElementById('podModal').style.display = 'none';
+  podState = null;
+}
+
+function setupSignatureCanvas() {
+  const canvas = document.getElementById('sigCanvas');
+  // Resize to device pixel ratio so the stroke isn't blurry on retina.
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.strokeStyle = '#2a2118';
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  let drawing = false;
+  const getPos = (e) => {
+    const r = canvas.getBoundingClientRect();
+    const t = e.touches ? e.touches[0] : e;
+    return { x: t.clientX - r.left, y: t.clientY - r.top };
+  };
+  const start = (e) => { e.preventDefault(); drawing = true; const p = getPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); };
+  const move  = (e) => { if (!drawing) return; e.preventDefault(); const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); };
+  const end   = ()  => { drawing = false; };
+  canvas.ontouchstart = start; canvas.ontouchmove = move; canvas.ontouchend = end;
+  canvas.onmousedown = start;  canvas.onmousemove = move;  canvas.onmouseup = end; canvas.onmouseleave = end;
+}
+function clearSignature() {
+  const canvas = document.getElementById('sigCanvas');
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+function onPhotoChange(input) {
+  const file = input.files && input.files[0];
+  const preview = document.getElementById('podPhotoPreview');
+  preview.innerHTML = '';
+  if (!file) return;
+  const url = URL.createObjectURL(file);
+  preview.innerHTML = `<img src="${url}" style="max-width:100%;max-height:160px;border-radius:8px;border:1px solid var(--border)">`;
+}
+
+async function submitPod(e) {
+  e.preventDefault();
+  if (!podState) return false;
+  const form = e.target;
+  const file = form.photo.files[0];
+  if (!file) { document.getElementById('podErr').textContent = 'กรุณาถ่ายรูปสินค้า'; return false; }
+  const canvas = document.getElementById('sigCanvas');
+  const sigData = canvas.toDataURL('image/png');
+  const fd = new FormData();
+  fd.append('photo', file);
+  fd.append('signature', sigData);
+  fd.append('signed_by_name', form.signed_by_name.value || '');
+  fd.append('notes', form.notes.value || '');
+  if (podState.lastLatLng) {
+    fd.append('lat', podState.lastLatLng.lat);
+    fd.append('lng', podState.lastLatLng.lng);
+  }
+  try {
+    const r = await fetch(`/api/tms/driver/shipments/${podState.shipmentId}/pod`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + getToken() },
+      body: fd,
+    });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      throw new Error(j.error || ('HTTP ' + r.status));
+    }
+    toast('บันทึก POD เรียบร้อย');
+    closePod();
+    await loadToday();
+  } catch (err) {
+    document.getElementById('podErr').textContent = err.message;
+  }
+  return false;
 }
 
 // Boot — if we already have a token, jump to main; otherwise show login.
