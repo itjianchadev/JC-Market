@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="th"><head>
+<meta charset="utf-8"><title>Shipping — JC-Market</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<style>
+.section{margin-bottom:28px}
+.section h3{font-size:16px;font-weight:700;margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid var(--gold);display:inline-block}
+.dtable{width:100%;border-collapse:collapse;font-size:13px}
+.dtable thead th{background:var(--beige);color:var(--gold-dark);padding:8px 10px;text-align:left;font-size:12px;font-weight:600;border-bottom:1px solid var(--gold);white-space:nowrap}
+.dtable tbody td{padding:10px;border-bottom:1px solid var(--border);vertical-align:middle}
+.dtable tbody tr:hover{background:rgba(173,156,130,.08)}
+.num{text-align:right;white-space:nowrap}
+.pay-badge{display:inline-block;padding:2px 10px;border-radius:99px;font-size:11px;font-weight:600;white-space:nowrap}
+.pay-pending{background:#fff3e0;color:#e65100}
+.pay-paid{background:#e3f2fd;color:#1565c0}
+.pay-verified{background:#e8f5e9;color:#2e7d32}
+.pay-failed{background:#ffebee;color:#c62828}
+.pay-cancelled{background:#f5f5f5;color:#999}
+.modal{position:fixed;inset:0;background:rgba(42,33,24,.5);backdrop-filter:blur(4px);z-index:1000;display:none;align-items:center;justify-content:center;padding:20px}
+.modal .box{background:#fff;border-radius:16px;max-width:420px;width:100%;max-height:90vh;overflow:auto;padding:24px;box-shadow:0 8px 30px rgba(0,0,0,.3);text-align:center}
+.qr-img{width:240px;height:240px;object-fit:contain;border:1px solid var(--border);border-radius:12px;margin:8px auto}
+.due{font-size:30px;font-weight:700;color:var(--gold-dark);margin:6px 0}
+.wht-note{font-size:12px;color:var(--muted);background:var(--beige);border-radius:8px;padding:10px;margin:10px 0;text-align:left;line-height:1.5}
+.intro{color:var(--muted);font-size:13px;margin-bottom:20px;line-height:1.6}
+@media(max-width:768px){.dtable{font-size:12px}.dtable thead th,.dtable tbody td{padding:7px 6px}}
+</style>
+</head><body data-i18n-title="shipping.page_title">
+<div id="nav"></div>
+<div class="container">
+  <h2 style="margin-bottom:4px" data-i18n="shipping.title">ค่าขนส่งประจำเดือน</h2>
+  <p class="intro" data-i18n="shipping.intro">บริษัทรวบค่าขนส่งของออเดอร์ในแต่ละเดือนมาเรียกเก็บเป็นใบแจ้งหนี้แยก สาขาชำระผ่าน QR แล้วอัพโหลดสลิป โดยหัก ณ ที่จ่าย 3% ของค่าขนส่ง</p>
+
+  <div class="section">
+    <div class="card" style="padding:0;overflow-x:auto">
+      <table class="dtable">
+        <thead><tr>
+          <th data-i18n="shipinv.col.period">งวด</th>
+          <th data-i18n="shipinv.col.invoice">เลขที่</th>
+          <th class="num" data-i18n="shipinv.col.orders">ออเดอร์</th>
+          <th class="num" data-i18n="shipinv.col.total">รวม</th>
+          <th class="num" data-i18n="shipinv.col.wht">หัก ณ ที่จ่าย</th>
+          <th class="num" data-i18n="shipinv.col.net">ยอดสุทธิ</th>
+          <th data-i18n="shipinv.col.status">สถานะ</th>
+          <th data-i18n="shipinv.col.action">จัดการ</th>
+        </tr></thead>
+        <tbody id="invBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Pay modal -->
+<div class="modal" id="payModal" onclick="if(event.target===this)closePay()">
+  <div class="box">
+    <h3 style="margin:0 0 4px" id="payTitle"></h3>
+    <p style="color:var(--muted);font-size:12px;margin:0 0 6px" data-i18n="shipping.amount_due">ยอดที่ต้องชำระ (หัก ณ ที่จ่าย 3% แล้ว)</p>
+    <div class="due" id="payDue">฿0</div>
+    <img id="payQr" class="qr-img" src="" alt="QR">
+    <p style="font-size:12px;color:var(--muted)" data-i18n="shipping.scan_qr">สแกน QR เพื่อชำระผ่านแอปธนาคาร</p>
+    <div class="wht-note" id="payWhtNote"></div>
+    <div style="text-align:left;margin-top:6px">
+      <label data-i18n="shipping.upload_slip">อัพโหลดสลิป</label>
+      <input type="file" id="slipFile" accept="image/*">
+      <div class="err" id="payErr"></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:14px">
+      <button class="btn ghost sm" style="flex:1" onclick="closePay()" data-i18n="common.cancel">ยกเลิก</button>
+      <button class="btn sm" style="flex:2" id="paySubmit" onclick="submitSlip()" data-i18n="shipping.submit_slip">ส่งสลิป</button>
+    </div>
+  </div>
+</div>
+
+<script src="/js/app.js"></script>
+<script>
+if(!requireLogin()) throw '';
+const u=getUser();
+// FC branch users pay here. HQ roles manage billing on the dedicated page.
+if(u.role==='super_admin'||u.role==='admin_scm'||u.role==='finance'){ location.href='/shipping-billing.html'; throw ''; }
+document.getElementById('nav').innerHTML=renderNav('shipping.html');
+
+const money=n=>'฿'+Number(n||0).toLocaleString(undefined,{maximumFractionDigits:2});
+const STATUS=s=>`<span class="pay-badge pay-${s}">${t('shipinv.status.'+s)||s}</span>`;
+let payId=null;
+
+let invCache=[];
+async function load(){
+  try{ invCache=await api('/api/shipping-invoices'); render(); }
+  catch(e){ toast(e.message); }
+}
+function render(){
+  const body=document.getElementById('invBody');
+  if(!invCache.length){ body.innerHTML=`<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:18px">${t('shipping.none')}</td></tr>`; return; }
+  body.innerHTML=invCache.map(v=>{
+    let action='';
+    if(v.status==='pending'||v.status==='failed'){
+      action=`<button class="btn sm" onclick="openPay('${v.id}')" data-i18n="shipping.pay">ชำระเงิน</button>`;
+    }else if(v.status==='paid'){
+      action=`<span style="color:var(--muted);font-size:12px" data-i18n="shipping.paid_wait">รอ Finance ตรวจสอบ</span>`;
+    }else if(v.status==='verified'){
+      action=`<span style="color:var(--ok);font-size:12px">${v.receipt_number||t('shipinv.status.verified')}</span>`;
+    }
+    return `<tr>
+      <td><strong>${v.period}</strong></td>
+      <td style="font-family:monospace;font-size:12px">${v.invoice_number}</td>
+      <td class="num">${v.order_count}</td>
+      <td class="num">${money(v.total)}</td>
+      <td class="num" style="color:var(--err)">-${money(v.wht_amount)}</td>
+      <td class="num" style="font-weight:700;color:var(--gold-dark)">${money(v.net_payable)}</td>
+      <td>${STATUS(v.status)}</td>
+      <td>${action}</td>
+    </tr>`;
+  }).join('');
+  applyI18n(body);
+}
+
+async function openPay(id){
+  payId=id;
+  const inv=invCache.find(x=>x.id===id);
+  document.getElementById('payErr').textContent='';
+  document.getElementById('slipFile').value='';
+  document.getElementById('payTitle').textContent=t('shipping.pay_title',{invoice:inv?inv.invoice_number:''});
+  document.getElementById('payWhtNote').textContent = inv
+    ? t('shipping.wht_note',{total:money(inv.total),wht:money(inv.wht_amount),net:money(inv.net_payable)}) : '';
+  document.getElementById('payQr').src='';
+  document.getElementById('payDue').textContent=inv?money(inv.net_payable):'฿0';
+  document.getElementById('payModal').style.display='flex';
+  try{
+    const q=await api('/api/shipping-invoices/'+id+'/qr');
+    document.getElementById('payQr').src=q.qr_data_url;
+    document.getElementById('payDue').textContent=money(q.net_payable);
+  }catch(e){ document.getElementById('payErr').textContent=e.message; }
+}
+function closePay(){ document.getElementById('payModal').style.display='none'; payId=null; }
+
+async function submitSlip(){
+  if(!payId) return;
+  const file=document.getElementById('slipFile').files[0];
+  if(!file){ document.getElementById('payErr').textContent=t('shipping.pick_slip'); return; }
+  const btn=document.getElementById('paySubmit'); btn.disabled=true; btn.textContent='...';
+  const fd=new FormData(); fd.append('slip',file);
+  try{
+    const r=await fetch('/api/shipping-invoices/'+payId+'/slip',{method:'POST',headers:{'Authorization':'Bearer '+getToken()},body:fd});
+    const j=await r.json();
+    if(!r.ok) throw new Error(j.error||r.statusText);
+    toast(j.message||t('shipping.slip_sent'));
+    closePay(); load();
+  }catch(e){
+    document.getElementById('payErr').textContent=e.message;
+  }finally{ btn.disabled=false; btn.textContent=t('shipping.submit_slip'); }
+}
+
+window.onLangChange=()=>{ document.getElementById('nav').innerHTML=renderNav('shipping.html'); render(); };
+load();
+</script>
+</body></html>

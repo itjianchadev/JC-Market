@@ -3,7 +3,7 @@ const path = require('path');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 
-const DB_PATH = path.join(__dirname, 'data', 'stock-market.db');
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data', 'stock-market.db');
 const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
@@ -278,6 +278,19 @@ try { db.exec("ALTER TABLE orders ADD COLUMN cancel_reason TEXT DEFAULT ''"); } 
 // permissions, etc.), we need a way for admins to see the orphan and retry.
 try { db.exec("ALTER TABLE orders ADD COLUMN bc_sync_error TEXT DEFAULT ''"); } catch (e) {}
 
+// ─── Migrate: FC shipping fee + withholding tax (WHT) + net payable ───
+// FC orders carry a flat shipping fee (pre-VAT, env FC_SHIPPING_FEE=200) and a
+// 3% WHT on the shipping ONLY — goods are a sale of goods (no WHT in TH; WHT is
+// services-only). net_payable = total - wht_amount is the amount fed to the
+// PromptPay QR + slip check. BC SO/PO documents ALWAYS carry the FULL total —
+// net_payable is a payment-layer concept only and must never leak into BC.
+// JC (master) orders: all of these stay 0 and net_payable = total (no payment).
+try { db.exec("ALTER TABLE orders ADD COLUMN shipping_fee REAL DEFAULT 0"); } catch (e) {}
+try { db.exec("ALTER TABLE orders ADD COLUMN wht_rate REAL DEFAULT 0"); } catch (e) {}
+try { db.exec("ALTER TABLE orders ADD COLUMN wht_base REAL DEFAULT 0"); } catch (e) {}
+try { db.exec("ALTER TABLE orders ADD COLUMN wht_amount REAL DEFAULT 0"); } catch (e) {}
+try { db.exec("ALTER TABLE orders ADD COLUMN net_payable REAL DEFAULT 0"); } catch (e) {}
+
 // ─── Migrate: anti-fraud fields on payments ───
 try { db.exec("ALTER TABLE payments ADD COLUMN slip_hash TEXT DEFAULT ''"); } catch (e) {}
 try { db.exec("ALTER TABLE payments ADD COLUMN trans_date TEXT DEFAULT ''"); } catch (e) {}
@@ -324,6 +337,67 @@ CREATE TABLE IF NOT EXISTS payment_receipts (
   created_at TEXT DEFAULT (datetime('now','localtime'))
 );
 `);
+
+// ─── Migrate: shipping + WHT breakdown on payment_receipts ───
+// NOTE: in the monthly-billing model the per-order receipt carries 0 here
+// (shipping/WHT moved off the goods order). These columns stay for the schema's
+// sake and so any pre-pivot receipts keep their stored breakdown.
+try { db.exec("ALTER TABLE payment_receipts ADD COLUMN shipping_fee REAL DEFAULT 0"); } catch (e) {}
+try { db.exec("ALTER TABLE payment_receipts ADD COLUMN wht_amount REAL DEFAULT 0"); } catch (e) {}
+try { db.exec("ALTER TABLE payment_receipts ADD COLUMN net_payable REAL DEFAULT 0"); } catch (e) {}
+
+// ─── Monthly consolidated shipping billing ─────────────────────────────────
+// Each FC order accrues a flat 200 THB shipping fee (orders.shipping_fee) but is
+// NOT billed for it at checkout. Once a month Finance consolidates every
+// verified + unbilled FC order per branch into ONE shipping_invoices row, which
+// opens a SEPARATE BC Sales Order (freight G/L line SV-TP0002 + 7% VAT) and is
+// settled by the FC in-app (PromptPay QR + slip + Finance verify), net of 3% WHT
+// on the pre-VAT shipping. SO-only — shipping is a service JC sells to the FC,
+// never a purchase, so there is no PO. The consolidated orders ARE the invoice
+// lines (reconstruct via orders WHERE shipping_invoice_id = ?), so there is no
+// separate lines table.
+db.exec(`
+CREATE TABLE IF NOT EXISTS shipping_invoices (
+  id TEXT PRIMARY KEY,
+  invoice_number TEXT UNIQUE NOT NULL,          -- SHP-INV-2026-06-0001
+  branch_code TEXT NOT NULL,                     -- FC branch being billed
+  bc_customer_no TEXT DEFAULT '',                -- denormalized BC customer for the SO
+  period TEXT NOT NULL,                           -- 'YYYY-MM' billing-run label (default = prev month)
+  cutoff_date TEXT DEFAULT '',                    -- orders.created_at <= this were swept in (audit)
+  order_count INTEGER NOT NULL DEFAULT 0,         -- N orders consolidated
+  shipping_subtotal REAL NOT NULL DEFAULT 0,      -- 200 * N (pre-VAT)
+  vat_rate REAL NOT NULL DEFAULT 7,
+  vat_amount REAL NOT NULL DEFAULT 0,             -- 7% of shipping_subtotal
+  total REAL NOT NULL DEFAULT 0,                  -- shipping_subtotal + vat_amount
+  wht_rate REAL NOT NULL DEFAULT 0,               -- 0.03
+  wht_base REAL NOT NULL DEFAULT 0,               -- = shipping_subtotal (pre-VAT)
+  wht_amount REAL NOT NULL DEFAULT 0,             -- 3% of shipping_subtotal
+  net_payable REAL NOT NULL DEFAULT 0,            -- total - wht_amount (FC pays this)
+  status TEXT NOT NULL DEFAULT 'pending',         -- pending/paid/verified/cancelled
+  bc_so_id TEXT DEFAULT '',
+  bc_so_no TEXT DEFAULT '',
+  qr_ref TEXT DEFAULT '',
+  slip_path TEXT DEFAULT '',
+  slip_hash TEXT DEFAULT '',
+  receipt_number TEXT DEFAULT '',                 -- set on Finance verify
+  note TEXT DEFAULT '',
+  created_by TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now','localtime')),
+  posted_at TEXT,                                 -- BC SO created at
+  paid_at TEXT,                                   -- FC uploaded slip at
+  verified_by TEXT DEFAULT '',
+  verified_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_shipinv_branch ON shipping_invoices(branch_code, period);
+CREATE INDEX IF NOT EXISTS idx_shipinv_status ON shipping_invoices(status);
+`);
+
+// Link an order to the monthly shipping invoice that billed its shipping accrual.
+// Empty = not yet billed. This is the real double-bill guard (stamped
+// transactionally when the invoice is generated); an order lands on exactly one
+// shipping invoice. The consolidation query selects:
+//   payment_status='verified' AND shipping_fee>0 AND shipping_invoice_id=''
+try { db.exec("ALTER TABLE orders ADD COLUMN shipping_invoice_id TEXT DEFAULT ''"); } catch (e) {}
 
 // ─── Seed admin + demo FC users ───
 // ─── Migration: add name_en column to existing items_cache if missing ───

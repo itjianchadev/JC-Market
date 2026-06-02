@@ -147,7 +147,10 @@ async function showDetail(id) {
     <hr style="border-color:var(--border);margin:12px 0">
     <div style="display:flex;justify-content:space-between;font-size:14px;color:var(--muted)"><span>${t('orders.subtotal')}</span><span>฿${o.subtotal.toLocaleString()}</span></div>
     ${o.vat_amount > 0 ? `<div style="display:flex;justify-content:space-between;font-size:14px;color:var(--muted);margin-top:4px"><span>${t('orders.vat')}</span><span>฿${o.vat_amount.toLocaleString()}</span></div>` : ''}
-    <div style="display:flex;justify-content:space-between;font-size:20px;font-weight:700;margin-top:8px"><span>${t('orders.grand')}</span><span style="color:var(--gold)">฿${o.total.toLocaleString()}</span></div>`;
+    <div style="display:flex;justify-content:space-between;font-size:20px;font-weight:700;margin-top:8px"><span>${t('orders.grand')}</span><span style="color:var(--gold)">฿${o.total.toLocaleString()}</span></div>
+    ${o.wht_amount > 0 ? `<div style="display:flex;justify-content:space-between;font-size:13px;color:var(--err);margin-top:6px"><span>${t('checkout.bd_wht')}</span><span>−฿${o.wht_amount.toLocaleString()}</span></div>
+    <div style="display:flex;justify-content:space-between;font-size:16px;font-weight:700;margin-top:4px"><span>${t('checkout.bd_net')}</span><span style="color:var(--gold)">฿${(o.net_payable||o.total).toLocaleString()}</span></div>
+    <div style="font-size:11px;color:var(--muted);margin-top:6px">${t('checkout.wht_cert_note', { wht: o.wht_amount.toLocaleString() })}</div>` : ''}`;
 
   if (o.note) html += `<div style="margin-top:12px;color:var(--muted);font-size:13px">${t('orders.note_prefix', { note: o.note })}</div>`;
 
@@ -183,7 +186,7 @@ async function showDetail(id) {
       html += `<div style="text-align:center;padding:16px;color:var(--err)"><p style="font-size:24px">⏰</p><p>${t('orders.pay_timeout')}</p></div>`;
     }
     html += `<div style="text-align:center;margin-bottom:16px">
-        <div style="font-size:24px;font-weight:700;color:var(--gold);margin-bottom:8px">฿${o.total.toLocaleString()}</div>
+        <div style="font-size:24px;font-weight:700;color:var(--gold);margin-bottom:8px">฿${(o.net_payable||o.total).toLocaleString()}</div>
         <img id="payQr_${o.id}" src="" style="max-width:240px;border-radius:12px;background:#fff;padding:10px;display:none">
         <p style="font-size:12px;color:var(--muted);margin-top:8px">${t('orders.scan_qr')}</p>
         <div class="row" style="gap:8px;margin-top:8px;justify-content:center">
@@ -220,7 +223,7 @@ async function showDetail(id) {
       </div>
       <h4 style="margin-bottom:12px">${t('orders.reupload_title')}</h4>
       <div style="text-align:center;margin-bottom:16px">
-        <div style="font-size:24px;font-weight:700;color:var(--gold);margin-bottom:8px">฿${o.total.toLocaleString()}</div>
+        <div style="font-size:24px;font-weight:700;color:var(--gold);margin-bottom:8px">฿${(o.net_payable||o.total).toLocaleString()}</div>
         <img id="payQr_${o.id}" src="" style="max-width:240px;border-radius:12px;background:#fff;padding:10px;display:none">
         <p style="font-size:12px;color:var(--muted);margin-top:8px">${t('orders.scan_qr')}</p>
       </div>
@@ -710,12 +713,21 @@ async function showReceipt(orderId) {
             <div style="display:flex;justify-content:space-between;font-size:14px;color:var(--muted);margin-bottom:4px">
               <span>${t('orders.receipt.subtotal')}</span><span>฿${rc.subtotal.toLocaleString()}</span>
             </div>
+            ${rc.shipping_fee > 0 ? `<div style="display:flex;justify-content:space-between;font-size:14px;color:var(--muted);margin-bottom:4px">
+              <span>${t('checkout.bd_shipping')}</span><span>฿${rc.shipping_fee.toLocaleString()}</span>
+            </div>` : ''}
             ${rc.vat_amount > 0 ? `<div style="display:flex;justify-content:space-between;font-size:14px;color:var(--muted);margin-bottom:4px">
               <span>${t('orders.receipt.vat')}</span><span>฿${rc.vat_amount.toLocaleString()}</span>
             </div>` : ''}
             <div style="display:flex;justify-content:space-between;font-size:18px;font-weight:700;border-top:2px solid var(--gold-dark);padding-top:8px;margin-top:4px">
               <span>${t('orders.receipt.grand')}</span><span style="color:var(--gold-dark)">฿${rc.total.toLocaleString()}</span>
             </div>
+            ${rc.wht_amount > 0 ? `<div style="display:flex;justify-content:space-between;font-size:13px;color:var(--err);margin-top:6px">
+              <span>${t('checkout.bd_wht')}</span><span>−฿${rc.wht_amount.toLocaleString()}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:15px;font-weight:700;margin-top:4px">
+              <span>${t('checkout.bd_net')}</span><span style="color:var(--gold-dark)">฿${(rc.net_payable||rc.total).toLocaleString()}</span>
+            </div>` : ''}
           </div>
         </div>
 
@@ -773,10 +785,17 @@ async function downloadOrderPDF(orderId) {
         <td style="padding:6px;border-bottom:1px solid #eee;text-align:right">฿${(l.unit_price||0).toLocaleString()}</td>
         <td style="padding:6px;border-bottom:1px solid #eee;text-align:right;font-weight:600">฿${l.line_total.toLocaleString()}</td>
       </tr>`).join('');
-    const vatRow = (o.vat_amount > 0) ? `
+    const pdfRow = (label, val, minus) => `
       <div style="display:flex;justify-content:space-between;font-size:13px;color:#666;margin-bottom:4px">
-        <span>${t('checkout.pdf_vat')}</span><span>฿${o.vat_amount.toLocaleString()}</span>
-      </div>` : '';
+        <span>${label}</span><span>${minus ? '−' : ''}฿${Math.abs(val).toLocaleString()}</span>
+      </div>`;
+    const vatRow = [
+      o.vat_amount > 0 ? pdfRow(t('checkout.pdf_vat'), o.vat_amount) : '',
+    ].join('');
+    const netRow = (o.wht_amount > 0) ? `
+      ${pdfRow(t('checkout.bd_wht'), o.wht_amount, true)}
+      <div class="grand" style="font-size:16px"><span>${t('checkout.bd_net')}</span><span style="color:#8B7355">฿${(o.net_payable||o.total).toLocaleString()}</span></div>
+      <div style="font-size:11px;color:#777;margin-top:8px">${t('checkout.wht_cert_note', { wht: o.wht_amount.toLocaleString() })}</div>` : '';
     const bcRow = [
       o.bc_po_no ? `<div>${t('orders.bc.po')}: <strong>${o.bc_po_no}</strong></div>` : '',
       o.bc_so_no ? `<div>${t('orders.bc.so')}: <strong>${o.bc_so_no}</strong></div>` : '',
@@ -784,7 +803,7 @@ async function downloadOrderPDF(orderId) {
     const qrPanel = qrData ? `
       <div style="text-align:center;padding:16px;border:1px dashed #AD9C82;border-radius:10px;margin-top:12px">
         <div style="font-weight:600;margin-bottom:8px">PromptPay QR</div>
-        <div style="font-size:24px;font-weight:700;color:#8B7355;margin:8px 0">฿${o.total.toLocaleString()}</div>
+        <div style="font-size:24px;font-weight:700;color:#8B7355;margin:8px 0">฿${(o.net_payable||o.total).toLocaleString()}</div>
         <img src="${qrData}" alt="QR" style="max-width:220px;background:#fff;padding:8px">
         <p style="font-size:12px;color:#777;margin-top:8px">${t('checkout.pdf_scan')}</p>
       </div>` : '';
@@ -832,6 +851,7 @@ async function downloadOrderPDF(orderId) {
         </div>
         ${vatRow}
         <div class="grand"><span>${t('checkout.pdf_total')}</span><span style="color:#8B7355">฿${o.total.toLocaleString()}</span></div>
+        ${netRow}
       </div></div>
       ${qrPanel}
       ${bcRow ? `<div class="bc">${bcRow}</div>` : ''}
