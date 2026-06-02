@@ -146,7 +146,6 @@ async function showDetail(id) {
     </table>
     <hr style="border-color:var(--border);margin:12px 0">
     <div style="display:flex;justify-content:space-between;font-size:14px;color:var(--muted)"><span>${t('orders.subtotal')}</span><span>฿${o.subtotal.toLocaleString()}</span></div>
-    ${o.shipping_fee > 0 ? `<div style="display:flex;justify-content:space-between;font-size:14px;color:var(--muted);margin-top:4px"><span>${t('checkout.bd_shipping')}</span><span>฿${o.shipping_fee.toLocaleString()}</span></div>` : ''}
     ${o.vat_amount > 0 ? `<div style="display:flex;justify-content:space-between;font-size:14px;color:var(--muted);margin-top:4px"><span>${t('orders.vat')}</span><span>฿${o.vat_amount.toLocaleString()}</span></div>` : ''}
     <div style="display:flex;justify-content:space-between;font-size:20px;font-weight:700;margin-top:8px"><span>${t('orders.grand')}</span><span style="color:var(--gold)">฿${o.total.toLocaleString()}</span></div>
     ${o.wht_amount > 0 ? `<div style="display:flex;justify-content:space-between;font-size:13px;color:var(--err);margin-top:6px"><span>${t('checkout.bd_wht')}</span><span>−฿${o.wht_amount.toLocaleString()}</span></div>
@@ -791,7 +790,6 @@ async function downloadOrderPDF(orderId) {
         <span>${label}</span><span>${minus ? '−' : ''}฿${Math.abs(val).toLocaleString()}</span>
       </div>`;
     const vatRow = [
-      o.shipping_fee > 0 ? pdfRow(t('checkout.bd_shipping'), o.shipping_fee) : '',
       o.vat_amount > 0 ? pdfRow(t('checkout.pdf_vat'), o.vat_amount) : '',
     ].join('');
     const netRow = (o.wht_amount > 0) ? `

@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="th"><head>
+<meta charset="utf-8"><title>Shipping Billing — JC-Market</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<style>
+.section{margin-bottom:28px}
+.section h3{font-size:16px;font-weight:700;margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid var(--gold);display:inline-block}
+.dtable{width:100%;border-collapse:collapse;font-size:13px}
+.dtable thead th{background:var(--beige);color:var(--gold-dark);padding:8px 10px;text-align:left;font-size:12px;font-weight:600;border-bottom:1px solid var(--gold);white-space:nowrap}
+.dtable tbody td{padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
+.dtable tbody tr:hover{background:rgba(173,156,130,.08)}
+.dtable tfoot td{padding:8px 10px;font-weight:700;border-top:2px solid var(--gold);background:var(--beige)}
+.num{text-align:right;white-space:nowrap}
+.pay-badge{display:inline-block;padding:2px 10px;border-radius:99px;font-size:11px;font-weight:600;white-space:nowrap}
+.pay-pending{background:#fff3e0;color:#e65100}
+.pay-paid{background:#e3f2fd;color:#1565c0}
+.pay-verified{background:#e8f5e9;color:#2e7d32}
+.pay-failed{background:#ffebee;color:#c62828}
+.pay-cancelled{background:#f5f5f5;color:#999}
+.slip-thumb{width:38px;height:38px;border-radius:6px;object-fit:cover;cursor:pointer;border:1px solid var(--border)}
+.action-btns{display:flex;gap:6px;flex-wrap:wrap}
+.mini{padding:4px 10px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600;border:none;white-space:nowrap}
+.mini.approve{background:var(--ok);color:#fff}
+.mini.reject{background:var(--err);color:#fff}
+.mini.ghost{background:transparent;color:var(--gold-dark);border:1px solid var(--border-strong)}
+.mini:hover{opacity:.85}
+.filters{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px}
+.filters label{margin-bottom:0}
+.filters .fld{min-width:150px}
+.modal{position:fixed;inset:0;background:rgba(42,33,24,.5);backdrop-filter:blur(4px);z-index:1000;display:none;align-items:center;justify-content:center;padding:20px}
+.modal .box{background:#fff;border-radius:14px;max-width:640px;width:100%;max-height:86vh;overflow:auto;padding:22px;box-shadow:0 8px 30px rgba(0,0,0,.3)}
+.slip-modal{position:fixed;inset:0;background:rgba(42,33,24,.5);backdrop-filter:blur(4px);z-index:1100;display:none;align-items:center;justify-content:center}
+.slip-modal img{max-width:90vw;max-height:80vh;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.3)}
+.summary-pill{display:inline-flex;gap:6px;align-items:baseline;background:var(--beige);border:1px solid var(--border);border-radius:10px;padding:8px 14px;margin-right:8px}
+.summary-pill .v{font-weight:700;color:var(--gold-dark)}
+.note-bc{color:var(--err);font-size:11px}
+@media(max-width:768px){.dtable{font-size:12px}.dtable thead th,.dtable tbody td{padding:6px 6px}}
+</style>
+</head><body data-i18n-title="shipbill.page_title">
+<div id="nav"></div>
+<div class="container">
+  <h2 style="margin-bottom:4px" data-i18n="shipbill.title">เรียกเก็บค่าขนส่งรายเดือน</h2>
+  <p style="color:var(--muted);font-size:13px;margin-bottom:20px" data-i18n="shipbill.subtitle">รวบค่าขนส่งของออเดอร์ FC ที่ตรวจสอบแล้วในงวด แล้วเปิด Sales Order แยกใน BC เพื่อเรียกเก็บ</p>
+
+  <!-- Generate -->
+  <div class="section">
+    <h3 data-i18n="shipbill.gen_title">สร้างใบแจ้งหนี้</h3>
+    <div class="card">
+      <div class="filters">
+        <label class="fld"><div data-i18n="shipbill.period">งวด (เดือน)</div>
+          <input type="month" id="genPeriod"></label>
+        <label class="fld"><div data-i18n="shipbill.branch_filter">เฉพาะสาขา (เว้นว่าง = ทุกสาขา)</div>
+          <input type="text" id="genBranch" placeholder="JF039"></label>
+        <button class="btn sm" onclick="loadPreview()" data-i18n="shipbill.preview">ดูตัวอย่าง</button>
+        <button class="btn sm" id="genBtn" onclick="generateInvoices()" disabled data-i18n="shipbill.generate">สร้าง + เปิด SO ใน BC</button>
+      </div>
+      <div id="previewMeta" style="margin-bottom:10px;display:none"></div>
+      <div style="overflow-x:auto">
+        <table class="dtable" id="previewTable" style="display:none">
+          <thead><tr>
+            <th data-i18n="shipinv.col.branch">สาขา</th>
+            <th class="num" data-i18n="shipinv.col.orders">ออเดอร์</th>
+            <th class="num" data-i18n="shipinv.col.shipping">ค่าขนส่ง</th>
+            <th class="num" data-i18n="shipinv.col.vat">VAT 7%</th>
+            <th class="num" data-i18n="shipinv.col.total">รวม</th>
+            <th class="num" data-i18n="shipinv.col.wht">หัก ณ ที่จ่าย</th>
+            <th class="num" data-i18n="shipinv.col.net">ยอดสุทธิ</th>
+          </tr></thead>
+          <tbody id="previewBody"></tbody>
+          <tfoot id="previewFoot"></tfoot>
+        </table>
+      </div>
+      <p id="previewEmpty" style="display:none;color:var(--muted);padding:10px 0" data-i18n="shipbill.no_candidates">ไม่มีออเดอร์ค้างเรียกเก็บในงวดนี้</p>
+    </div>
+  </div>
+
+  <!-- Invoices -->
+  <div class="section">
+    <h3 data-i18n="shipbill.invoices_title">ใบแจ้งหนี้ค่าขนส่ง</h3>
+    <div class="card">
+      <div class="filters">
+        <label class="fld"><div data-i18n="shipbill.period">งวด (เดือน)</div>
+          <input type="month" id="fltPeriod"></label>
+        <label class="fld"><div data-i18n="shipinv.col.status">สถานะ</div>
+          <select id="fltStatus">
+            <option value="" data-i18n="shipinv.all_status">ทุกสถานะ</option>
+            <option value="pending" data-i18n="shipinv.status.pending">รอชำระ</option>
+            <option value="paid" data-i18n="shipinv.status.paid">รอตรวจสอบ</option>
+            <option value="verified" data-i18n="shipinv.status.verified">อนุมัติแล้ว</option>
+            <option value="failed" data-i18n="shipinv.status.failed">ไม่ผ่าน</option>
+          </select></label>
+        <label class="fld"><div data-i18n="shipinv.col.branch">สาขา</div>
+          <input type="text" id="fltBranch" placeholder="JF039"></label>
+        <button class="btn sm" onclick="loadInvoices()" data-i18n="shipbill.load">โหลด</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="dtable">
+          <thead><tr>
+            <th data-i18n="shipinv.col.invoice">เลขที่</th>
+            <th data-i18n="shipinv.col.branch">สาขา</th>
+            <th data-i18n="shipinv.col.period">งวด</th>
+            <th class="num" data-i18n="shipinv.col.orders">ออเดอร์</th>
+            <th class="num" data-i18n="shipinv.col.total">รวม</th>
+            <th class="num" data-i18n="shipinv.col.wht">หัก ณ ที่จ่าย</th>
+            <th class="num" data-i18n="shipinv.col.net">ยอดสุทธิ</th>
+            <th data-i18n="shipinv.col.status">สถานะ</th>
+            <th data-i18n="shipinv.col.bc_so">BC SO</th>
+            <th data-i18n="shipinv.col.slip">สลิป</th>
+            <th data-i18n="shipinv.col.action">จัดการ</th>
+          </tr></thead>
+          <tbody id="invBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Detail modal -->
+<div class="modal" id="detailModal" onclick="if(event.target===this)this.style.display='none'">
+  <div class="box">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h3 style="margin:0" data-i18n="shipbill.detail_title">รายการออเดอร์ในใบแจ้งหนี้</h3>
+      <button class="mini ghost" onclick="document.getElementById('detailModal').style.display='none'" data-i18n="common.close">ปิด</button>
+    </div>
+    <div id="detailHead" style="color:var(--muted);font-size:13px;margin-bottom:10px"></div>
+    <table class="dtable">
+      <thead><tr>
+        <th data-i18n="shipinv.col.order_no">Order</th>
+        <th data-i18n="shipinv.col.date">วันที่</th>
+        <th class="num" data-i18n="shipinv.col.shipping">ค่าขนส่ง</th>
+      </tr></thead>
+      <tbody id="detailBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Slip preview modal -->
+<div class="slip-modal" id="slipModal" onclick="this.style.display='none'"><img id="slipImg" src=""></div>
+
+<script src="/js/app.js"></script>
+<script>
+if(!requireLogin()) throw '';
+const u = getUser();
+// HQ-only: super_admin / admin_scm / finance (matches requireAdmin on the API).
+if(u.role !== 'super_admin' && u.role !== 'admin_scm' && u.role !== 'finance'){ location.href='/index.html'; throw ''; }
+document.getElementById('nav').innerHTML = renderNav('shipping-billing.html');
+
+const money = n => '฿' + Number(n||0).toLocaleString(undefined,{maximumFractionDigits:2});
+const STATUS = s => `<span class="pay-badge pay-${s}">${t('shipinv.status.'+s)||s}</span>`;
+function fmtDate(d){ if(!d) return '-'; const loc=getLang()==='th'?'th-TH':'en-US'; return new Date(d.replace(' ','T')).toLocaleDateString(loc,{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}); }
+
+// Default both month pickers to the previous month (the typical billing target).
+(function initPeriods(){
+  const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-1);
+  const ym=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+  document.getElementById('genPeriod').value=ym;
+})();
+
+let previewCache=null;
+async function loadPreview(){
+  const period=document.getElementById('genPeriod').value;
+  const branch=document.getElementById('genBranch').value.trim();
+  if(!period){ toast(t('shipbill.period')); return; }
+  try{
+    const qs=new URLSearchParams({period}); if(branch) qs.set('branch_code',branch);
+    previewCache=await api('/api/shipping-invoices/preview?'+qs.toString());
+    renderPreview();
+  }catch(e){ toast(e.message); }
+}
+function renderPreview(){
+  const p=previewCache; if(!p) return;
+  const tbl=document.getElementById('previewTable'), body=document.getElementById('previewBody'),
+        foot=document.getElementById('previewFoot'), meta=document.getElementById('previewMeta'),
+        empty=document.getElementById('previewEmpty'), genBtn=document.getElementById('genBtn');
+  meta.style.display='';
+  meta.innerHTML=`<span class="summary-pill"><span data-i18n="shipbill.cutoff">ตัดยอดถึง</span><span class="v">${p.cutoff}</span></span>`
+    +`<span class="summary-pill"><span class="v">${p.branch_count}</span><span data-i18n="shipbill.branches">สาขา</span></span>`;
+  applyI18n(meta);
+  if(!p.rows.length){ tbl.style.display='none'; empty.style.display=''; genBtn.disabled=true; return; }
+  empty.style.display='none'; tbl.style.display=''; genBtn.disabled=false;
+  body.innerHTML=p.rows.map(r=>`<tr>
+    <td><strong>${r.branch_name||r.branch_code}</strong> <span style="color:var(--muted);font-size:11px">${r.branch_code}</span></td>
+    <td class="num">${r.order_count}</td>
+    <td class="num">${money(r.shipping_subtotal)}</td>
+    <td class="num">${money(r.vat_amount)}</td>
+    <td class="num">${money(r.total)}</td>
+    <td class="num" style="color:var(--err)">-${money(r.wht_amount)}</td>
+    <td class="num" style="font-weight:700;color:var(--gold-dark)">${money(r.net_payable)}</td>
+  </tr>`).join('');
+  const tt=p.totals;
+  foot.innerHTML=`<tr>
+    <td data-i18n="common.total">รวม</td>
+    <td class="num">${tt.order_count}</td>
+    <td class="num">${money(tt.shipping_subtotal)}</td>
+    <td class="num">${money(tt.vat_amount)}</td>
+    <td class="num">${money(tt.total)}</td>
+    <td class="num" style="color:var(--err)">-${money(tt.wht_amount)}</td>
+    <td class="num" style="color:var(--gold-dark)">${money(tt.net_payable)}</td>
+  </tr>`;
+  applyI18n(foot);
+}
+
+async function generateInvoices(){
+  const period=document.getElementById('genPeriod').value;
+  const branch=document.getElementById('genBranch').value.trim();
+  if(!period) return;
+  if(!confirm(t('shipbill.confirm_generate',{period}))) return;
+  const btn=document.getElementById('genBtn'); btn.disabled=true; btn.textContent='...';
+  try{
+    const r=await api('/api/shipping-invoices/generate',{method:'POST',body:JSON.stringify({period,branch_code:branch||undefined})});
+    toast(r.message||t('shipbill.gen_ok'));
+    // surface any per-branch BC failures
+    const bcFails=(r.created||[]).filter(c=>c.bc&&c.bc.ok===false);
+    if(bcFails.length) toast(t('shipbill.bc_warn',{n:bcFails.length}));
+    previewCache=null;
+    document.getElementById('previewTable').style.display='none';
+    document.getElementById('previewMeta').style.display='none';
+    document.getElementById('previewEmpty').style.display='none';
+    document.getElementById('fltPeriod').value=period;
+    loadInvoices();
+  }catch(e){ toast(e.message); }
+  finally{ btn.textContent=t('shipbill.generate'); btn.disabled=false; }
+}
+
+let invCache=[];
+async function loadInvoices(){
+  try{
+    const qs=new URLSearchParams();
+    const p=document.getElementById('fltPeriod').value; if(p) qs.set('period',p);
+    const s=document.getElementById('fltStatus').value; if(s) qs.set('status',s);
+    const b=document.getElementById('fltBranch').value.trim(); if(b) qs.set('branch_code',b);
+    invCache=await api('/api/shipping-invoices?'+qs.toString());
+    renderInvoices();
+  }catch(e){ toast(e.message); }
+}
+function renderInvoices(){
+  const body=document.getElementById('invBody');
+  if(!invCache.length){ body.innerHTML=`<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:16px">${t('shipbill.none')}</td></tr>`; return; }
+  body.innerHTML=invCache.map(v=>{
+    const bcCell = v.bc_so_no
+      ? `<span style="font-family:monospace;font-size:12px">${v.bc_so_no}</span>`
+      : `<span class="note-bc">${(v.note||'').startsWith('[BC]')?'BC error':'—'}</span>`;
+    const slip = v.slip_path ? `<img src="${v.slip_path}" class="slip-thumb" onclick="viewSlip('${v.slip_path}')">` : '<span style="color:var(--muted)">-</span>';
+    const acts=[];
+    if(v.status==='paid'){
+      acts.push(`<button class="mini approve" onclick="verifyInv('${v.id}','approve')">${t('admin.approve')}</button>`);
+      acts.push(`<button class="mini reject" onclick="verifyInv('${v.id}','reject')">${t('admin.reject')}</button>`);
+    }
+    if(!v.bc_so_no) acts.push(`<button class="mini ghost" onclick="retryBc('${v.id}',this)">${t('shipbill.retry_bc')}</button>`);
+    acts.push(`<button class="mini ghost" onclick="viewDetail('${v.id}')">${t('shipbill.view')}</button>`);
+    return `<tr>
+      <td style="font-family:monospace;font-size:12px">${v.invoice_number}${v.receipt_number?`<br><span style="color:var(--ok)">${v.receipt_number}</span>`:''}</td>
+      <td><strong>${v.branch_code}</strong></td>
+      <td>${v.period}</td>
+      <td class="num">${v.order_count}</td>
+      <td class="num">${money(v.total)}</td>
+      <td class="num" style="color:var(--err)">-${money(v.wht_amount)}</td>
+      <td class="num" style="font-weight:700;color:var(--gold-dark)">${money(v.net_payable)}</td>
+      <td>${STATUS(v.status)}</td>
+      <td>${bcCell}</td>
+      <td>${slip}</td>
+      <td><div class="action-btns">${acts.join('')}</div></td>
+    </tr>`;
+  }).join('');
+}
+
+async function verifyInv(id,action){
+  let reason='';
+  if(action==='reject'){ reason=prompt(t('shipbill.reject_reason')); if(reason===null) return; }
+  else if(!confirm(t('shipbill.confirm_approve'))) return;
+  try{
+    const r=await api(`/api/shipping-invoices/${id}/verify`,{method:'POST',body:JSON.stringify({action,reason})});
+    toast(r.receipt_number?t('shipbill.approved',{rc:r.receipt_number}):t('shipbill.rejected'));
+    loadInvoices();
+  }catch(e){ toast(e.message); }
+}
+
+async function retryBc(id,btn){
+  btn.disabled=true; const old=btn.textContent; btn.textContent='...';
+  try{
+    const r=await api(`/api/shipping-invoices/${id}/post`,{method:'POST'});
+    toast(r.bc_so_no?t('shipbill.bc_ok',{so:r.bc_so_no}):'OK');
+    loadInvoices();
+  }catch(e){ toast(e.message); btn.disabled=false; btn.textContent=old; }
+}
+
+async function viewDetail(id){
+  try{
+    const inv=await api('/api/shipping-invoices/'+id);
+    document.getElementById('detailHead').innerHTML=
+      `${inv.invoice_number} · <strong>${inv.branch_code}</strong> · ${inv.period} · ${money(inv.shipping_subtotal)} (${inv.order_count} ${t('shipinv.col.orders')})`;
+    document.getElementById('detailBody').innerHTML=(inv.orders||[]).map(o=>`<tr>
+      <td><a href="/orders.html?id=${o.id}" target="_blank" style="color:var(--gold-dark);text-decoration:underline">${o.order_number}</a></td>
+      <td>${fmtDate(o.created_at)}</td>
+      <td class="num">${money(o.shipping_fee)}</td>
+    </tr>`).join('');
+    document.getElementById('detailModal').style.display='flex';
+  }catch(e){ toast(e.message); }
+}
+
+function viewSlip(p){ document.getElementById('slipImg').src=p; document.getElementById('slipModal').style.display='flex'; }
+
+window.onLangChange=()=>{
+  document.getElementById('nav').innerHTML=renderNav('shipping-billing.html');
+  if(previewCache) renderPreview();
+  renderInvoices();
+};
+
+loadInvoices();
+</script>
+</body></html>

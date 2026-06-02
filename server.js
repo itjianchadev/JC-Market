@@ -628,35 +628,27 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
   });
   tx();
 
-  // Local total calculation. For FC sales we layer two add-ons on top of goods:
-  //   1. Flat shipping fee (pre-VAT) — env FC_SHIPPING_FEE (default 200).
-  //   2. 3% withholding tax (WHT) on the SHIPPING ONLY. Goods are a sale of
-  //      goods (no WHT in TH — WHT applies to services). net_payable =
-  //      total - wht_amount is the cash the FC transfers via PromptPay; the BC
-  //      SO/PO still carry the FULL total and the FC hands JC a WHT certificate
-  //      for the withheld 6 THB (JC's prepaid-tax credit).
-  // JC master outlets (jc_transfer / jc_purchase) are internal movements
-  // between company-owned locations, not external sales — no VAT, no shipping,
-  // no WHT, and net_payable === total (they never pay).
+  // Local total calculation — Thai standard 7% VAT on GOODS only. The flat FC
+  // shipping fee (env FC_SHIPPING_FEE, default 200) is NOT billed on this order:
+  // it is recorded as an ACCRUAL (orders.shipping_fee) and collected later via a
+  // consolidated monthly shipping invoice — one BC Sales Order per FC branch
+  // with the shipping G/L line + VAT + 3% WHT (see /api/shipping-invoices/*).
+  // So per-order wht_* stay 0 and net_payable === total (goods + VAT). JC master
+  // outlets are internal movements — no VAT, no shipping accrual, net === total.
   const vatRate     = isJcBranch ? 0 : 0.07;
-  const shippingFee = isJcBranch ? 0 : Math.round((parseFloat(process.env.FC_SHIPPING_FEE) || 200) * 100) / 100;
-  const whtRate     = isJcBranch ? 0 : (parseFloat(process.env.FC_WHT_RATE) || 0.03);
-  const taxableBase = subtotal + shippingFee;                            // goods + shipping, pre-VAT
-  const vatAmount   = Math.round(taxableBase * vatRate * 100) / 100;     // VAT on goods + shipping
-  const total       = Math.round((taxableBase + vatAmount) * 100) / 100; // full invoice → orders.total
-  const whtBase     = shippingFee;                                       // WHT base = shipping only
-  const whtAmount   = Math.round(whtRate * whtBase * 100) / 100;         // 0.03 × 200 = 6.00 flat
-  const netPayable  = Math.round((total - whtAmount) * 100) / 100;       // PromptPay QR + slip amount
+  const shippingFee = isJcBranch ? 0 : Math.round((parseFloat(process.env.FC_SHIPPING_FEE) || 200) * 100) / 100; // accrual only — excluded from total
+  const vatAmount   = Math.round(subtotal * vatRate * 100) / 100;        // VAT on goods only
+  const total       = Math.round((subtotal + vatAmount) * 100) / 100;    // goods + VAT → orders.total
+  const netPayable  = total;                                             // no per-order WHT → QR/slip = full goods total
 
-  db.prepare('UPDATE orders SET shipping_fee=?, vat_amount=?, total=?, wht_rate=?, wht_base=?, wht_amount=?, net_payable=? WHERE id=?')
-    .run(shippingFee, vatAmount, total, whtRate, whtBase, whtAmount, netPayable, orderId);
-  // payments.amount stays the FULL total (accounts-receivable). The slip check
-  // compares the transferred amount against net_payable (total - wht), NOT
-  // payments.amount — the FC pays cash net of WHT.
+  db.prepare('UPDATE orders SET shipping_fee=?, vat_amount=?, total=?, wht_rate=0, wht_base=0, wht_amount=0, net_payable=? WHERE id=?')
+    .run(shippingFee, vatAmount, total, netPayable, orderId);
+  // payments.amount = the goods total (accounts-receivable for this order). The
+  // 200 shipping accrual is billed separately on the monthly shipping invoice.
   db.prepare('UPDATE payments SET amount=? WHERE order_id=?').run(total, orderId);
 
-  // Generate PromptPay QR for FC only — JC branches don't pay. The QR encodes
-  // net_payable (cash net of WHT), never the full total.
+  // Generate PromptPay QR for FC only — JC branches don't pay. Per-order QR
+  // encodes the goods total (net_payable === total); shipping is billed monthly.
   let qrDataUrl = '';
   if (!isJcBranch) {
     try {
@@ -727,11 +719,11 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
     order_id: orderId,
     order_number: orderNumber,
     subtotal,
-    shipping_fee: shippingFee,
+    shipping_accrual: shippingFee, // 200 accrual — billed later on the monthly shipping invoice, NOT part of total
     vat_amount: vatAmount,
     total,
-    wht_amount: whtAmount,
-    net_payable: netPayable,
+    wht_amount: 0,                 // per-order has no WHT; WHT applies on the monthly shipping bill
+    net_payable: netPayable,       // === total (goods + VAT)
     payment_method: paymentMethod,
     credit_due_at: creditDueAt,
     is_fruit: isFruitOrder,
@@ -794,8 +786,9 @@ app.get('/api/orders/:id/qr', requireAuth, async (req, res) => {
   // amount and need the QR again to re-pay.
   if (order.payment_status !== 'pending' && order.payment_status !== 'failed') return res.status(400).json({ error: 'Order already paid' });
   try {
-    // FC pays net of WHT → encode net_payable. Legacy orders created before the
-    // WHT feature have net_payable=0 → fall back to the full total.
+    // Per-order QR encodes the goods total (net_payable === total now — shipping
+    // and WHT moved to the monthly invoice). Fall back to total for any legacy
+    // row with net_payable=0.
     const payAmount = order.net_payable > 0 ? order.net_payable : order.total;
     const qr = await generateQR(payAmount);
     res.json({ qr_data_url: qr, total: order.total, net_payable: payAmount });
@@ -840,10 +833,9 @@ app.post('/api/orders/:id/slip', requireAuth, upload.single('slip'), async (req,
     return { duplicate: false };
   };
 
-  // The FC transfers cash NET of WHT, so the slip amount must match net_payable
-  // (total - wht), NOT order.total. payments.amount stays the full total (AR);
-  // this expected-amount check is the one place that uses the net figure.
-  // Legacy orders (pre-WHT) have net_payable=0 → fall back to total.
+  // Per-order slip must match the goods total (net_payable === total now; WHT is
+  // only deducted on the monthly shipping invoice). Fall back to total for any
+  // legacy row with net_payable=0.
   const expectedAmount = order.net_payable > 0 ? order.net_payable : order.total;
 
   // Auto-verify slip with anti-fraud
@@ -987,7 +979,7 @@ app.post('/api/orders/:id/verify', requireAuth, requireAdmin, async (req, res) =
         db.prepare("UPDATE orders SET payment_status='verified' WHERE id=?").run(order.id);
         db.prepare("UPDATE payments SET verified=1, verified_by=?, verified_at=datetime('now','localtime') WHERE order_id=?").run(req.user.id, order.id);
         db.prepare("INSERT INTO payment_receipts (id, order_id, receipt_number, issued_by, subtotal, shipping_fee, vat_amount, total, wht_amount, net_payable) VALUES (?,?,?,?,?,?,?,?,?,?)")
-          .run(rcptId, order.id, rcptNo, req.user.id, order.subtotal, order.shipping_fee || 0, order.vat_amount, order.total, order.wht_amount || 0, order.net_payable || order.total);
+          .run(rcptId, order.id, rcptNo, req.user.id, order.subtotal, 0, order.vat_amount, order.total, 0, order.net_payable || order.total); // per-order receipt: goods + VAT only (shipping/WHT billed monthly)
       });
       tx();
     } catch (e) {
@@ -1097,7 +1089,7 @@ app.get('/api/orders/:id/receipt', requireAuth, (req, res) => {
     const rcptNo = genReceiptNumber();
     const adminUser = db.prepare("SELECT id FROM users WHERE role IN ('super_admin','admin_scm') ORDER BY CASE role WHEN 'super_admin' THEN 0 ELSE 1 END LIMIT 1").get();
     db.prepare("INSERT INTO payment_receipts (id, order_id, receipt_number, issued_by, subtotal, shipping_fee, vat_amount, total, wht_amount, net_payable) VALUES (?,?,?,?,?,?,?,?,?,?)")
-      .run(rcptId, order.id, rcptNo, adminUser ? adminUser.id : '', order.subtotal, order.shipping_fee || 0, order.vat_amount, order.total, order.wht_amount || 0, order.net_payable || order.total);
+      .run(rcptId, order.id, rcptNo, adminUser ? adminUser.id : '', order.subtotal, 0, order.vat_amount, order.total, 0, order.net_payable || order.total); // per-order receipt: goods + VAT only (shipping/WHT billed monthly)
     receipt = db.prepare(`
       SELECT pr.*, u.full_name as issued_by_name
       FROM payment_receipts pr LEFT JOIN users u ON u.id = pr.issued_by
@@ -1155,27 +1147,10 @@ async function postOrderToBC(orderId) {
     });
   }
 
-  // 2b. FC freight line — flat shipping fee posted as a G/L Account line (not an
-  // Item). The account's Gen. Posting Type = Sale (set on the account card) is
-  // what drives output VAT, since v2.0 can't set Gen. Posting Type on the line
-  // directly. FC only: shipping_fee>0. JC master orders have shipping_fee=0 so
-  // this is skipped. No locationId — G/L lines don't post inventory.
-  if (order.shipping_fee > 0) {
-    const freightGlNo = (process.env.BC_FREIGHT_GL_SALES_NO || '').trim();
-    const freightAcctId = freightGlNo ? await bc.findGLAccountIdByNo(freightGlNo).catch(() => null) : null;
-    if (freightAcctId) {
-      await bc.addSalesOrderLine(soId, {
-        accountId: freightAcctId,
-        lineType: 'Account',
-        quantity: 1,
-        unitPrice: order.shipping_fee,
-        description: 'ค่าขนส่ง',
-      });
-    } else {
-      db.prepare('INSERT INTO sync_log (kind, status, message, count) VALUES (?,?,?,?)')
-        .run('sales_order', 'warn', `SO ${soNo}: freight G/L '${freightGlNo}' not found in BC — shipping line skipped`, 1);
-    }
-  }
+  // NOTE: shipping is NO LONGER billed per-order. The flat 200 THB freight is
+  // accrued on each FC order (orders.shipping_fee) and consolidated into a
+  // SEPARATE monthly Sales Order per branch — see postShippingSOToBC(). So this
+  // per-order SO carries goods lines only; no freight G/L line here anymore.
 
   // 3. Read back SO totals from BC (VAT calculated by BC)
   const soFinal = await bc.getSalesOrder(soId);
@@ -1189,20 +1164,18 @@ async function postOrderToBC(orderId) {
   //    PO creation has been intentionally taken out of this flow — the procurement
   //    side will be triggered separately later, not as part of checkout/payment.
   const newOrderNumber = soNo || order.order_number;
-  // Recompute net_payable off the BC-posted total. wht_amount was frozen at
-  // checkout/reorder (3% of shipping). FC transfers net of WHT via PromptPay;
-  // the BC SO + payments.amount keep the FULL total (accounts-receivable).
-  const whtAmount = order.wht_amount || 0;
-  const netPayable = Math.round((totalInclVat - whtAmount) * 100) / 100;
+  // net_payable = BC-posted total. No per-order WHT anymore (WHT applies only to
+  // the monthly shipping invoice), so QR/slip == full goods-incl-VAT total.
+  const netPayable = totalInclVat;
   db.prepare("UPDATE orders SET order_number=?, bc_so_id=?, bc_so_no=?, vat_amount=?, total=?, net_payable=?, posted_at=datetime('now','localtime') WHERE id=?")
     .run(newOrderNumber, soId, soNo, vatAmount, totalInclVat, netPayable, orderId);
 
-  // Update payment amount to match BC total (full AR; FC pays net_payable).
+  // Update payment amount to match BC total.
   db.prepare('UPDATE payments SET amount=? WHERE order_id=?').run(totalInclVat, orderId);
 
   // Guard: the QR/slip amount was computed off our LOCAL total. If BC's posted
-  // total drifts beyond a rounding tolerance the freight line or a VAT-setup
-  // mismatch is the likely cause — surface it for finance review.
+  // total drifts beyond a rounding tolerance a VAT-setup mismatch is the likely
+  // cause — surface it for finance review.
   if (order.total && Math.abs(totalInclVat - order.total) > 0.5) {
     db.prepare('INSERT INTO sync_log (kind, status, message, count) VALUES (?,?,?,?)')
       .run('sales_order', 'warn', `SO ${soNo}: BC total ${totalInclVat} != local ${order.total} (Δ${(totalInclVat - order.total).toFixed(2)})`, 1);
@@ -1293,26 +1266,9 @@ async function postPOToBC(orderId, vendorNo) {
     }
   }
 
-  // FC freight line on the PO too — mirrors the SO so procurement carries the
-  // full landed cost. G/L Account line, so the Purchase Price lookup quirk
-  // (Item-only) doesn't apply → no POST+PATCH dance, directUnitCost sticks on
-  // the first POST. JC orders have shipping_fee=0 so this is skipped.
-  if (order.shipping_fee > 0) {
-    const freightGlNo = (process.env.BC_FREIGHT_GL_PURCH_NO || '').trim();
-    const freightAcctId = freightGlNo ? await bc.findGLAccountIdByNo(freightGlNo).catch(() => null) : null;
-    if (freightAcctId) {
-      await bc.addPurchaseOrderLine(poId, {
-        accountId: freightAcctId,
-        lineType: 'Account',
-        quantity: 1,
-        directUnitCost: order.shipping_fee,
-        description: 'ค่าขนส่ง',
-      });
-    } else {
-      db.prepare('INSERT INTO sync_log (kind, status, message, count) VALUES (?,?,?,?)')
-        .run('purchase_order', 'warn', `PO ${poNo}: freight G/L '${freightGlNo}' not found in BC — shipping line skipped`, 1);
-    }
-  }
+  // NOTE: no freight line on the PO anymore. Shipping is a service JC sells to
+  // the FC (billed via the monthly shipping SO), not something JC purchases, so
+  // it never belonged on the goods PO. Monthly shipping billing is SO-only.
 
   // Clear any stale [PO]-prefixed sync error from a previous failed attempt.
   const clearErr = (order.bc_sync_error || '').startsWith('[PO]') ? '' : (order.bc_sync_error || '');
@@ -2475,37 +2431,39 @@ app.get('/api/admin/dashboard', requireAuth, requireAdmin, (req, res) => {
 });
 
 // ─── Report: Withholding Tax (WHT) on shipping ───────────────────────────
-// FC orders withhold 3% on the flat 200 THB shipping fee (6 THB each). The
-// sale of goods carries no WHT in TH — only the freight service does. This
-// report sums the withheld amount per branch per month so finance can
-// reconcile the PND.53 filing and chase WHT certificates from each FC.
-// Verified orders only — WHT is realised when the FC actually pays.
+// WHT (3%) is withheld on the freight service when the FC settles its MONTHLY
+// consolidated shipping invoice — the sale of goods carries no WHT in TH. This
+// report sums the withheld amount per branch per month from verified shipping
+// invoices so finance can reconcile the PND.53 filing and chase WHT
+// certificates from each FC. Verified invoices only — WHT is realised when the
+// FC actually pays and Finance approves. Filtered by the withholding date
+// (verified_at, falling back to created_at).
 app.get('/api/reports/wht', requireAuth, requireAdmin, (req, res) => {
   const to   = (req.query.to   || '').trim() || new Date().toISOString().slice(0, 10);
   const from = (req.query.from || '').trim() || new Date(Date.now() - 365 * 864e5).toISOString().slice(0, 10);
   const branch = (req.query.branch || '').trim();
 
   const where = [
-    'o.wht_amount > 0',
-    "o.payment_status = 'verified'",
-    'DATE(o.created_at) >= DATE(?)',
-    'DATE(o.created_at) <= DATE(?)',
+    "si.status = 'verified'",
+    'si.wht_amount > 0',
+    "DATE(COALESCE(si.verified_at, si.created_at)) >= DATE(?)",
+    "DATE(COALESCE(si.verified_at, si.created_at)) <= DATE(?)",
   ];
   const params = [from, to];
-  if (branch) { where.push('o.branch_code = ?'); params.push(branch); }
+  if (branch) { where.push('si.branch_code = ?'); params.push(branch); }
 
   const rows = db.prepare(`
-    SELECT strftime('%Y-%m', o.created_at)  AS month,
-           o.branch_code,
-           COALESCE(MAX(u.branch_name), o.branch_code) AS branch_name,
-           COUNT(o.id)                       AS order_count,
-           COALESCE(SUM(o.shipping_fee), 0)  AS shipping_total,
-           COALESCE(SUM(o.wht_amount), 0)    AS wht_total,
-           COALESCE(SUM(o.total), 0)         AS invoice_total
-    FROM orders o
-    LEFT JOIN users u ON u.id = o.user_id
+    SELECT si.period                              AS month,
+           si.branch_code,
+           COALESCE(MAX(b.name), si.branch_code)  AS branch_name,
+           COALESCE(SUM(si.order_count), 0)       AS order_count,
+           COALESCE(SUM(si.shipping_subtotal), 0) AS shipping_total,
+           COALESCE(SUM(si.wht_amount), 0)        AS wht_total,
+           COALESCE(SUM(si.total), 0)             AS invoice_total
+    FROM shipping_invoices si
+    LEFT JOIN branches b ON b.code = si.branch_code
     WHERE ${where.join(' AND ')}
-    GROUP BY month, o.branch_code
+    GROUP BY month, si.branch_code
     ORDER BY month DESC, wht_total DESC
   `).all(...params);
 
@@ -2633,27 +2591,23 @@ app.post('/api/orders/:id/reorder', requireAuth, async (req, res) => {
   const orderNumber = genOrderNumber();
   const subtotal = cartItems.reduce((s, r) => s + r.quantity * r.unit_price, 0);
 
-  // Mirror checkout: FC reorders carry a flat shipping fee (pre-VAT) + 3% WHT on
-  // the shipping only. JC master branches pay nothing — no shipping/VAT/WHT.
-  // net_payable (total - wht) drives the PromptPay QR; orders.total + the BC SO
-  // keep the FULL amount. See /api/checkout for the full rationale.
+  // Mirror checkout: goods + 7% VAT only. The flat FC shipping fee is recorded
+  // as an accrual (orders.shipping_fee) and billed later on the monthly shipping
+  // invoice — never on this order. wht_* stay 0 and net_payable === total. JC
+  // master branches pay nothing (and accrue no shipping).
   const reBranchRow = req.user.branch_code
     ? db.prepare('SELECT branch_type FROM branches WHERE code = ?').get(req.user.branch_code)
     : null;
   const reIsJc      = reBranchRow && reBranchRow.branch_type === 'jc';
   const reVatRate   = reIsJc ? 0 : 0.07;
-  const reShipping  = reIsJc ? 0 : Math.round((parseFloat(process.env.FC_SHIPPING_FEE) || 200) * 100) / 100;
-  const reWhtRate   = reIsJc ? 0 : (parseFloat(process.env.FC_WHT_RATE) || 0.03);
-  const reTaxable   = subtotal + reShipping;
-  const reVat       = Math.round(reTaxable * reVatRate * 100) / 100;
-  const reTotal     = Math.round((reTaxable + reVat) * 100) / 100;
-  const reWhtBase   = reShipping;
-  const reWhtAmount = Math.round(reWhtRate * reWhtBase * 100) / 100;
-  let   reNet       = Math.round((reTotal - reWhtAmount) * 100) / 100;
+  const reShipping  = reIsJc ? 0 : Math.round((parseFloat(process.env.FC_SHIPPING_FEE) || 200) * 100) / 100; // accrual only
+  const reVat       = Math.round(subtotal * reVatRate * 100) / 100;
+  const reTotal     = Math.round((subtotal + reVat) * 100) / 100;
+  let   reNet       = reTotal;
 
   const tx = db.transaction(() => {
     db.prepare(`INSERT INTO orders (id, order_number, user_id, branch_code, subtotal, shipping_fee, vat_amount, total, wht_rate, wht_base, wht_amount, net_payable, note)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(orderId, orderNumber, req.user.id, req.user.branch_code || '', subtotal, reShipping, reVat, reTotal, reWhtRate, reWhtBase, reWhtAmount, reNet, `สั่งใหม่จาก ${oldOrder.order_number}`);
+      VALUES (?,?,?,?,?,?,?,?,0,0,0,?,?)`).run(orderId, orderNumber, req.user.id, req.user.branch_code || '', subtotal, reShipping, reVat, reTotal, reNet, `สั่งใหม่จาก ${oldOrder.order_number}`);
 
     const insLine = db.prepare('INSERT INTO order_lines (order_id, item_no, item_name, quantity, unit_price, line_total) VALUES (?,?,?,?,?,?)');
     for (const ci of cartItems) {
@@ -2669,10 +2623,9 @@ app.post('/api/orders/:id/reorder', requireAuth, async (req, res) => {
   });
   tx();
 
-  // Post to BC. postOrderToBC adds the FC freight G/L line (shipping_fee>0),
-  // reads back the posted total, overwrites orders.total/vat_amount and
-  // recomputes orders.net_payable. We seed local values so a BC failure still
-  // leaves a coherent QR amount.
+  // Post to BC (goods SO only — no freight line). postOrderToBC reads back the
+  // posted total and recomputes net_payable (= total, since wht_amount=0). We
+  // seed local values so a BC failure still leaves a coherent QR amount.
   let bcResult = null;
   let vatAmount = reVat;
   let total = reTotal;
@@ -2685,12 +2638,11 @@ app.post('/api/orders/:id/reorder', requireAuth, async (req, res) => {
     bcResult = { error: e.message };
   }
 
-  // Re-read net_payable: postOrderToBC recomputes it from the posted total when
-  // BC succeeds; otherwise our seeded value stands.
+  // Re-read net_payable from the posted total (=== total; no per-order WHT).
   const reFinal = db.prepare('SELECT net_payable FROM orders WHERE id=?').get(orderId);
   if (reFinal && reFinal.net_payable > 0) reNet = reFinal.net_payable;
 
-  // PromptPay QR encodes net_payable (cash net of WHT). JC branches never pay.
+  // PromptPay QR encodes the goods total. JC branches never pay.
   let qrDataUrl = '';
   if (!reIsJc) {
     try { qrDataUrl = await generateQR(reNet); } catch (e) { console.error('[QR]', e.message); }
@@ -2701,15 +2653,391 @@ app.post('/api/orders/:id/reorder', requireAuth, async (req, res) => {
     order_id: orderId,
     order_number: orderNumber,
     subtotal,
-    shipping_fee: reShipping,
+    shipping_accrual: reShipping, // billed monthly, not part of total
     vat_amount: vatAmount,
     total,
-    wht_amount: reWhtAmount,
+    wht_amount: 0,
     net_payable: reNet,
     bc_so: bcResult,
     qr_data_url: qrDataUrl,
     message: `สร้างคำสั่งซื้อใหม่ ${orderNumber} สำเร็จ`,
   });
+});
+
+// ═══════════════ Monthly consolidated shipping billing ═════════════════════
+// Each FC order accrues a flat 200 THB shipping fee (orders.shipping_fee) but is
+// NOT billed at checkout. Once a month Finance consolidates every verified +
+// unbilled FC order per branch into ONE shipping_invoices row → a SEPARATE BC
+// Sales Order (freight G/L line SV-TP0002 + 7% VAT), settled by the FC in-app
+// (PromptPay QR + slip + Finance verify) net of 3% WHT on the pre-VAT shipping.
+// SO-only — shipping is a service JC sells to the FC, never a purchase.
+
+// Default billing period = previous calendar month ('YYYY-MM').
+function prevMonthPeriod() {
+  const d = new Date();
+  d.setDate(1);
+  d.setMonth(d.getMonth() - 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+const isValidPeriod = (p) => /^\d{4}-\d{2}$/.test(p || '');
+
+// Last day of the period at 23:59:59 — orders.created_at <= this are swept in.
+// Uses SQLite date math so month lengths / leap years are correct.
+function periodCutoff(period) {
+  const row = db.prepare("SELECT date(? || '-01', '+1 month', '-1 day') AS d").get(period);
+  return `${row.d} 23:59:59`;
+}
+
+// SHPINV202606NNNN — per-period running sequence.
+function genShippingInvoiceNumber(period) {
+  const prefix = `SHPINV${period.replace('-', '')}`;
+  const last = db.prepare("SELECT invoice_number FROM shipping_invoices WHERE invoice_number LIKE ? ORDER BY invoice_number DESC LIMIT 1").get(prefix + '%');
+  const seq = last ? parseInt(last.invoice_number.slice(-4)) + 1 : 1;
+  return prefix + String(seq).padStart(4, '0');
+}
+
+// Receipt number for a settled shipping invoice (kept distinct from per-order
+// RC**** so the two sequences never collide).
+function genShippingReceiptNumber() {
+  const d = new Date();
+  const prefix = `SHRC${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+  const last = db.prepare("SELECT receipt_number FROM shipping_invoices WHERE receipt_number LIKE ? ORDER BY receipt_number DESC LIMIT 1").get(prefix + '%');
+  const seq = last ? parseInt(last.receipt_number.slice(-4)) + 1 : 1;
+  return prefix + String(seq).padStart(4, '0');
+}
+
+// Shipping invoice money math from the consolidated accrual. order_count and
+// shipping_subtotal (= SUM of per-order shipping_fee) come from the candidate
+// orders; everything else is derived. WHT (3%) is on the pre-VAT shipping only.
+function shippingInvoiceMath(orderCount, shippingSubtotal) {
+  const sub = Math.round(shippingSubtotal * 100) / 100;
+  const vatAmount = Math.round(sub * 0.07 * 100) / 100;
+  const total = Math.round((sub + vatAmount) * 100) / 100;
+  const whtRate = parseFloat(process.env.FC_WHT_RATE) || 0.03;
+  const whtAmount = Math.round(sub * whtRate * 100) / 100;
+  const netPayable = Math.round((total - whtAmount) * 100) / 100;
+  return {
+    order_count: orderCount,
+    shipping_subtotal: sub,
+    vat_rate: 7,
+    vat_amount: vatAmount,
+    total,
+    wht_rate: whtRate,
+    wht_base: sub,
+    wht_amount: whtAmount,
+    net_payable: netPayable,
+  };
+}
+
+// Branch display name + BC customer number, resolved the same way the per-order
+// SO resolves it: prefer branches.bc_customer_no, fall back to the branch code.
+function branchBillingMeta(code) {
+  const b = db.prepare('SELECT name, bc_customer_no FROM branches WHERE code = ?').get(code);
+  return {
+    branch_name: (b && b.name) || code,
+    bc_customer_no: (b && b.bc_customer_no) ? b.bc_customer_no : code,
+  };
+}
+
+// Candidate consolidation rows for a period: one row per FC branch with
+// verified + unbilled orders that accrued shipping on/before the cutoff.
+const SHIP_CANDIDATE_SQL = `
+  SELECT branch_code,
+         COUNT(*)                          AS order_count,
+         COALESCE(SUM(shipping_fee), 0)    AS shipping_subtotal
+  FROM orders
+  WHERE payment_status = 'verified'
+    AND shipping_fee > 0
+    AND (shipping_invoice_id IS NULL OR shipping_invoice_id = '')
+    AND branch_code IS NOT NULL AND branch_code != ''
+    AND created_at <= ?`;
+
+function shippingPreview(period, branchCode) {
+  const cutoff = periodCutoff(period);
+  let sql = SHIP_CANDIDATE_SQL;
+  const params = [cutoff];
+  if (branchCode) { sql += ' AND branch_code = ?'; params.push(branchCode); }
+  sql += ' GROUP BY branch_code HAVING order_count > 0 ORDER BY branch_code';
+  const raw = db.prepare(sql).all(...params);
+  const rows = raw.map(r => {
+    const meta = branchBillingMeta(r.branch_code);
+    return { branch_code: r.branch_code, ...meta, ...shippingInvoiceMath(r.order_count, r.shipping_subtotal) };
+  });
+  const totals = rows.reduce((a, r) => ({
+    order_count: a.order_count + r.order_count,
+    shipping_subtotal: Math.round((a.shipping_subtotal + r.shipping_subtotal) * 100) / 100,
+    vat_amount: Math.round((a.vat_amount + r.vat_amount) * 100) / 100,
+    total: Math.round((a.total + r.total) * 100) / 100,
+    wht_amount: Math.round((a.wht_amount + r.wht_amount) * 100) / 100,
+    net_payable: Math.round((a.net_payable + r.net_payable) * 100) / 100,
+  }), { order_count: 0, shipping_subtotal: 0, vat_amount: 0, total: 0, wht_amount: 0, net_payable: 0 });
+  return { period, cutoff, branch_count: rows.length, rows, totals };
+}
+
+// ─── BC: open the consolidated shipping Sales Order ───
+// ONE freight G/L line, qty = order_count, unitPrice = avg per-order accrual
+// (200 when every order carries the standard fee). Account SV-TP0002 has
+// Gen. Posting Type = Sale set on its card, which drives output VAT. The BC SO
+// carries the FULL total (incl VAT); WHT is a payment-layer concept (net_payable)
+// and never leaks into BC — the FC hands JC a WHT certificate for the 3%.
+async function postShippingSOToBC(invoiceId) {
+  const inv = db.prepare('SELECT * FROM shipping_invoices WHERE id=?').get(invoiceId);
+  if (!inv) throw new Error('Shipping invoice not found');
+  if (inv.bc_so_no) return { already: true, bc_so_no: inv.bc_so_no };
+
+  const customerNo = inv.bc_customer_no || inv.branch_code || '';
+  if (!customerNo) throw new Error('ไม่พบเลขลูกค้า BC (bc_customer_no) สำหรับสาขา ' + inv.branch_code);
+
+  const so = await bc.createSalesOrder({
+    customerNumber: customerNo,
+    externalDocumentNumber: inv.invoice_number,
+  });
+  const soId = so.id;
+  const soNo = so.number || '';
+
+  const freightGlNo = (process.env.BC_FREIGHT_GL_SALES_NO || '').trim();
+  const freightAcctId = freightGlNo ? await bc.findGLAccountIdByNo(freightGlNo).catch(() => null) : null;
+  const unitPrice = inv.order_count > 0
+    ? Math.round((inv.shipping_subtotal / inv.order_count) * 100) / 100
+    : inv.shipping_subtotal;
+  if (freightAcctId) {
+    await bc.addSalesOrderLine(soId, {
+      accountId: freightAcctId,
+      lineType: 'Account',
+      quantity: inv.order_count || 1,
+      unitPrice,
+      description: `ค่าขนส่งประจำเดือน ${inv.period} (${inv.order_count} ออเดอร์)`,
+    });
+  } else {
+    db.prepare('INSERT INTO sync_log (kind, status, message, count) VALUES (?,?,?,?)')
+      .run('shipping_so', 'warn', `SHIP SO ${soNo}: freight G/L '${freightGlNo}' not found in BC — shipping line skipped`, 1);
+  }
+
+  const soFinal = await bc.getSalesOrder(soId);
+  const vatAmount = soFinal.totalTaxAmount || 0;
+  const totalInclVat = soFinal.totalAmountIncludingTax || inv.total;
+
+  db.prepare("UPDATE shipping_invoices SET bc_so_id=?, bc_so_no=?, posted_at=datetime('now','localtime') WHERE id=?")
+    .run(soId, soNo, invoiceId);
+
+  // Drift guard: our QR was computed off the LOCAL total. If BC's posted total
+  // diverges beyond rounding, a VAT-setup or freight-account mismatch is likely.
+  if (inv.total && Math.abs(totalInclVat - inv.total) > 0.5) {
+    db.prepare('INSERT INTO sync_log (kind, status, message, count) VALUES (?,?,?,?)')
+      .run('shipping_so', 'warn', `SHIP SO ${soNo}: BC total ${totalInclVat} != local ${inv.total} (Δ${(totalInclVat - inv.total).toFixed(2)})`, 1);
+  }
+
+  db.prepare('INSERT INTO sync_log (kind, status, message, count) VALUES (?,?,?,?)')
+    .run('shipping_so', 'ok', `Created shipping SO ${soNo} for ${inv.branch_code} ${inv.period} (${inv.order_count} orders, VAT=${vatAmount})`, 1);
+
+  return { ok: true, bc_so_id: soId, bc_so_no: soNo, vat_amount: vatAmount, total_incl_vat: totalInclVat };
+}
+
+// ─── Preview the month's consolidation (no writes) ───
+// Finance reviews this before pressing "generate". period defaults to last month.
+app.get('/api/shipping-invoices/preview', requireAuth, requireAdmin, (req, res) => {
+  const period = req.query.period || prevMonthPeriod();
+  if (!isValidPeriod(period)) return res.status(400).json({ error: 'period ต้องเป็นรูปแบบ YYYY-MM' });
+  const branchCode = (req.query.branch_code || '').trim() || null;
+  try {
+    res.json(shippingPreview(period, branchCode));
+  } catch (e) {
+    console.error('[shipping preview]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Generate the monthly shipping invoices + open BC SO per branch ───
+// Idempotent on the order set: each candidate order is stamped with
+// shipping_invoice_id inside the same transaction that creates the invoice, so a
+// re-run never double-bills (already-stamped orders drop out of the candidate
+// query). One invoice per branch. BC SO is posted AFTER the local commit so a BC
+// outage still leaves a coherent, payable invoice (retry via .../:id/post).
+app.post('/api/shipping-invoices/generate', requireAuth, requireAdmin, async (req, res) => {
+  const period = (req.body && req.body.period) || prevMonthPeriod();
+  if (!isValidPeriod(period)) return res.status(400).json({ error: 'period ต้องเป็นรูปแบบ YYYY-MM' });
+  const onlyBranch = (req.body && req.body.branch_code || '').trim() || null;
+  const cutoff = periodCutoff(period);
+
+  const candidates = shippingPreview(period, onlyBranch).rows;
+  if (!candidates.length) {
+    return res.json({ ok: true, period, created: [], message: 'ไม่มีออเดอร์ค้างเรียกเก็บค่าขนส่งในงวดนี้' });
+  }
+
+  const selStmt = db.prepare(`SELECT id, shipping_fee FROM orders
+    WHERE payment_status='verified' AND shipping_fee>0
+      AND (shipping_invoice_id IS NULL OR shipping_invoice_id='')
+      AND branch_code=? AND created_at<=?`);
+  const stampStmt = db.prepare("UPDATE orders SET shipping_invoice_id=? WHERE id=?");
+
+  const created = [];
+  for (const c of candidates) {
+    const invId = crypto.randomUUID();
+    const invNo = genShippingInvoiceNumber(period);
+    const meta = branchBillingMeta(c.branch_code);
+    try {
+      const tx = db.transaction(() => {
+        const orders = selStmt.all(c.branch_code, cutoff);
+        if (!orders.length) return null; // raced away — skip
+        const subtotal = orders.reduce((s, o) => s + (o.shipping_fee || 0), 0);
+        const m = shippingInvoiceMath(orders.length, subtotal);
+        db.prepare(`INSERT INTO shipping_invoices
+          (id, invoice_number, branch_code, bc_customer_no, period, cutoff_date, order_count,
+           shipping_subtotal, vat_rate, vat_amount, total, wht_rate, wht_base, wht_amount, net_payable,
+           status, created_by)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?)`).run(
+          invId, invNo, c.branch_code, meta.bc_customer_no, period, cutoff, m.order_count,
+          m.shipping_subtotal, m.vat_rate, m.vat_amount, m.total, m.wht_rate, m.wht_base, m.wht_amount, m.net_payable,
+          req.user.id);
+        for (const o of orders) stampStmt.run(invId, o.id);
+        return m;
+      });
+      const m = tx();
+      if (!m) continue;
+
+      let bcResult = null;
+      try {
+        bcResult = await postShippingSOToBC(invId);
+      } catch (e) {
+        console.error('[shipping SO]', e.message);
+        db.prepare("UPDATE shipping_invoices SET note=? WHERE id=?").run('[BC] ' + e.message, invId);
+        bcResult = { ok: false, error: e.message };
+      }
+      created.push({ ...db.prepare('SELECT * FROM shipping_invoices WHERE id=?').get(invId), bc: bcResult });
+    } catch (e) {
+      console.error('[shipping generate]', c.branch_code, e.message);
+      created.push({ branch_code: c.branch_code, error: e.message });
+    }
+  }
+
+  res.json({ ok: true, period, created, message: `สร้างใบแจ้งหนี้ค่าขนส่ง ${created.length} สาขา (งวด ${period})` });
+});
+
+// ─── List shipping invoices (Finance: all; FC: own branch only) ───
+app.get('/api/shipping-invoices', requireAuth, (req, res) => {
+  const where = [];
+  const params = [];
+  if (!isHqAdmin(req.user)) {
+    if (!req.user.branch_code) return res.json([]);
+    where.push('branch_code = ?'); params.push(req.user.branch_code);
+  } else if (req.query.branch_code) {
+    where.push('branch_code = ?'); params.push(req.query.branch_code);
+  }
+  if (req.query.period) { where.push('period = ?'); params.push(req.query.period); }
+  if (req.query.status) { where.push('status = ?'); params.push(req.query.status); }
+  const sql = `SELECT * FROM shipping_invoices ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY created_at DESC`;
+  res.json(db.prepare(sql).all(...params));
+});
+
+// ─── Shipping invoice detail + its consolidated orders ───
+app.get('/api/shipping-invoices/:id', requireAuth, (req, res) => {
+  const inv = db.prepare('SELECT * FROM shipping_invoices WHERE id=?').get(req.params.id);
+  if (!inv) return res.status(404).json({ error: 'Shipping invoice not found' });
+  if (!isHqAdmin(req.user) && inv.branch_code !== req.user.branch_code) return res.status(403).json({ error: 'Forbidden' });
+  const orders = db.prepare(`SELECT id, order_number, created_at, shipping_fee, total, payment_status
+    FROM orders WHERE shipping_invoice_id=? ORDER BY created_at`).all(inv.id);
+  res.json({ ...inv, orders });
+});
+
+// ─── Regenerate the PromptPay QR for a shipping invoice (FC pays net of WHT) ───
+app.get('/api/shipping-invoices/:id/qr', requireAuth, async (req, res) => {
+  const inv = db.prepare('SELECT * FROM shipping_invoices WHERE id=?').get(req.params.id);
+  if (!inv) return res.status(404).json({ error: 'Shipping invoice not found' });
+  if (!isHqAdmin(req.user) && inv.branch_code !== req.user.branch_code) return res.status(403).json({ error: 'Forbidden' });
+  if (inv.status !== 'pending' && inv.status !== 'failed') return res.status(400).json({ error: 'ใบแจ้งหนี้นี้ชำระแล้ว' });
+  try {
+    const qr = await generateQR(inv.net_payable);
+    res.json({ qr_data_url: qr, total: inv.total, net_payable: inv.net_payable });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Manually (re)post the BC SO for an invoice (retry after a BC outage) ───
+app.post('/api/shipping-invoices/:id/post', requireAuth, requireAdmin, async (req, res) => {
+  const inv = db.prepare('SELECT * FROM shipping_invoices WHERE id=?').get(req.params.id);
+  if (!inv) return res.status(404).json({ error: 'Shipping invoice not found' });
+  if (inv.bc_so_no) return res.json({ already: true, bc_so_no: inv.bc_so_no });
+  try {
+    const r = await postShippingSOToBC(inv.id);
+    db.prepare("UPDATE shipping_invoices SET note='' WHERE id=? AND note LIKE '[BC]%'").run(inv.id);
+    res.json(r);
+  } catch (e) {
+    db.prepare("UPDATE shipping_invoices SET note=? WHERE id=?").run('[BC] ' + e.message, inv.id);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── FC uploads payment slip for a shipping invoice (auto-verify is a hint) ───
+app.post('/api/shipping-invoices/:id/slip', requireAuth, upload.single('slip'), async (req, res) => {
+  const inv = db.prepare('SELECT * FROM shipping_invoices WHERE id=?').get(req.params.id);
+  if (!inv) return res.status(404).json({ error: 'Shipping invoice not found' });
+  if (!isHqAdmin(req.user) && inv.branch_code !== req.user.branch_code) return res.status(403).json({ error: 'Forbidden' });
+  if (!req.file) return res.status(400).json({ error: 'No slip file' });
+  if (inv.status === 'verified') return res.status(400).json({ error: 'ใบแจ้งหนี้นี้อนุมัติแล้ว' });
+  if (inv.status === 'cancelled') return res.status(400).json({ error: 'ใบแจ้งหนี้นี้ถูกยกเลิก' });
+  if (inv.status === 'paid') return res.status(400).json({ error: 'ส่งสลิปไปแล้ว · รอ Finance ตรวจสอบ' });
+
+  const slipPath = '/uploads/' + req.file.filename;
+  const absPath = path.join(__dirname, 'uploads', req.file.filename);
+  const clientIp = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+
+  const checkDuplicate = async ({ hash, qrRef }) => {
+    if (qrRef) {
+      const d = db.prepare("SELECT invoice_number FROM shipping_invoices WHERE qr_ref=? AND status IN ('paid','verified') AND id != ?").get(qrRef, inv.id);
+      if (d) return { duplicate: true, reason: `สลิปนี้ (ref: ${qrRef}) ถูกใช้กับใบแจ้งหนี้ ${d.invoice_number} แล้ว` };
+    }
+    if (hash) {
+      const d = db.prepare("SELECT invoice_number FROM shipping_invoices WHERE slip_hash=? AND status IN ('paid','verified') AND id != ?").get(hash, inv.id);
+      if (d) return { duplicate: true, reason: `ภาพสลิปนี้เคยถูกใช้กับใบแจ้งหนี้ ${d.invoice_number} แล้ว` };
+    }
+    return { duplicate: false };
+  };
+
+  const result = await verifySlip(absPath, inv.net_payable, { checkDuplicate });
+
+  if (!result.verified) {
+    try {
+      db.prepare(`INSERT INTO slip_fraud_log (order_id, user_id, username, ip, reason, slip_hash, qr_ref, slip_amount, expected_amount, trans_date, raw_response)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(
+        'SHIP:' + inv.id, req.user.id, req.user.username || '', clientIp,
+        result.reason || '', result.slip_hash || '', result.ref || '', result.amount || 0,
+        inv.net_payable, result.transDate || '', result.raw ? JSON.stringify(result.raw).slice(0, 2000) : '');
+    } catch (e) { /* audit log failure must not break flow */ }
+  }
+
+  db.prepare(`UPDATE shipping_invoices SET status='paid', slip_path=?, slip_hash=?, qr_ref=?, paid_at=datetime('now','localtime') WHERE id=?`)
+    .run(slipPath, result.slip_hash || '', result.ref || '', inv.id);
+
+  res.json({
+    ok: true,
+    auto_verified: result.verified,
+    slip_path: slipPath,
+    verify_result: { amount: result.amount, sender: result.sender, receiver: result.receiver, ref: result.ref, reason: result.reason },
+    message: result.verified
+      ? 'อัพโหลดสลิปสำเร็จ · ตรวจอัตโนมัติผ่าน → รอ Finance อนุมัติ'
+      : 'อัพโหลดสลิปสำเร็จ · ตรวจอัตโนมัติไม่ผ่าน → รอ Finance ตรวจสอบ',
+  });
+});
+
+// ─── Finance verifies the shipping-invoice slip ───
+app.post('/api/shipping-invoices/:id/verify', requireAuth, requireAdmin, (req, res) => {
+  const { action, reason } = req.body || {};
+  const inv = db.prepare('SELECT * FROM shipping_invoices WHERE id=?').get(req.params.id);
+  if (!inv) return res.status(404).json({ error: 'Shipping invoice not found' });
+
+  if (action === 'approve') {
+    if (inv.status !== 'paid') return res.status(400).json({ error: 'ต้องมีสลิปรอตรวจก่อน (status=paid)' });
+    const rcptNo = genShippingReceiptNumber();
+    db.prepare("UPDATE shipping_invoices SET status='verified', receipt_number=?, verified_by=?, verified_at=datetime('now','localtime') WHERE id=?")
+      .run(rcptNo, req.user.id, inv.id);
+    return res.json({ ok: true, status: 'verified', receipt_number: rcptNo });
+  }
+
+  if (action === 'reject') {
+    db.prepare("UPDATE shipping_invoices SET status='failed', note=? WHERE id=?").run('[REJECT] ' + (reason || ''), inv.id);
+    return res.json({ ok: true, status: 'failed' });
+  }
+
+  return res.status(400).json({ error: "action ต้องเป็น 'approve' หรือ 'reject'" });
 });
 
 // ─────────────── TMS Phase 1: Admin CRUD (Carriers + Drivers) ───────────────

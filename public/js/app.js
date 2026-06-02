@@ -266,6 +266,43 @@ const I18N = {
     'history.branch':'สาขา','history.qty':'จำนวน','history.unit_price':'ราคา/หน่วย',
     'history.line_total':'รวม','history.payment':'สถานะ','history.date':'วันที่',
     'history.none':'ยังไม่มีการสั่งซื้อสินค้านี้',
+    // Shipping — monthly consolidated billing
+    'nav.shipping':'ค่าขนส่ง','nav.shipping_billing':'เรียกเก็บค่าขนส่ง',
+    'shipinv.col.invoice':'เลขที่','shipinv.col.branch':'สาขา','shipinv.col.period':'งวด',
+    'shipinv.col.orders':'ออเดอร์','shipinv.col.shipping':'ค่าขนส่ง','shipinv.col.vat':'VAT 7%',
+    'shipinv.col.total':'รวม','shipinv.col.wht':'หัก ณ ที่จ่าย','shipinv.col.net':'ยอดสุทธิ',
+    'shipinv.col.status':'สถานะ','shipinv.col.bc_so':'BC SO','shipinv.col.slip':'สลิป',
+    'shipinv.col.action':'จัดการ','shipinv.col.order_no':'Order','shipinv.col.date':'วันที่',
+    'shipinv.all_status':'ทุกสถานะ',
+    'shipinv.status.pending':'รอชำระ','shipinv.status.paid':'รอตรวจสอบ','shipinv.status.verified':'อนุมัติแล้ว',
+    'shipinv.status.failed':'ไม่ผ่าน','shipinv.status.cancelled':'ยกเลิก',
+    'shipbill.page_title':'เรียกเก็บค่าขนส่ง — JC-Market',
+    'shipbill.title':'เรียกเก็บค่าขนส่งรายเดือน',
+    'shipbill.subtitle':'รวบค่าขนส่งของออเดอร์ FC ที่ตรวจสอบแล้วในงวด แล้วเปิด Sales Order แยกใน BC เพื่อเรียกเก็บ',
+    'shipbill.gen_title':'สร้างใบแจ้งหนี้','shipbill.period':'งวด (เดือน)',
+    'shipbill.branch_filter':'เฉพาะสาขา (เว้นว่าง = ทุกสาขา)',
+    'shipbill.preview':'ดูตัวอย่าง','shipbill.generate':'สร้าง + เปิด SO ใน BC',
+    'shipbill.cutoff':'ตัดยอดถึง','shipbill.branches':'สาขา',
+    'shipbill.no_candidates':'ไม่มีออเดอร์ค้างเรียกเก็บในงวดนี้',
+    'shipbill.confirm_generate':'สร้างใบแจ้งหนี้ค่าขนส่งงวด {period} และเปิด Sales Order ใน BC?',
+    'shipbill.gen_ok':'สร้างใบแจ้งหนี้เรียบร้อย',
+    'shipbill.bc_warn':'เปิด SO ใน BC ไม่สำเร็จ {n} สาขา — กด Retry BC ภายหลัง',
+    'shipbill.invoices_title':'ใบแจ้งหนี้ค่าขนส่ง','shipbill.load':'โหลด',
+    'shipbill.none':'ยังไม่มีใบแจ้งหนี้','shipbill.retry_bc':'Retry BC','shipbill.view':'ดู',
+    'shipbill.confirm_approve':'อนุมัติการชำระเงินใบแจ้งหนี้นี้?',
+    'shipbill.reject_reason':'เหตุผลที่ปฏิเสธ:',
+    'shipbill.approved':'อนุมัติแล้ว · {rc}','shipbill.rejected':'ปฏิเสธแล้ว',
+    'shipbill.bc_ok':'เปิด SO ใน BC แล้ว · {so}',
+    'shipbill.detail_title':'รายการออเดอร์ในใบแจ้งหนี้',
+    'shipping.page_title':'ค่าขนส่ง — JC-Market','shipping.title':'ค่าขนส่งประจำเดือน',
+    'shipping.intro':'บริษัทรวบค่าขนส่งของออเดอร์ในแต่ละเดือนมาเรียกเก็บเป็นใบแจ้งหนี้แยก สาขาชำระผ่าน QR แล้วอัพโหลดสลิป โดยหัก ณ ที่จ่าย 3% ของค่าขนส่ง',
+    'shipping.pay':'ชำระเงิน','shipping.pay_title':'ชำระค่าขนส่ง {invoice}',
+    'shipping.amount_due':'ยอดที่ต้องชำระ (หัก ณ ที่จ่าย 3% แล้ว)',
+    'shipping.scan_qr':'สแกน QR เพื่อชำระผ่านแอปธนาคาร',
+    'shipping.upload_slip':'อัพโหลดสลิป','shipping.submit_slip':'ส่งสลิป',
+    'shipping.pick_slip':'กรุณาเลือกไฟล์สลิป','shipping.slip_sent':'ส่งสลิปแล้ว · รอ Finance ตรวจสอบ',
+    'shipping.paid_wait':'รอ Finance ตรวจสอบ','shipping.none':'ยังไม่มีใบแจ้งหนี้ค่าขนส่ง',
+    'shipping.wht_note':'บริษัทออกใบกำกับเต็มจำนวน {total} — สาขาหัก ณ ที่จ่าย 3% ({wht}) ชำระสุทธิ {net} และนำส่งหนังสือรับรองหัก ณ ที่จ่ายให้บริษัท',
   },
   en: {
     // Nav
@@ -522,6 +559,43 @@ const I18N = {
     'history.branch':'Branch','history.qty':'Qty','history.unit_price':'Unit Price',
     'history.line_total':'Total','history.payment':'Status','history.date':'Date',
     'history.none':'No orders for this item yet',
+    // Shipping — monthly consolidated billing
+    'nav.shipping':'Shipping','nav.shipping_billing':'Shipping Billing',
+    'shipinv.col.invoice':'Invoice','shipinv.col.branch':'Branch','shipinv.col.period':'Period',
+    'shipinv.col.orders':'Orders','shipinv.col.shipping':'Shipping','shipinv.col.vat':'VAT 7%',
+    'shipinv.col.total':'Total','shipinv.col.wht':'WHT','shipinv.col.net':'Net Payable',
+    'shipinv.col.status':'Status','shipinv.col.bc_so':'BC SO','shipinv.col.slip':'Slip',
+    'shipinv.col.action':'Action','shipinv.col.order_no':'Order','shipinv.col.date':'Date',
+    'shipinv.all_status':'All status',
+    'shipinv.status.pending':'Unpaid','shipinv.status.paid':'To Review','shipinv.status.verified':'Approved',
+    'shipinv.status.failed':'Failed','shipinv.status.cancelled':'Cancelled',
+    'shipbill.page_title':'Shipping Billing — JC-Market',
+    'shipbill.title':'Monthly Shipping Billing',
+    'shipbill.subtitle':'Consolidate shipping fees from verified FC orders in the period, then open a separate Sales Order in BC to bill it.',
+    'shipbill.gen_title':'Generate Invoices','shipbill.period':'Period (month)',
+    'shipbill.branch_filter':'Specific branch (blank = all)',
+    'shipbill.preview':'Preview','shipbill.generate':'Generate + open BC SO',
+    'shipbill.cutoff':'Cutoff','shipbill.branches':'branches',
+    'shipbill.no_candidates':'No unbilled orders in this period',
+    'shipbill.confirm_generate':'Generate shipping invoices for {period} and open Sales Orders in BC?',
+    'shipbill.gen_ok':'Invoices generated',
+    'shipbill.bc_warn':'BC SO failed for {n} branch(es) — use Retry BC later',
+    'shipbill.invoices_title':'Shipping Invoices','shipbill.load':'Load',
+    'shipbill.none':'No invoices yet','shipbill.retry_bc':'Retry BC','shipbill.view':'View',
+    'shipbill.confirm_approve':'Approve payment for this invoice?',
+    'shipbill.reject_reason':'Rejection reason:',
+    'shipbill.approved':'Approved · {rc}','shipbill.rejected':'Rejected',
+    'shipbill.bc_ok':'BC SO opened · {so}',
+    'shipbill.detail_title':'Orders in this invoice',
+    'shipping.page_title':'Shipping — JC-Market','shipping.title':'Monthly Shipping',
+    'shipping.intro':'Each month the company consolidates your order shipping fees into a separate invoice. Pay via QR and upload the slip; 3% withholding tax applies to the shipping amount.',
+    'shipping.pay':'Pay','shipping.pay_title':'Pay shipping {invoice}',
+    'shipping.amount_due':'Amount due (net of 3% WHT)',
+    'shipping.scan_qr':'Scan the QR to pay in your banking app',
+    'shipping.upload_slip':'Upload slip','shipping.submit_slip':'Send slip',
+    'shipping.pick_slip':'Please choose a slip file','shipping.slip_sent':'Slip sent · awaiting Finance review',
+    'shipping.paid_wait':'Awaiting Finance review','shipping.none':'No shipping invoices yet',
+    'shipping.wht_note':'The company issues a full {total} tax invoice — you withhold 3% ({wht}), pay {net} net, and submit the WHT certificate to the company.',
   }
 };
 
@@ -688,6 +762,8 @@ const NAV_ICONS = {
   'nav.pending_approvals': `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`,
   'nav.approved_list':     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>`,
   'nav.rejected_list':     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m9 9 6 6"/><path d="m15 9-6 6"/></svg>`,
+  'nav.shipping':          `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"/><path d="M8 8h8"/><path d="M8 12h8"/><path d="M8 16h5"/></svg>`,
+  'nav.shipping_billing':  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="12" x="2" y="6" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 12h.01M18 12h.01"/></svg>`,
   'nav.logout':            `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>`,
 };
 
@@ -706,6 +782,8 @@ function renderNav(active) {
     links.push(['approvals.html?tab=pending','nav.pending_approvals']);
     links.push(['approvals.html?tab=approved','nav.approved_list']);
     links.push(['approvals.html?tab=rejected','nav.rejected_list']);
+    // Finance also runs the monthly shipping-billing center (preview/generate/verify).
+    links.push(['shipping-billing.html','nav.shipping_billing']);
   } else if (isHq) {
     // super_admin / admin_scm — full HQ visibility minus the cart/stock flow
     links.push(['index.html','nav.shop']);
@@ -716,9 +794,11 @@ function renderNav(active) {
     links.push(['cart.html','nav.cart']);
     links.push(['orders.html','nav.orders']);
     links.push(['stock-balance.html','nav.stock']);
+    links.push(['shipping.html','nav.shipping']);
   }
   if (!isFinance && (isHq || u.role === 'branch_owner')) links.push(['team.html','nav.team']);
   if (!isFinance && isHq) links.push(['tms-admin.html','nav.tms']);
+  if (!isFinance && isHq) links.push(['shipping-billing.html','nav.shipping_billing']);
   if (!isFinance && isHq) links.push(['admin.html','nav.admin']);
   const lang = getLang();
   const otherLang = lang === 'th' ? 'en' : 'th';
