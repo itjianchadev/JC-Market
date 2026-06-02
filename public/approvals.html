@@ -214,7 +214,7 @@ async function renderPending() {
           ${(o.slip_retry_count || 0) > 0 ? `<div style="display:inline-block;margin-left:6px;padding:2px 8px;border-radius:10px;background:#fef3c7;color:#92400e;font-size:11px;font-weight:600">🔁 อัปโหลดใหม่ #${o.slip_retry_count}</div>` : ''}
         </td>
         <td>${o.branch_name || o.user_name || '-'}</td>
-        <td style="font-weight:700;color:var(--gold-dark)">฿${o.total.toLocaleString()}</td>
+        <td style="font-weight:700;color:var(--gold-dark)">฿${(o.net_payable||o.total).toLocaleString()}${o.wht_amount > 0 ? `<div style="font-size:10px;color:var(--muted);font-weight:400">${t('approvals.amount_net_hint', { total: o.total.toLocaleString(), wht: o.wht_amount.toLocaleString() })}</div>` : ''}</td>
         <td>${slipPath
           ? `<img src="${slipPath}" class="slip-thumb" onclick="openLightbox('${slipPath}')">`
           : '<span style="color:var(--muted);font-size:11px">—</span>'}</td>
@@ -247,7 +247,7 @@ function renderApproved() {
       <td style="white-space:nowrap;color:var(--muted)">${o.paid_at || o.created_at}</td>
       <td><strong>${o.order_number}</strong></td>
       <td>${o.branch_name || o.user_name || '-'}</td>
-      <td style="font-weight:700;color:var(--gold-dark)">฿${o.total.toLocaleString()}</td>
+      <td style="font-weight:700;color:var(--gold-dark)">฿${(o.net_payable||o.total).toLocaleString()}${o.wht_amount > 0 ? `<div style="font-size:10px;color:var(--muted);font-weight:400">${t('approvals.amount_net_hint', { total: o.total.toLocaleString(), wht: o.wht_amount.toLocaleString() })}</div>` : ''}</td>
       <td><span class="bc-no">${o.bc_so_no || '—'}</span></td>
       <td>${poCell}</td>
       <td><span class="bc-no">${o.bc_invoice_no || (o.bc_posted ? '(posted)' : '—')}</span></td>
@@ -275,7 +275,7 @@ async function renderRejected() {
         <td style="white-space:nowrap;color:var(--muted)">${o.rejected_at || '-'}</td>
         <td><strong>${o.order_number}</strong></td>
         <td>${o.branch_name || o.user_name || '-'}</td>
-        <td style="font-weight:700;color:var(--gold-dark)">฿${o.total.toLocaleString()}</td>
+        <td style="font-weight:700;color:var(--gold-dark)">฿${(o.net_payable||o.total).toLocaleString()}${o.wht_amount > 0 ? `<div style="font-size:10px;color:var(--muted);font-weight:400">${t('approvals.amount_net_hint', { total: o.total.toLocaleString(), wht: o.wht_amount.toLocaleString() })}</div>` : ''}</td>
         <td style="color:#c62828;font-size:13px;max-width:260px">${o.reject_reason || '<span style="color:var(--muted)">(ไม่ระบุ)</span>'}</td>
         <td style="font-size:12px">${o.rejected_by_name || det.rejected_by_name || '-'}</td>
         <td>${slipPath

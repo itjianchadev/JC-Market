@@ -267,6 +267,22 @@ async function findLocationIdByCode(code) {
   return id;
 }
 
+// ─── G/L Accounts ───
+// Resolve a G/L Account number (e.g. 'SV-TP0001') to its BC id (GUID) so we can
+// stamp freight lines onto sales/purchase orders via lineType:'Account'. Cached
+// for the process lifetime like locations — the chart of accounts is static.
+const _glCache = new Map();
+async function findGLAccountIdByNo(no) {
+  if (!no) return null;
+  if (MOCK) return null;
+  if (_glCache.has(no)) return _glCache.get(no);
+  const enc = encodeURIComponent(no);
+  const j = await bcFetch(`/accounts?$filter=number eq '${enc}'&$select=id,number&$top=1`);
+  const id = (j.value && j.value[0] && j.value[0].id) || null;
+  _glCache.set(no, id);
+  return id;
+}
+
 // ─── Purchase Order ───
 async function createPurchaseOrder(payload) {
   if (MOCK) return { mock: true, id: 'MOCK-PO-' + Date.now(), number: 'PO-MOCK-' + Date.now() };
@@ -363,4 +379,4 @@ async function receivePurchaseOrderLines(poId, lineQtyMap) {
   return { ok: true };
 }
 
-module.exports = { MOCK, getToken, listItems, listItemCategories, listItemCards, listSalesPrices, listItemUnitsOfMeasure, createSalesOrder, getSalesOrder, addSalesOrderLine, shipAndInvoiceSalesOrder, findPostedInvoiceByExternalDoc, createSalesInvoice, addInvoiceLine, postInvoice, deleteSalesInvoice, deleteSalesOrder, listVendors, findLocationIdByCode, createPurchaseOrder, getPurchaseOrder, addPurchaseOrderLine, patchPurchaseOrderLine, getPurchaseOrderLines, listPurchaseReceipts, receivePurchaseOrderLines, createTransferOrder, addTransferOrderLine };
+module.exports = { MOCK, getToken, listItems, listItemCategories, listItemCards, listSalesPrices, listItemUnitsOfMeasure, createSalesOrder, getSalesOrder, addSalesOrderLine, shipAndInvoiceSalesOrder, findPostedInvoiceByExternalDoc, createSalesInvoice, addInvoiceLine, postInvoice, deleteSalesInvoice, deleteSalesOrder, listVendors, findLocationIdByCode, findGLAccountIdByNo, createPurchaseOrder, getPurchaseOrder, addPurchaseOrderLine, patchPurchaseOrderLine, getPurchaseOrderLines, listPurchaseReceipts, receivePurchaseOrderLines, createTransferOrder, addTransferOrderLine };

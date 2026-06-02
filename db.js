@@ -3,7 +3,7 @@ const path = require('path');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 
-const DB_PATH = path.join(__dirname, 'data', 'stock-market.db');
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data', 'stock-market.db');
 const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
@@ -278,6 +278,19 @@ try { db.exec("ALTER TABLE orders ADD COLUMN cancel_reason TEXT DEFAULT ''"); } 
 // permissions, etc.), we need a way for admins to see the orphan and retry.
 try { db.exec("ALTER TABLE orders ADD COLUMN bc_sync_error TEXT DEFAULT ''"); } catch (e) {}
 
+// ─── Migrate: FC shipping fee + withholding tax (WHT) + net payable ───
+// FC orders carry a flat shipping fee (pre-VAT, env FC_SHIPPING_FEE=200) and a
+// 3% WHT on the shipping ONLY — goods are a sale of goods (no WHT in TH; WHT is
+// services-only). net_payable = total - wht_amount is the amount fed to the
+// PromptPay QR + slip check. BC SO/PO documents ALWAYS carry the FULL total —
+// net_payable is a payment-layer concept only and must never leak into BC.
+// JC (master) orders: all of these stay 0 and net_payable = total (no payment).
+try { db.exec("ALTER TABLE orders ADD COLUMN shipping_fee REAL DEFAULT 0"); } catch (e) {}
+try { db.exec("ALTER TABLE orders ADD COLUMN wht_rate REAL DEFAULT 0"); } catch (e) {}
+try { db.exec("ALTER TABLE orders ADD COLUMN wht_base REAL DEFAULT 0"); } catch (e) {}
+try { db.exec("ALTER TABLE orders ADD COLUMN wht_amount REAL DEFAULT 0"); } catch (e) {}
+try { db.exec("ALTER TABLE orders ADD COLUMN net_payable REAL DEFAULT 0"); } catch (e) {}
+
 // ─── Migrate: anti-fraud fields on payments ───
 try { db.exec("ALTER TABLE payments ADD COLUMN slip_hash TEXT DEFAULT ''"); } catch (e) {}
 try { db.exec("ALTER TABLE payments ADD COLUMN trans_date TEXT DEFAULT ''"); } catch (e) {}
@@ -324,6 +337,13 @@ CREATE TABLE IF NOT EXISTS payment_receipts (
   created_at TEXT DEFAULT (datetime('now','localtime'))
 );
 `);
+
+// ─── Migrate: shipping + WHT breakdown on payment_receipts ───
+// Keep the printed receipt math coherent: subtotal(goods) + shipping_fee + vat
+// = total, then total - wht_amount = net_payable (what the FC actually paid).
+try { db.exec("ALTER TABLE payment_receipts ADD COLUMN shipping_fee REAL DEFAULT 0"); } catch (e) {}
+try { db.exec("ALTER TABLE payment_receipts ADD COLUMN wht_amount REAL DEFAULT 0"); } catch (e) {}
+try { db.exec("ALTER TABLE payment_receipts ADD COLUMN net_payable REAL DEFAULT 0"); } catch (e) {}
 
 // ─── Seed admin + demo FC users ───
 // ─── Migration: add name_en column to existing items_cache if missing ───
