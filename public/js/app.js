@@ -15,7 +15,7 @@ const I18N = {
     // Nav
     'nav.shop':'ร้านค้า','nav.cart':'ตะกร้า','nav.orders':'คำสั่งซื้อ',
     'nav.stock':'Stock','nav.admin':'Admin','nav.logout':'ออกจากระบบ',
-    'nav.team':'จัดการผู้ใช้','nav.tms':'ขนส่ง',
+    'nav.team':'จัดการผู้ใช้','nav.staff':'จัดการพนักงาน','nav.tms':'ขนส่ง',
     'nav.pending_approvals':'รายการต้องอนุมัติ','nav.approved_list':'รายการที่อนุมัติแล้ว','nav.rejected_list':'ปฏิเสธ',
     // Common
     'common.loading':'กำลังโหลด...','common.close':'ปิด','common.confirm':'ยืนยัน','common.cancel':'ยกเลิก',
@@ -53,7 +53,7 @@ const I18N = {
     'tms.stops_in_trip':'รายการ stops ใน Trip','tms.pick_at_least_one':'กรุณาเลือก shipment อย่างน้อย 1 รายการ',
     'tms.add_more_shipments':'+ เพิ่ม Shipment ใน Trip',
     // Login
-    'login.title':'🛍️ JC-Market','login.sub':'ระบบสั่งซื้อวัตถุดิบสำหรับสาขา FC',
+    'login.title':'🛍️ JC-Market','login.sub':'ระบบสั่งซื้อวัตถุดิบ บ.เจี้ยนชา จำกัด',
     'login.username':'Username','login.password':'Password','login.submit':'เข้าสู่ระบบ',
     'login.page_title':'เข้าสู่ระบบ — JC-Market',
     // Shop (index)
@@ -308,7 +308,7 @@ const I18N = {
     // Nav
     'nav.shop':'Shop','nav.cart':'Cart','nav.orders':'Orders',
     'nav.stock':'Stock','nav.admin':'Admin','nav.logout':'Logout',
-    'nav.team':'Users','nav.tms':'Transport',
+    'nav.team':'Users','nav.staff':'Manage Staff','nav.tms':'Transport',
     'nav.pending_approvals':'Pending Approval','nav.approved_list':'Approved','nav.rejected_list':'Rejected',
     // Common
     'common.loading':'Loading...','common.close':'Close','common.confirm':'Confirm','common.cancel':'Cancel',
@@ -346,7 +346,7 @@ const I18N = {
     'tms.stops_in_trip':'Stops in this trip','tms.pick_at_least_one':'Please pick at least one shipment',
     'tms.add_more_shipments':'+ Add Shipment to Trip',
     // Login
-    'login.title':'🛍️ JC-Market','login.sub':'Raw-material ordering system for FC branches',
+    'login.title':'🛍️ JC-Market','login.sub':'Raw-material ordering system — Jian Cha Co., Ltd.',
     'login.username':'Username','login.password':'Password','login.submit':'Sign In',
     'login.page_title':'Sign In — JC-Market',
     // Shop
@@ -766,6 +766,20 @@ const NAV_ICONS = {
   'nav.shipping_billing':  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="12" x="2" y="6" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 12h.01M18 12h.01"/></svg>`,
   'nav.logout':            `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>`,
 };
+NAV_ICONS['nav.staff'] = NAV_ICONS['nav.team']; // branch "จัดการพนักงาน" reuses the team icon
+
+// Flat (rectangular) national flag for the language toggle, instead of the OS
+// emoji flag (which renders glossy/waving and is inconsistent across platforms).
+// Returns inline SVG markup; global so login.html's inline script can reuse it.
+function langFlagSvg(lang) {
+  const wrap = 'width="20" height="13" style="vertical-align:-2px;border-radius:2px;box-shadow:0 0 0 .5px rgba(0,0,0,.15)"';
+  if (lang === 'th') {
+    // ธงไตรรงค์ — bands red/white/blue(double)/white/red (ratio 1:1:2:1:1).
+    return `<svg ${wrap} viewBox="0 0 9 6"><rect width="9" height="6" fill="#fff"/><rect width="9" height="1" fill="#A51931"/><rect width="9" height="2" y="2" fill="#2D2A4A"/><rect width="9" height="1" y="5" fill="#A51931"/></svg>`;
+  }
+  // Union Jack (simplified) for the EN toggle.
+  return `<svg ${wrap} viewBox="0 0 60 30"><clipPath id="ukf"><rect width="60" height="30"/></clipPath><g clip-path="url(#ukf)"><rect width="60" height="30" fill="#012169"/><path d="M0,0 60,30M60,0 0,30" stroke="#fff" stroke-width="6"/><path d="M0,0 60,30M60,0 0,30" stroke="#C8102E" stroke-width="4"/><path d="M30,0V30M0,15H60" stroke="#fff" stroke-width="10"/><path d="M30,0V30M0,15H60" stroke="#C8102E" stroke-width="6"/></g></svg>`;
+}
 
 function renderNav(active) {
   const u = getUser();
@@ -796,13 +810,19 @@ function renderNav(active) {
     links.push(['stock-balance.html','nav.stock']);
     links.push(['shipping.html','nav.shipping']);
   }
-  if (!isFinance && (isHq || u.role === 'branch_owner')) links.push(['team.html','nav.team']);
+  // Branch users (FC/JF + JC) manage their own staff -> "จัดการพนักงาน".
+  // HQ (super_admin/admin_scm) keeps the network-wide "จัดการผู้ใช้".
+  if (!isFinance && (isHq || u.role === 'branch_owner')) {
+    links.push(['team.html', isHq ? 'nav.team' : 'nav.staff']);
+  }
   if (!isFinance && isHq) links.push(['tms-admin.html','nav.tms']);
-  if (!isFinance && isHq) links.push(['shipping-billing.html','nav.shipping_billing']);
+  // Shipping-billing is a Finance function — hide it from SCM Admin (admin_scm).
+  // super_admin keeps it; Finance gets it via the isFinance branch above.
+  if (!isFinance && isHq && u.role !== 'admin_scm') links.push(['shipping-billing.html','nav.shipping_billing']);
   if (!isFinance && isHq) links.push(['admin.html','nav.admin']);
   const lang = getLang();
   const otherLang = lang === 'th' ? 'en' : 'th';
-  const flag = lang === 'th' ? '🇹🇭 TH' : '🇬🇧 EN';
+  const flag = langFlagSvg(lang) + (lang === 'th' ? ' TH' : ' EN');
   const navLink = (h, k) => {
     const icon = NAV_ICONS[k] || '';
     const cls = active === h ? 'active' : '';
