@@ -2776,8 +2776,9 @@ function shippingPreview(period, branchCode) {
 
 // ─── BC: open the consolidated shipping Sales Order ───
 // ONE freight G/L line, qty = order_count, unitPrice = avg per-order accrual
-// (200 when every order carries the standard fee). Account SV-TP0002 has
-// Gen. Posting Type = Sale set on its card, which drives output VAT. The BC SO
+// (200 when every order carries the standard fee). The freight account is set
+// via env BC_FREIGHT_GL_SALES_NO (SV-TP0001 "ค่าขนส่ง" in BC UAT-Dev); output
+// VAT 7% is driven by that account's VAT posting setup on its card. The BC SO
 // carries the FULL total (incl VAT); WHT is a payment-layer concept (net_payable)
 // and never leaks into BC — the FC hands JC a WHT certificate for the 3%.
 async function postShippingSOToBC(invoiceId) {

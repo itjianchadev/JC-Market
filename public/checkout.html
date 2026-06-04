@@ -56,7 +56,7 @@
           <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span data-i18n="checkout.subtotal">ยอดรวมสินค้า</span><span id="subtotal" style="font-weight:600"></span></div>
           <hr style="border-color:var(--border);margin:12px 0">
           <div style="display:flex;justify-content:space-between;font-size:24px;font-weight:700"><span data-i18n="checkout.grand">รวม</span><span id="grandTotal" style="color:var(--gold)"></span></div>
-          <div style="color:var(--muted);font-size:12px;margin-top:4px;text-align:right" data-i18n="checkout.vat_note">VAT คำนวณจาก D365 BC เมื่อยืนยันสั่งซื้อ</div>
+          <div style="color:var(--err);font-size:12px;margin-top:4px;text-align:right" data-i18n="checkout.shipping_note">ราคานี้ไม่รวมค่าขนส่ง</div>
 
           <!-- Payment method picker — visible only for fruit orders -->
           <div id="payMethodBox" style="display:none;margin-top:16px;padding:12px;border:1px solid var(--border);border-radius:8px">
@@ -109,7 +109,7 @@
           <img id="qrImg" src="" alt="QR Code">
           <div id="vatInfo"></div>
           <div id="bcSoInfo"></div>
-          <p style="font-size:12px;color:var(--muted);margin-top:12px" data-i18n="checkout.qr_hint">สแกน QR ด้วยแอปธนาคาร</p>
+          <p style="font-size:12px;color:var(--muted);margin-top:12px" data-i18n="checkout.qr_shipping_note">ราคาไม่รวมค่าขนส่ง</p>
           <div class="row" style="gap:8px;margin-top:12px">
             <button class="btn ghost sm" style="flex:1" onclick="saveQR()" data-i18n="checkout.save_qr">💾 บันทึก QR</button>
             <button class="btn ghost sm" style="flex:1" onclick="downloadPDF()" data-i18n="checkout.download_pdf">📄 ดาวน์โหลด PDF</button>
@@ -330,32 +330,13 @@ function renderStep1Label() {
 function renderVatInfo() {
   const vatInfo = document.getElementById('vatInfo');
   if (!vatInfo || !lastOrderResp) return;
-  const r = lastOrderResp;
-  // FC orders carry a shipping fee + 3% WHT on the shipping. Show the full
-  // breakdown so the FC understands why they transfer net_payable (total − WHT)
-  // rather than the full invoice total, and that they must issue a WHT
-  // certificate for the withheld amount. JC / no-shipping orders fall back to
-  // the VAT one-liner.
-  if (r.wht_amount > 0 || r.shipping_fee > 0) {
-    const row = (label, val, opts = {}) => `
-      <div style="display:flex;justify-content:space-between;margin-bottom:3px${opts.strong ? ';font-weight:700' : ''}${opts.color ? ';color:' + opts.color : ''}">
-        <span>${label}</span><span>${opts.minus ? '−' : ''}฿${Math.abs(val).toLocaleString()}</span>
-      </div>`;
-    vatInfo.innerHTML = `
-      <div style="font-size:13px;color:var(--muted);margin-top:10px;text-align:left;border-top:1px solid var(--border);padding-top:10px">
-        ${row(t('checkout.bd_goods'), r.subtotal || 0)}
-        ${r.shipping_fee > 0 ? row(t('checkout.bd_shipping'), r.shipping_fee) : ''}
-        ${r.vat_amount > 0 ? row(t('checkout.bd_vat'), r.vat_amount) : ''}
-        ${row(t('checkout.bd_total'), r.total || 0, { strong: true })}
-        ${r.wht_amount > 0 ? row(t('checkout.bd_wht'), r.wht_amount, { minus: true, color: 'var(--err)' }) : ''}
-        ${row(t('checkout.bd_net'), r.net_payable || r.total || 0, { strong: true, color: 'var(--gold)' })}
-      </div>
-      ${r.wht_amount > 0 ? `<div style="font-size:11px;color:var(--muted);margin-top:8px;text-align:left">${t('checkout.wht_cert_note', { wht: r.wht_amount.toLocaleString() })}</div>` : ''}`;
-  } else if (r.vat_amount > 0) {
-    vatInfo.innerHTML = `<div style="font-size:13px;color:var(--muted);margin-top:8px">${t('checkout.vat_breakdown', { sub: r.subtotal.toLocaleString(), vat: r.vat_amount.toLocaleString() })}</div>`;
-  } else {
-    vatInfo.innerHTML = '';
-  }
+  // Show the ordering branch (code + name) on the payment card so the slip /
+  // QR is traceable to the branch that placed the order.
+  const me = getUser() || {};
+  const label = [me.branch_code, me.branch_name].filter(Boolean).join(' · ');
+  vatInfo.innerHTML = label
+    ? `<div style="font-size:14px;color:var(--text);font-weight:600;margin-top:8px">${label}</div>`
+    : '';
 }
 function renderBcSoInfo() {
   const soInfo = document.getElementById('bcSoInfo');
