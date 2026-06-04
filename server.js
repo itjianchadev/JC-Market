@@ -1135,6 +1135,10 @@ async function postOrderToBC(orderId) {
   const soNo = so.number || '';
 
   // 2. Add order lines
+  // Resolve the CTI warehouse location for the ACTIVE BC env (cached). Location
+  // GUIDs differ per environment, so never hardcode — findLocationIdByCode keeps
+  // this env-agnostic. On UAT-Dev 'CTI' resolves to 7e4291d6-… (unchanged).
+  const ctiLocId = await bc.findLocationIdByCode('CTI').catch(() => null);
   for (const line of lines) {
     const item = db.prepare('SELECT id FROM items_cache WHERE item_no=?').get(line.item_no);
     await bc.addSalesOrderLine(soId, {
@@ -1143,7 +1147,7 @@ async function postOrderToBC(orderId) {
       quantity: line.quantity,
       unitPrice: line.unit_price,
       description: line.item_name,
-      locationId: '7e4291d6-d13e-f011-be59-000d3a086703', // CTI WH
+      locationId: ctiLocId || undefined, // CTI WH (resolved per active env)
     });
   }
 
@@ -1241,9 +1245,11 @@ async function postPOToBC(orderId, vendorNo) {
   // when BC has a matching Location, so the PO shows who it's for. FC branches
   // (JF***) don't exist as BC Locations today → fall back to INTRANSIT, which
   // is also the safe default for any new branch we haven't set up in BC yet.
-  const INTRANSIT_LOCATION_ID = '814291d6-d13e-f011-be59-000d3a086703';
+  // Resolve both codes for the ACTIVE BC env (cached). On UAT-Dev 'INTRANSIT'
+  // resolves to 814291d6-… (unchanged); never hardcode — GUIDs differ per env.
+  const intransitLocId = await bc.findLocationIdByCode('INTRANSIT').catch(() => null);
   const branchLocId = await bc.findLocationIdByCode(order.branch_code).catch(() => null);
-  const lineLocationId = branchLocId || INTRANSIT_LOCATION_ID;
+  const lineLocationId = branchLocId || intransitLocId || undefined;
   for (const line of lines) {
     const item = db.prepare('SELECT id, unit_cost FROM items_cache WHERE item_no=?').get(line.item_no);
     const created = await bc.addPurchaseOrderLine(poId, {
@@ -1580,6 +1586,8 @@ async function postSalesInvoiceForOrder(orderId) {
         externalDocumentNumber: externalDocNo,
       });
       draftInvoiceId = inv.id;
+      // Resolve CTI for the ACTIVE BC env (cached); never hardcode the GUID.
+      const ctiLocId = await bc.findLocationIdByCode('CTI').catch(() => null);
       for (const line of lines) {
         const item = db.prepare('SELECT id FROM items_cache WHERE item_no=?').get(line.item_no);
         await bc.addInvoiceLine(draftInvoiceId, {
@@ -1588,7 +1596,7 @@ async function postSalesInvoiceForOrder(orderId) {
           quantity: line.quantity,
           unitPrice: line.unit_price,
           description: line.item_name,
-          locationId: '7e4291d6-d13e-f011-be59-000d3a086703', // CTI WH
+          locationId: ctiLocId || undefined, // CTI WH (resolved per active env)
         });
       }
       const posted = await bc.postInvoice(draftInvoiceId);
