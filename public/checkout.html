@@ -58,17 +58,19 @@
           <div style="display:flex;justify-content:space-between;font-size:24px;font-weight:700"><span data-i18n="checkout.grand">รวม</span><span id="grandTotal" style="color:var(--gold)"></span></div>
           <div style="color:var(--err);font-size:12px;margin-top:4px;text-align:right" data-i18n="checkout.shipping_note">ราคานี้ไม่รวมค่าขนส่ง</div>
 
-          <!-- Payment method picker — visible only for fruit orders -->
-          <div id="payMethodBox" style="display:none;margin-top:16px;padding:12px;border:1px solid var(--border);border-radius:8px">
+          <!-- FC fruit orders are always Credit 7 days (immediate-pay removed per ops feedback). -->
+          <div id="payMethodBox" style="display:none;margin-top:16px">
             <div style="font-size:13px;font-weight:600;margin-bottom:8px" data-i18n="checkout.payment_method">วิธีชำระเงิน</div>
-            <label style="display:flex;gap:8px;align-items:center;padding:8px;border-radius:6px;cursor:pointer;font-size:14px">
-              <input type="radio" name="paymentMethod" value="immediate" checked>
-              <span data-i18n="checkout.pay_immediate">ชำระทันที</span>
-            </label>
-            <label style="display:flex;gap:8px;align-items:center;padding:8px;border-radius:6px;cursor:pointer;font-size:14px">
-              <input type="radio" name="paymentMethod" value="credit_7d">
-              <span data-i18n="checkout.pay_credit_7d">เครดิต 7 วัน</span>
-            </label>
+            <!-- Single fixed method (credit_7d) shown as an info card, not a radio, so the
+                 global input{width:100%} rule can't break the layout. placeOrder() derives
+                 the method from this box's visibility, not from any form input. -->
+            <div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border:1.5px solid var(--gold);border-radius:8px;background:rgba(173,156,130,.08)">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M20 6 9 17l-5-5"/></svg>
+              <div>
+                <div style="font-size:14px;font-weight:600;line-height:1.3" data-i18n="checkout.pay_credit_7d">เครดิต 7 วัน</div>
+                <div style="font-size:12.5px;color:var(--muted);line-height:1.35;margin-top:2px" data-i18n="checkout.pay_credit_7d_note">(รอบชำระทุกวันอังคาร ไม่เกิน 12:00 น.)</div>
+              </div>
+            </div>
           </div>
 
           <button class="btn" style="width:100%;margin-top:20px;font-size:16px;padding:14px" onclick="placeOrder()" data-i18n="checkout.place">ยืนยันสั่งซื้อ</button>
@@ -137,7 +139,7 @@
   </div>
 </div>
 
-<script src="/js/app.js?v=20260604c"></script>
+<script src="/js/app.js?v=20260604e"></script>
 <script>
 if(!requireLogin()) throw '';
 if(!denyFinance()) throw '';
@@ -244,8 +246,12 @@ let lastOrderResp = null;
 let savedItems = null; // snapshot ของ items ก่อน cart ถูกล้าง ใช้สำหรับ PDF
 async function placeOrder() {
   const note = document.getElementById('note').value;
-  const methodInput = document.querySelector('input[name="paymentMethod"]:checked');
-  const paymentMethod = methodInput ? methodInput.value : 'immediate';
+  // FC fruit carts are credit_7d (the only method shown); FC general + JC pay
+  // immediately. Derive from the fruit picker's visibility so a hidden credit_7d
+  // radio can never leak credit terms into a general/JC order (the server also
+  // rejects credit_7d for non-fruit, but keep the client honest too).
+  const isFruitCart = document.getElementById('payMethodBox').style.display === 'block';
+  const paymentMethod = isFruitCart ? 'credit_7d' : 'immediate';
   try {
     // snapshot items ก่อน server ล้าง cart
     savedItems = cartData ? cartData.items.map(it => ({
