@@ -42,7 +42,7 @@
   </div>
 </div>
 
-<script src="/js/app.js?v=20260604e"></script>
+<script src="/js/app.js?v=20260604g"></script>
 <script>
 if(!requireLogin()) throw '';
 if(!denyFinance()) throw '';
@@ -97,13 +97,8 @@ async function load() {
             ? `<span class="countdown" data-expire="${dueMs}" data-credit-due="1">⏱ ${fmtCountdown(remCredit)}</span>`
             : `<span class="countdown" style="background:#fee2e2;color:#991b1b">⚠ ${t('orders.credit_overdue')}</span>`;
         }
-      } else {
-        const remaining = getRemaining(o.created_at);
-        if (remaining > 0) {
-          const urgent = remaining < 5 * 60 * 1000;
-          countdownHtml = `<span class="countdown ${urgent?'urgent':''}" data-expire="${new Date(o.created_at).getTime() + CANCEL_TIMEOUT_MIN*60*1000}">⏱ ${fmtCountdown(remaining)}</span>`;
-        }
       }
+      // General/immediate orders are no longer timed — no countdown.
     }
     return `<div class="card order-card" style="${isCancelled?'opacity:.6':''}" onclick="showDetail('${o.id}')">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
@@ -157,8 +152,6 @@ async function showDetail(id) {
   // Payment section for pending orders
   if (o.payment_status === 'pending') {
     const isCredit = o.payment_method === 'credit_7d';
-    const remaining = getRemaining(o.created_at);
-    const urgent = remaining > 0 && remaining < 5 * 60 * 1000;
     html += `<hr style="border-color:var(--border);margin:12px 0">
       <h4 style="margin-bottom:12px">${t('orders.pay')}</h4>`;
     if (isCredit) {
@@ -177,14 +170,8 @@ async function showDetail(id) {
         <div style="font-size:11px;color:var(--muted);margin-top:4px">${o.credit_due_at || ''}</div>
       </div>`;
       setTimeout(() => startCountdownTimer(), 100);
-    } else if (remaining > 0) {
-      html += `<div style="text-align:center;margin-bottom:12px">
-        <div class="countdown ${urgent?'urgent':''}" style="font-size:18px;display:inline-flex" id="modalCountdown" data-expire="${new Date(o.created_at).getTime() + CANCEL_TIMEOUT_MIN*60*1000}">⏱ ${fmtCountdown(remaining)}</div>
-        <p style="font-size:12px;color:var(--muted);margin-top:4px">${t('orders.pay_hint')}</p>
-      </div>`;
-    } else {
-      html += `<div style="text-align:center;padding:16px;color:var(--err)"><p style="font-size:24px">⏰</p><p>${t('orders.pay_timeout')}</p></div>`;
     }
+    // General/immediate orders are no longer timed — no countdown / no timeout message.
     html += `<div style="text-align:center;margin-bottom:16px">
         <div style="font-size:24px;font-weight:700;color:var(--gold);margin-bottom:8px">฿${(o.net_payable||o.total).toLocaleString()}</div>
         <img id="payQr_${o.id}" src="" style="max-width:240px;border-radius:12px;background:#fff;padding:10px;display:none">
@@ -202,8 +189,8 @@ async function showDetail(id) {
       <img id="slipPrev_${o.id}" style="max-width:200px;border-radius:8px;margin:12px auto;display:none">
       <button class="btn" style="width:100%;margin-top:12px" id="payBtn_${o.id}" onclick="submitPaySlip('${o.id}')" disabled>${t('orders.send_slip')}</button>
       <div class="err" id="payErr_${o.id}"></div>`;
-    // Cancel button
-    html += `<button class="btn ghost" style="width:100%;margin-top:8px;color:var(--err);border-color:var(--err)" onclick="cancelOrder('${o.id}')">${t('orders.cancel_order')}</button>`;
+    // Cancel button — HQ admins only; branches (JF/JC) cannot self-cancel an order.
+    if (isAdmin) html += `<button class="btn ghost" style="width:100%;margin-top:8px;color:var(--err);border-color:var(--err)" onclick="cancelOrder('${o.id}')">${t('orders.cancel_order')}</button>`;
     loadPayQR(o.id);
     setTimeout(() => startCountdownTimer(), 100);
   }
@@ -234,8 +221,9 @@ async function showDetail(id) {
       </div>
       <img id="slipPrev_${o.id}" style="max-width:200px;border-radius:8px;margin:12px auto;display:none">
       <button class="btn" style="width:100%;margin-top:12px" id="payBtn_${o.id}" onclick="submitPaySlip('${o.id}')" disabled>${t('orders.send_slip')}</button>
-      <div class="err" id="payErr_${o.id}"></div>
-      <button class="btn ghost" style="width:100%;margin-top:8px;color:var(--err);border-color:var(--err)" onclick="cancelOrder('${o.id}')">${t('orders.cancel_order')}</button>`;
+      <div class="err" id="payErr_${o.id}"></div>`;
+    // Cancel button — HQ admins only; branches (JF/JC) cannot self-cancel an order.
+    if (isAdmin) html += `<button class="btn ghost" style="width:100%;margin-top:8px;color:var(--err);border-color:var(--err)" onclick="cancelOrder('${o.id}')">${t('orders.cancel_order')}</button>`;
     loadPayQR(o.id);
   }
 
@@ -258,8 +246,8 @@ async function showDetail(id) {
     if (o.payment.verified) html += `<p style="color:var(--ok);font-size:13px;margin-top:4px">${t('orders.verified_at', { at: o.payment.verified_at })}</p>`;
   }
 
-  // FC cancel button for paid orders
-  if (o.payment_status === 'paid') {
+  // Cancel button (paid / awaiting Finance) — HQ admins only; branches cannot self-cancel.
+  if (isAdmin && o.payment_status === 'paid') {
     html += `<button class="btn ghost" style="width:100%;margin-top:8px;color:var(--err);border-color:var(--err)" onclick="cancelOrder('${o.id}')">${t('orders.cancel_order')}</button>`;
   }
 
