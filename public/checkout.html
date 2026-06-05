@@ -126,7 +126,8 @@
     <div class="card" style="text-align:center;padding:60px 20px">
       <div id="doneIcon" style="font-size:64px;margin-bottom:16px">✅</div>
       <h2 id="doneTitle" style="margin-bottom:8px"></h2>
-      <p style="color:var(--muted);margin-bottom:8px"><span data-i18n="checkout.order_no_label">คำสั่งซื้อ</span> <strong id="doneOrderNo"></strong></p>
+      <p id="doneOrderLine" style="color:var(--muted);margin-bottom:8px"><span data-i18n="checkout.order_no_label">คำสั่งซื้อ</span> <strong id="doneOrderNo"></strong></p>
+      <p id="doneStatus" style="display:none;margin-bottom:8px;align-items:center;justify-content:center;gap:7px;color:var(--ok);font-weight:600;font-size:15px"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span data-i18n="checkout.order_success">คำสั่งซื้อสำเร็จ</span></p>
       <p id="doneMsg" style="color:var(--muted);margin-bottom:8px"></p>
       <div id="verifyDetail" style="margin:16px auto;max-width:320px;text-align:left;display:none">
         <div class="card" style="font-size:13px;padding:14px"></div>
@@ -139,7 +140,7 @@
   </div>
 </div>
 
-<script src="/js/app.js?v=20260604e"></script>
+<script src="/js/app.js?v=20260604g"></script>
 <script>
 if(!requireLogin()) throw '';
 if(!denyFinance()) throw '';
@@ -179,7 +180,7 @@ function startPayCountdown(createdAtStr, timeoutMin, isCredit) {
     // Credit orders aren't auto-cancelled — replace the "or it gets cancelled"
     // sub-text with a less alarming credit note. ⏱ icon is still useful since
     // we are counting down to a due date.
-    subEl.textContent = t('checkout.credit_msg', { due: '' }).replace(' · upload the slip from the Orders page once paid.', '').replace(' · เมื่อโอนแล้วอัปสลิปได้ที่หน้าคำสั่งซื้อ', '');
+    subEl.textContent = t('checkout.credit_msg');
   }
   if (payTimerInterval) clearInterval(payTimerInterval);
   const tick = () => {
@@ -295,11 +296,16 @@ async function placeOrder() {
     if (r.payment_method === 'credit_7d') {
       document.getElementById('step1').style.display = 'none';
       document.getElementById('step3').style.display = 'block';
+      // Confirmation screen: hide the raw SO number, show a green success line
+      // instead (the number stays visible on /orders.html and the rest of the flow).
       document.getElementById('doneOrderNo').textContent = r.order_number;
-      document.getElementById('doneIcon').textContent = '📅';
+      document.getElementById('doneOrderLine').style.display = 'none';
+      document.getElementById('doneStatus').style.display = 'flex';
+      document.getElementById('doneIcon').innerHTML = '<svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M3 4h2l2.4 12.4a2 2 0 0 0 2 1.6h8.2a2 2 0 0 0 2-1.6L21 8H6"/></svg>';
       document.getElementById('doneTitle').style.color = '#f59e0b';
       document.getElementById('doneTitle').textContent = t('checkout.credit_title');
-      document.getElementById('doneMsg').textContent = t('checkout.credit_msg', { due: r.credit_due_at || '' });
+      // Slip note breaks onto its own line below the billing-cycle line.
+      document.getElementById('doneMsg').innerHTML = t('checkout.credit_msg') + '<br>' + t('checkout.credit_msg_slip');
       const detail = document.getElementById('verifyDetail');
       const bcSo = r.bc_so || {};
       const bcPo = r.bc_po || {};
@@ -317,7 +323,7 @@ async function placeOrder() {
     document.getElementById('step1').style.display = 'none';
     document.getElementById('step2').style.display = 'block';
     renderStep1Label();
-    startPayCountdown(r.created_at, r.cancel_timeout_min, false);
+    // General/immediate orders are no longer timed — no payment countdown / auto-cancel.
     document.getElementById('qrAmount').textContent = `฿${(r.net_payable || r.total).toLocaleString()}`;
     document.getElementById('qrImg').src = r.qr_data_url;
     document.getElementById('doneOrderNo').textContent = r.order_number;
@@ -400,25 +406,11 @@ async function uploadSlip() {
     document.getElementById('doneIcon').textContent = '⏳';
     document.getElementById('doneTitle').style.color = '#f59e0b';
     document.getElementById('doneTitle').textContent = t('checkout.pending_title');
-    document.getElementById('doneMsg').textContent = t('checkout.pending_msg');
-
-    const vr = j.verify_result || {};
-    const autoPassed = !!j.auto_verified;
-    const hasSlipMeta = vr.amount || vr.sender || vr.receiver || vr.ref;
-    if (hasSlipMeta || vr.reason) {
-      const detail = document.getElementById('verifyDetail');
-      detail.style.display = 'block';
-      const hint = autoPassed
-        ? `<div style="color:var(--ok);margin-top:6px">${t('checkout.auto_pass_hint')}</div>`
-        : (vr.reason ? `<div style="color:var(--err);margin-top:6px">${t('checkout.auto_fail_hint')} ${vr.reason}</div>` : '');
-      detail.querySelector('.card').innerHTML = `
-        ${vr.amount ? `<div style="margin-bottom:6px"><strong>${t('checkout.transfer_amount')}:</strong> ฿${(vr.amount||0).toLocaleString()}</div>` : ''}
-        ${vr.sender ? `<div style="margin-bottom:6px"><strong>${t('checkout.sender')}:</strong> ${vr.sender}</div>` : ''}
-        ${vr.receiver ? `<div style="margin-bottom:6px"><strong>${t('checkout.receiver')}:</strong> ${vr.receiver}</div>` : ''}
-        ${vr.ref ? `<div style="margin-bottom:6px"><strong>${t('checkout.ref')}:</strong> ${vr.ref}</div>` : ''}
-        ${hint}
-      `;
-    }
+    // Per ops: keep this screen minimal — just the "awaiting Finance" status + buttons.
+    // Hide the order number, the message line, and the parsed-slip detail card.
+    document.getElementById('doneOrderLine').style.display = 'none';
+    document.getElementById('doneMsg').style.display = 'none';
+    document.getElementById('verifyDetail').style.display = 'none';
   } catch (e) {
     document.getElementById('slipErr').textContent = e.message;
     document.getElementById('uploadBtn').disabled = false;

@@ -2543,13 +2543,12 @@ function autoCancelExpiredOrders() {
 app.post('/api/orders/:id/cancel', requireAuth, (req, res) => {
   const order = db.prepare('SELECT * FROM orders WHERE id=?').get(req.params.id);
   if (!order) return res.status(404).json({ error: 'Order not found' });
-  if (!isHqAdmin(req.user) && order.user_id !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
+  // Branch users (JF/JC) cannot cancel orders — only HQ admins can. A branch that
+  // needs an order cancelled must go through Finance/HQ.
+  if (!isHqAdmin(req.user)) return res.status(403).json({ error: 'สาขาไม่สามารถยกเลิกคำสั่งซื้อได้ กรุณาติดต่อสำนักงานใหญ่ / Branches cannot cancel orders' });
 
-  // FC can cancel: pending, paid only
-  // Admin can cancel: pending, paid, verified (if not shipped yet)
-  const allowed = isHqAdmin(req.user)
-    ? ['pending', 'paid', 'verified']
-    : ['pending', 'paid'];
+  // HQ admins can cancel pending / paid / verified (verified only if not yet shipped).
+  const allowed = ['pending', 'paid', 'verified'];
   if (!allowed.includes(order.payment_status)) {
     return res.status(400).json({ error: 'ไม่สามารถยกเลิกคำสั่งซื้อนี้ได้' });
   }
@@ -3713,8 +3712,9 @@ app.listen(PORT, () => {
   syncItems().then(r => console.log(`   Initial sync: ${r.count} items (${r.ms}ms)`));
   setInterval(() => syncItems().then(r => console.log(`[sync] ${r.count} items (${r.ms}ms)`)), SYNC_INTERVAL);
   console.log(`   Sync interval: every ${SYNC_INTERVAL/60000} min`);
-  // Auto-cancel expired orders every 1 min
-  autoCancelExpiredOrders();
-  setInterval(autoCancelExpiredOrders, 60 * 1000);
-  console.log(`   Auto-cancel: pending orders > ${CANCEL_TIMEOUT_MIN} min\n`);
+  // Auto-cancel DISABLED (per ops): general/immediate orders no longer expire.
+  // Fruit orders are credit_7d (never auto-cancelled) and JC orders don't pay,
+  // so no category is auto-cancelled anymore. autoCancelExpiredOrders() is kept
+  // for manual/admin use but is no longer scheduled.
+  console.log(`   Auto-cancel: DISABLED\n`);
 });
