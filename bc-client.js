@@ -53,10 +53,27 @@ async function bcFetch(path, opts = {}) {
   return r.status === 204 ? null : r.json();
 }
 
+// Fetch ALL pages of an API v2.0 list endpoint by following @odata.nextLink.
+// A single GET with an explicit $top caps the response — /items returned only
+// the first 1000 records and silently dropped the rest on larger catalogs.
+async function bcFetchAll(path) {
+  const token = await getToken();
+  let url = `${baseUrl()}${path}`;
+  const all = [];
+  for (let guard = 0; url && guard < 100; guard++) {
+    const r = await fetch(url, { headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' } });
+    if (!r.ok) throw new Error(`BC ${path} (page ${guard}) → ${r.status}: ${await r.text()}`);
+    const j = await r.json();
+    if (Array.isArray(j.value)) all.push(...j.value);
+    url = j['@odata.nextLink'] || null;
+  }
+  return { value: all };
+}
+
 // ─── Items ───
 async function listItems() {
   if (MOCK) return { mock: true, value: [] };
-  return bcFetch('/items?$top=1000');
+  return bcFetchAll('/items');   // paginated — ALL items, not just the first 1000
 }
 
 // ─── Item Categories ───
