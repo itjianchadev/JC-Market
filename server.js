@@ -2973,6 +2973,242 @@ app.get('/api/shipping-invoices/:id', requireAuth, (req, res) => {
   res.json({ ...inv, orders });
 });
 
+// ═══════════════ Consolidated GOODS billing (credit/fruit → Tuesday cycle) ═════
+// FC fruit orders are credit: each already has its own BC SO (the real sales doc).
+// Finance consolidates every verified + unbilled FC fruit order per franchise into
+// ONE credit_invoices row — an APP-side statement (no extra BC doc) listing each
+// order, due the next Tuesday 12:00. No WHT on goods → net_payable = total.
+
+// Next Tuesday at 12:00 (server localtime) as 'YYYY-MM-DD 12:00'. If today is
+// Tuesday before noon, that Tuesday counts; otherwise the following Tuesday.
+function nextTuesdayDue() {
+  const now = new Date();
+  let add = (2 - now.getDay() + 7) % 7;            // 2 = Tuesday
+  if (add === 0 && now.getHours() >= 12) add = 7;  // past noon on a Tuesday → next week
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + add);
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} 12:00`;
+}
+
+// Candidate consolidation: one row per FC branch with verified + unbilled fruit
+// (credit_7d) orders. The consolidated orders themselves are the invoice lines.
+const CREDIT_CANDIDATE_SQL = `
+  SELECT branch_code,
+         COUNT(*)                       AS order_count,
+         COALESCE(SUM(subtotal), 0)     AS subtotal,
+         COALESCE(SUM(vat_amount), 0)   AS vat_amount,
+         COALESCE(SUM(total), 0)        AS total
+  FROM orders
+  WHERE payment_status = 'verified'
+    AND payment_method = 'credit_7d'
+    AND order_type = 'fc_purchase'
+    AND (credit_invoice_id IS NULL OR credit_invoice_id = '')
+    AND branch_code IS NOT NULL AND branch_code != ''`;
+
+function creditPreview(branchCode) {
+  let sql = CREDIT_CANDIDATE_SQL;
+  const params = [];
+  if (branchCode) { sql += ' AND branch_code = ?'; params.push(branchCode); }
+  sql += ' GROUP BY branch_code HAVING order_count > 0 ORDER BY branch_code';
+  const rows = db.prepare(sql).all(...params).map(r => {
+    const meta = branchBillingMeta(r.branch_code);
+    const subtotal = Math.round(r.subtotal * 100) / 100;
+    const vat_amount = Math.round(r.vat_amount * 100) / 100;
+    const total = Math.round(r.total * 100) / 100;
+    return { branch_code: r.branch_code, ...meta, order_count: r.order_count, subtotal, vat_amount, total, net_payable: total };
+  });
+  const totals = rows.reduce((a, r) => ({
+    order_count: a.order_count + r.order_count,
+    subtotal: Math.round((a.subtotal + r.subtotal) * 100) / 100,
+    vat_amount: Math.round((a.vat_amount + r.vat_amount) * 100) / 100,
+    total: Math.round((a.total + r.total) * 100) / 100,
+    net_payable: Math.round((a.net_payable + r.net_payable) * 100) / 100,
+  }), { order_count: 0, subtotal: 0, vat_amount: 0, total: 0, net_payable: 0 });
+  // Individual unbilled orders (the future invoice lines) for the per-order
+  // breakdown — order no, BC SO/PO, amount — shown under each franchise.
+  let oSql = `SELECT id, branch_code, order_number, created_at, bc_so_no, bc_po_no, total
+    FROM orders WHERE payment_status='verified' AND payment_method='credit_7d' AND order_type='fc_purchase'
+      AND (credit_invoice_id IS NULL OR credit_invoice_id='') AND branch_code IS NOT NULL AND branch_code != ''`;
+  const oParams = [];
+  if (branchCode) { oSql += ' AND branch_code = ?'; oParams.push(branchCode); }
+  const orders = db.prepare(oSql + ' ORDER BY branch_code, created_at').all(...oParams);
+  return { cycle_due: nextTuesdayDue(), branch_count: rows.length, rows, totals, orders };
+}
+
+function genCreditInvoiceNumber() {
+  const now = new Date();
+  const p = n => String(n).padStart(2, '0');
+  const prefix = `CRD-INV-${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}-`;
+  const last = db.prepare("SELECT invoice_number FROM credit_invoices WHERE invoice_number LIKE ? ORDER BY invoice_number DESC LIMIT 1").get(prefix + '%');
+  const seq = last ? parseInt(last.invoice_number.slice(prefix.length), 10) + 1 : 1;
+  return prefix + String(seq).padStart(4, '0');
+}
+function genCreditReceiptNumber() {
+  const now = new Date();
+  const p = n => String(n).padStart(2, '0');
+  const prefix = `CRD-RC-${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}-`;
+  const last = db.prepare("SELECT receipt_number FROM credit_invoices WHERE receipt_number LIKE ? ORDER BY receipt_number DESC LIMIT 1").get(prefix + '%');
+  const seq = last ? parseInt(last.receipt_number.slice(prefix.length), 10) + 1 : 1;
+  return prefix + String(seq).padStart(4, '0');
+}
+
+// Preview what the Tuesday billing run would consolidate. HQ admins see all
+// franchises (or a filtered one); an FC sees only their own outstanding total.
+app.get('/api/credit-invoices/preview', requireAuth, (req, res) => {
+  let branchCode = (req.query.branch_code || '').trim() || null;
+  if (!isHqAdmin(req.user)) {
+    if (!req.user.branch_code) return res.json({ cycle_due: nextTuesdayDue(), branch_count: 0, rows: [], totals: { order_count: 0, subtotal: 0, vat_amount: 0, total: 0, net_payable: 0 } });
+    branchCode = req.user.branch_code;
+  }
+  try { res.json(creditPreview(branchCode)); }
+  catch (e) { console.error('[credit preview]', e); res.status(500).json({ error: e.message }); }
+});
+
+// Generate the consolidated billing statements — one per franchise. Each candidate
+// order is stamped credit_invoice_id inside the same tx that creates the invoice,
+// so a re-run never double-bills (stamped orders drop out of the candidate query).
+app.post('/api/credit-invoices/generate', requireAuth, requireAdmin, (req, res) => {
+  const onlyBranch = (req.body && req.body.branch_code || '').trim() || null;
+  const cutoffAt = db.prepare("SELECT datetime('now','localtime') AS t").get().t;
+  const due = nextTuesdayDue();
+  const candidates = creditPreview(onlyBranch).rows;
+  if (!candidates.length) return res.json({ ok: true, created: [], message: 'ไม่มีออเดอร์เครดิตค้างวางบิล' });
+
+  const selStmt = db.prepare(`SELECT id, subtotal, vat_amount, total FROM orders
+    WHERE payment_status='verified' AND payment_method='credit_7d' AND order_type='fc_purchase'
+      AND (credit_invoice_id IS NULL OR credit_invoice_id='') AND branch_code=?`);
+  const stampStmt = db.prepare("UPDATE orders SET credit_invoice_id=? WHERE id=?");
+
+  const created = [];
+  for (const c of candidates) {
+    const invId = crypto.randomUUID();
+    const invNo = genCreditInvoiceNumber();
+    const meta = branchBillingMeta(c.branch_code);
+    try {
+      const ok = db.transaction(() => {
+        const orders = selStmt.all(c.branch_code);
+        if (!orders.length) return false; // raced away — skip
+        const r2 = n => Math.round(n * 100) / 100;
+        const subtotal = r2(orders.reduce((s, o) => s + (o.subtotal || 0), 0));
+        const vat = r2(orders.reduce((s, o) => s + (o.vat_amount || 0), 0));
+        const total = r2(orders.reduce((s, o) => s + (o.total || 0), 0));
+        db.prepare(`INSERT INTO credit_invoices
+          (id, invoice_number, branch_code, branch_name, bc_customer_no, cycle_due, cutoff_at, order_count,
+           subtotal, vat_amount, total, net_payable, status, created_by)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'pending',?)`).run(
+          invId, invNo, c.branch_code, meta.branch_name, meta.bc_customer_no, due, cutoffAt, orders.length,
+          subtotal, vat, total, total, req.user.id);
+        for (const o of orders) stampStmt.run(invId, o.id);
+        return true;
+      })();
+      if (!ok) continue;
+      created.push(db.prepare('SELECT * FROM credit_invoices WHERE id=?').get(invId));
+    } catch (e) {
+      console.error('[credit generate]', c.branch_code, e.message);
+      created.push({ branch_code: c.branch_code, error: e.message });
+    }
+  }
+  res.json({ ok: true, cycle_due: due, created, message: `วางบิล ${created.length} เฟรนไชส์ (กำหนดชำระ ${due})` });
+});
+
+// List billing statements (Finance: all; FC: own branch).
+app.get('/api/credit-invoices', requireAuth, (req, res) => {
+  const where = [], params = [];
+  if (!isHqAdmin(req.user)) {
+    if (!req.user.branch_code) return res.json([]);
+    where.push('branch_code = ?'); params.push(req.user.branch_code);
+  } else if (req.query.branch_code) { where.push('branch_code = ?'); params.push(req.query.branch_code); }
+  if (req.query.status) { where.push('status = ?'); params.push(req.query.status); }
+  const sql = `SELECT * FROM credit_invoices ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY created_at DESC`;
+  res.json(db.prepare(sql).all(...params));
+});
+
+// Billing statement detail + its consolidated orders (the lines).
+app.get('/api/credit-invoices/:id', requireAuth, (req, res) => {
+  const inv = db.prepare('SELECT * FROM credit_invoices WHERE id=?').get(req.params.id);
+  if (!inv) return res.status(404).json({ error: 'Billing statement not found' });
+  if (!isHqAdmin(req.user) && inv.branch_code !== req.user.branch_code) return res.status(403).json({ error: 'Forbidden' });
+  const orders = db.prepare(`SELECT id, order_number, created_at, subtotal, vat_amount, total, bc_so_no, bc_po_no
+    FROM orders WHERE credit_invoice_id=? ORDER BY created_at`).all(inv.id);
+  res.json({ ...inv, orders });
+});
+
+// ─── PromptPay QR for a credit bill (FC pays the consolidated goods total) ───
+app.get('/api/credit-invoices/:id/qr', requireAuth, async (req, res) => {
+  const inv = db.prepare('SELECT * FROM credit_invoices WHERE id=?').get(req.params.id);
+  if (!inv) return res.status(404).json({ error: 'Billing statement not found' });
+  if (!isHqAdmin(req.user) && inv.branch_code !== req.user.branch_code) return res.status(403).json({ error: 'Forbidden' });
+  if (inv.status !== 'pending' && inv.status !== 'failed') return res.status(400).json({ error: 'ใบวางบิลนี้ชำระแล้ว' });
+  try {
+    const qr = await generateQR(inv.net_payable);
+    res.json({ qr_data_url: qr, total: inv.total, net_payable: inv.net_payable });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── FC uploads the payment slip for a credit bill (auto-verify is a hint) ───
+app.post('/api/credit-invoices/:id/slip', requireAuth, upload.single('slip'), async (req, res) => {
+  const inv = db.prepare('SELECT * FROM credit_invoices WHERE id=?').get(req.params.id);
+  if (!inv) return res.status(404).json({ error: 'Billing statement not found' });
+  if (!isHqAdmin(req.user) && inv.branch_code !== req.user.branch_code) return res.status(403).json({ error: 'Forbidden' });
+  if (!req.file) return res.status(400).json({ error: 'No slip file' });
+  if (inv.status === 'verified') return res.status(400).json({ error: 'ใบวางบิลนี้อนุมัติแล้ว' });
+  if (inv.status === 'cancelled') return res.status(400).json({ error: 'ใบวางบิลนี้ถูกยกเลิก' });
+  if (inv.status === 'paid') return res.status(400).json({ error: 'ส่งสลิปไปแล้ว · รอ Finance ตรวจสอบ' });
+
+  const slipPath = '/uploads/' + req.file.filename;
+  const absPath = path.join(__dirname, 'uploads', req.file.filename);
+  const clientIp = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+  const checkDuplicate = async ({ hash, qrRef }) => {
+    if (qrRef) {
+      const d = db.prepare("SELECT invoice_number FROM credit_invoices WHERE qr_ref=? AND status IN ('paid','verified') AND id != ?").get(qrRef, inv.id);
+      if (d) return { duplicate: true, reason: `สลิปนี้ (ref: ${qrRef}) ถูกใช้กับใบวางบิล ${d.invoice_number} แล้ว` };
+    }
+    if (hash) {
+      const d = db.prepare("SELECT invoice_number FROM credit_invoices WHERE slip_hash=? AND status IN ('paid','verified') AND id != ?").get(hash, inv.id);
+      if (d) return { duplicate: true, reason: `ภาพสลิปนี้เคยถูกใช้กับใบวางบิล ${d.invoice_number} แล้ว` };
+    }
+    return { duplicate: false };
+  };
+  const result = await verifySlip(absPath, inv.net_payable, { checkDuplicate });
+  if (!result.verified) {
+    try {
+      db.prepare(`INSERT INTO slip_fraud_log (order_id, user_id, username, ip, reason, slip_hash, qr_ref, slip_amount, expected_amount, trans_date, raw_response)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(
+        'CRD:' + inv.id, req.user.id, req.user.username || '', clientIp,
+        result.reason || '', result.slip_hash || '', result.ref || '', result.amount || 0,
+        inv.net_payable, result.transDate || '', result.raw ? JSON.stringify(result.raw).slice(0, 2000) : '');
+    } catch (e) { /* audit log failure must not break flow */ }
+  }
+  db.prepare(`UPDATE credit_invoices SET status='paid', slip_path=?, slip_hash=?, qr_ref=?, paid_at=datetime('now','localtime') WHERE id=?`)
+    .run(slipPath, result.slip_hash || '', result.ref || '', inv.id);
+  res.json({
+    ok: true, auto_verified: result.verified, slip_path: slipPath,
+    verify_result: { amount: result.amount, sender: result.sender, receiver: result.receiver, ref: result.ref, reason: result.reason },
+    message: result.verified
+      ? 'อัพโหลดสลิปสำเร็จ · ตรวจอัตโนมัติผ่าน → รอ Finance อนุมัติ'
+      : 'อัพโหลดสลิปสำเร็จ · รอ Finance ตรวจสอบ',
+  });
+});
+
+// ─── Finance verifies the credit-bill slip → 'verified' (ชำระสำเร็จ) or 'failed' ───
+app.post('/api/credit-invoices/:id/verify', requireAuth, requireAdmin, (req, res) => {
+  const { action, reason } = req.body || {};
+  const inv = db.prepare('SELECT * FROM credit_invoices WHERE id=?').get(req.params.id);
+  if (!inv) return res.status(404).json({ error: 'Billing statement not found' });
+  if (action === 'approve') {
+    if (inv.status !== 'paid') return res.status(400).json({ error: 'ต้องมีสลิปรอตรวจก่อน (status=paid)' });
+    const rcptNo = genCreditReceiptNumber();
+    db.prepare("UPDATE credit_invoices SET status='verified', receipt_number=?, verified_by=?, verified_at=datetime('now','localtime') WHERE id=?")
+      .run(rcptNo, req.user.id, inv.id);
+    return res.json({ ok: true, status: 'verified', receipt_number: rcptNo });
+  }
+  if (action === 'reject') {
+    db.prepare("UPDATE credit_invoices SET status='failed', note=? WHERE id=?").run('[REJECT] ' + (reason || ''), inv.id);
+    return res.json({ ok: true, status: 'failed' });
+  }
+  return res.status(400).json({ error: "action ต้องเป็น 'approve' หรือ 'reject'" });
+});
+
 // ─── Regenerate the PromptPay QR for a shipping invoice (FC pays net of WHT) ───
 app.get('/api/shipping-invoices/:id/qr', requireAuth, async (req, res) => {
   const inv = db.prepare('SELECT * FROM shipping_invoices WHERE id=?').get(req.params.id);

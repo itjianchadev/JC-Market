@@ -399,6 +399,46 @@ CREATE INDEX IF NOT EXISTS idx_shipinv_status ON shipping_invoices(status);
 //   payment_status='verified' AND shipping_fee>0 AND shipping_invoice_id=''
 try { db.exec("ALTER TABLE orders ADD COLUMN shipping_invoice_id TEXT DEFAULT ''"); } catch (e) {}
 
+// ─── Consolidated GOODS billing (credit/fruit orders → Tuesday cycle) ──────────
+// FC fruit orders are credit: each already auto-creates its own BC SO at checkout
+// (the real sales doc), but is NOT collected per-order. Finance consolidates every
+// verified + unbilled FC fruit order per franchise into ONE credit_invoices row —
+// an APP-side billing statement (no extra BC doc) listing each order, due the next
+// Tuesday 12:00. The franchise pays the grand total once. Like shipping billing,
+// the consolidated orders ARE the lines (orders WHERE credit_invoice_id=?), so
+// there is no separate lines table. No WHT on goods → net_payable = total.
+db.exec(`
+CREATE TABLE IF NOT EXISTS credit_invoices (
+  id TEXT PRIMARY KEY,
+  invoice_number TEXT UNIQUE NOT NULL,            -- CRD-INV-20260609-0001
+  branch_code TEXT NOT NULL,
+  branch_name TEXT DEFAULT '',
+  bc_customer_no TEXT DEFAULT '',
+  cycle_due TEXT NOT NULL,                          -- 'YYYY-MM-DD 12:00' = Tuesday due
+  cutoff_at TEXT DEFAULT '',                        -- when the sweep ran (audit)
+  order_count INTEGER NOT NULL DEFAULT 0,
+  subtotal REAL NOT NULL DEFAULT 0,                -- sum of order subtotals (goods, pre-VAT)
+  vat_amount REAL NOT NULL DEFAULT 0,              -- sum of order VAT
+  total REAL NOT NULL DEFAULT 0,                   -- subtotal + vat = sum(order.total)
+  net_payable REAL NOT NULL DEFAULT 0,             -- = total (no WHT on goods)
+  status TEXT NOT NULL DEFAULT 'pending',           -- pending/paid/verified/cancelled
+  qr_ref TEXT DEFAULT '',
+  slip_path TEXT DEFAULT '',
+  slip_hash TEXT DEFAULT '',
+  receipt_number TEXT DEFAULT '',
+  note TEXT DEFAULT '',
+  created_by TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now','localtime')),
+  paid_at TEXT,
+  verified_by TEXT DEFAULT '',
+  verified_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_crdinv_branch ON credit_invoices(branch_code);
+CREATE INDEX IF NOT EXISTS idx_crdinv_status ON credit_invoices(status);
+`);
+// Link an FC fruit order to the Tuesday billing run that swept it (double-bill guard).
+try { db.exec("ALTER TABLE orders ADD COLUMN credit_invoice_id TEXT DEFAULT ''"); } catch (e) {}
+
 // ─── Seed admin + demo FC users ───
 // ─── Migration: add name_en column to existing items_cache if missing ───
 try {
