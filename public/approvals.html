@@ -220,7 +220,7 @@ async function renderPending() {
           : '<span style="color:var(--muted);font-size:11px">—</span>'}</td>
         <td>${autoPill}${autoReason ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">${autoReason}</div>` : ''}</td>
         <td>
-          <button class="btn-approve" onclick="approveOrder('${o.id}', this)">✅ อนุมัติ</button>
+          <button class="btn-approve" onclick="approveOrder('${o.id}','${o.order_number}', this)">✅ อนุมัติ</button>
           <button class="btn-reject" onclick="openRejectModal('${o.id}','${o.order_number}')">❌ ปฏิเสธ</button>
         </td>
       </tr>
@@ -286,7 +286,8 @@ async function renderRejected() {
   }).join('');
 }
 
-async function approveOrder(id, btn) {
+async function approveOrder(id, orderNum, btn) {
+  if (!confirm('ยืนยันอนุมัติการชำระเงินของออเดอร์ ' + orderNum + ' ?\n\nเมื่ออนุมัติแล้วระบบจะสร้างเอกสาร SO/PO ใน BC ทันที')) return;
   btn.disabled = true;
   btn.textContent = 'กำลังอนุมัติ...';
   try {

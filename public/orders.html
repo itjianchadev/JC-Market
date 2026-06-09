@@ -151,26 +151,10 @@ async function showDetail(id) {
 
   // Payment section for pending orders
   if (o.payment_status === 'pending') {
-    const isCredit = o.payment_method === 'credit_7d';
     html += `<hr style="border-color:var(--border);margin:12px 0">
       <h4 style="margin-bottom:12px">${t('orders.pay')}</h4>`;
-    if (isCredit) {
-      // Credit orders count down to credit_due_at (7 days from checkout)
-      // instead of the 30-min cancel timer. data-expire lets the existing
-      // startCountdownTimer() loop refresh the text every second. Past the
-      // due date the countdown shows "⚠ เกินกำหนด" but stays interactive —
-      // FC can still upload a slip, they just can't place new fruit orders
-      // until everything outstanding is settled.
-      const dueMs = o.credit_due_at ? new Date(o.credit_due_at.replace(' ', 'T')).getTime() : 0;
-      const remainingCredit = Math.max(0, dueMs - Date.now());
-      const overdue = dueMs && Date.now() > dueMs;
-      html += `<div style="text-align:center;padding:14px;margin-bottom:12px;background:${overdue?'#fee2e2':'#fef3c7'};border-radius:8px">
-        <div style="font-size:14px;color:${overdue?'#991b1b':'#92400e'};font-weight:600">${overdue ? '⚠ ' + t('orders.credit_overdue') : '📅 ' + t('orders.credit_due')}</div>
-        <div style="font-size:13px;margin-top:4px" data-expire="${dueMs}" data-credit-due="1">${overdue ? (o.credit_due_at || '') : '⏱ ' + fmtCountdown(remainingCredit)}</div>
-        <div style="font-size:11px;color:var(--muted);margin-top:4px">${o.credit_due_at || ''}</div>
-      </div>`;
-      setTimeout(() => startCountdownTimer(), 100);
-    }
+    // Per-order credit-due band (yellow) removed — it confused franchises; billing is
+    // consolidated on the Tuesday cycle. Payment detail now shows just the QR + slip.
     // General/immediate orders are no longer timed — no countdown / no timeout message.
     html += `<div style="text-align:center;margin-bottom:16px">
         <div style="font-size:24px;font-weight:700;color:var(--gold);margin-bottom:8px">฿${(o.net_payable||o.total).toLocaleString()}</div>
