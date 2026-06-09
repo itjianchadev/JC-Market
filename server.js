@@ -598,10 +598,11 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
   const orderType = isJcBranch
     ? (isFruitOrder ? 'jc_purchase' : 'jc_transfer')
     : 'fc_purchase';
-  // JC orders skip Finance entirely — flip straight to 'verified' so they
-  // never appear in the Finance approval queue and aren't subject to the
-  // 30-min auto-cancel timer.
-  const initialPaymentStatus = isJcBranch ? 'verified' : 'pending';
+  // JC orders skip Finance entirely — flip straight to 'verified'. FC fruit
+  // (credit_7d) does too: it's billed on the consolidated Tuesday cycle (no
+  // upfront slip to approve), so it auto-creates BC SO+PO below and never enters
+  // the Finance approval queue. FC general still goes through Finance (slip → approve).
+  const initialPaymentStatus = (isJcBranch || paymentMethod === 'credit_7d') ? 'verified' : 'pending';
 
   const tx = db.transaction(() => {
     // Create order (VAT=0 ก่อน จะอัพเดทจาก BC ทีหลัง)
@@ -698,6 +699,31 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
       try { createShipmentForOrder(orderId); }
       catch (e) { console.error('[checkout → shipment]', e.message); }
     }
+  } else if (orderType === 'fc_purchase' && paymentMethod === 'credit_7d') {
+    // FC fruit = credit (billed on the Tuesday cycle, no upfront slip). Auto-create
+    // BC SO + PO at checkout (the order is already 'verified') — skips the Finance
+    // gate. Safe: branches can't self-cancel and auto-cancel is off (no BC orphans).
+    try {
+      bcSoResult = await postOrderToBC(orderId);
+    } catch (e) {
+      console.error('[checkout → BC SO (fruit credit)]', e.message);
+      db.prepare("UPDATE orders SET bc_sync_error=? WHERE id=?").run(e.message, orderId);
+      bcSoResult = { ok: false, error: e.message };
+    }
+    if (bcSoResult && bcSoResult.bc_so_no && defaultVendor) {
+      try {
+        bcPoResult = await postPOToBC(orderId, defaultVendor);
+      } catch (e) {
+        console.error('[checkout → BC PO (fruit credit)]', e.message);
+        db.prepare("UPDATE orders SET bc_sync_error=? WHERE id=?").run('[PO] ' + e.message, orderId);
+        bcPoResult = { ok: false, error: e.message };
+      }
+    }
+    // TMS shipment row — only if BC SO succeeded.
+    if (bcSoResult && bcSoResult.bc_so_no) {
+      try { createShipmentForOrder(orderId); }
+      catch (e) { console.error('[checkout → shipment]', e.message); }
+    }
   }
 
   // Grab created_at (set by SQLite DEFAULT) so client can sync countdown with server time
@@ -709,7 +735,7 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
   } else if (orderType === 'jc_purchase') {
     msgBase = `สร้างคำสั่งซื้อ ${orderNumber} (สาขา JC · ผลไม้สด) — ${bcPoResult && bcPoResult.bc_po_no ? 'BC PO ' + bcPoResult.bc_po_no : 'BC PO ค้าง (retry)'}`;
   } else if (paymentMethod === 'credit_7d') {
-    msgBase = `สร้างคำสั่งซื้อ ${orderNumber} (เครดิต 7 วัน) — กำหนดชำระภายใน ${creditDueAt}`;
+    msgBase = `สร้างคำสั่งซื้อ ${orderNumber} (เครดิต 7 วัน) — ${bcSoResult && bcSoResult.bc_so_no ? 'BC SO ' + bcSoResult.bc_so_no : 'BC SO ค้าง (retry)'}`;
   } else {
     msgBase = `สร้างคำสั่งซื้อ ${orderNumber} — โอนชำระเงินและส่งสลิปเพื่อให้ Finance ตรวจสอบ`;
   }
