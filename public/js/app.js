@@ -603,11 +603,15 @@ const I18N = {
 // Top-level grouping for the shop sidebar. Anything in FRUIT_CATEGORIES rolls
 // up under "ผลไม้สด"; everything else falls under "สินค้าทั่วไป". Add more
 // category codes to FRUIT_CATEGORIES when BC introduces them.
-const FRUIT_CATEGORIES = new Set(['Fruit fresh']);
+const FRUIT_CATEGORIES = new Set(['Fruit fresh','นมสด','Ice Hot','Wipping cream creamchess','Yokurt']);
 function categoryGroup(cat){ return FRUIT_CATEGORIES.has(cat) ? 'fruit' : 'general'; }
 
 const CATEGORY_I18N = {
-  'Fruit fresh':      { th:'ผลไม้สด', en:'Fruit fresh' },
+  'Fruit fresh':      { th:'ผลไม้', en:'Fruit' },
+  'นมสด':             { th:'นมสด', en:'Fresh Milk' },
+  'Ice Hot':          { th:'ไอซ์ฮอต', en:'Ice Hot' },
+  'Wipping cream creamchess': { th:'วิปครีม / ครีมชีส', en:'Whipping / Cream cheese' },
+  'Yokurt':           { th:'โยเกิร์ต', en:'Yogurt' },
   'Tea Leaves':       { th:'ใบชา', en:'Tea Leaves' },
   'Ingredient':       { th:'วัตถุดิบ', en:'Ingredient' },
   'Topping':          { th:'ท็อปปิ้ง', en:'Topping' },
