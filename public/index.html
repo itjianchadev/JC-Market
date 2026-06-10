@@ -89,7 +89,7 @@
       <div class="card" style="padding:12px">
         <div class="search-row">
           <input id="q" data-i18n-placeholder="shop.search_placeholder" placeholder="ค้นหาสินค้า...">
-          <label class="toggle-label" title="ซ่อนสินค้าที่คงเหลือเป็น 0">
+          <label id="oosToggle" class="toggle-label" title="ซ่อนสินค้าที่คงเหลือเป็น 0">
             <span class="switch"><input type="checkbox" id="hideOos"><span class="slider"></span></span>
             <span data-i18n="shop.hide_oos">ซ่อนสินค้าหมด</span>
           </label>
@@ -158,7 +158,7 @@
   </div>
 </div>
 
-<script src="/js/app.js?v=20260604h"></script>
+<script src="/js/app.js?v=20260604i"></script>
 <script>
 if(!requireLogin()) throw '';
 if(!denyFinance()) throw '';
@@ -193,6 +193,11 @@ if (isAdminView) {
     <th data-i18n="shop.col.last_order">สั่งล่าสุด</th>
     <th style="text-align:center"></th>`;
   applyI18n(thead);
+} else {
+  // FC catalog hides no-price / out-of-stock items permanently (see renderItems),
+  // so the manual "hide out-of-stock" toggle is redundant for branches.
+  const oosToggle = document.getElementById('oosToggle');
+  if (oosToggle) oosToggle.style.display = 'none';
 }
 
 function fmtRelDate(isoStr){
@@ -277,6 +282,9 @@ function renderItems() {
       const hay = ((it.name||'') + ' ' + (it.name_en||'') + ' ' + (it.item_no||'')).toLowerCase();
       if (!hay.includes(q)) return false;
     }
+    // Branch catalog hides items with no price or no stock (team request);
+    // admin view keeps everything so HQ can audit price/stock coverage.
+    if (!isAdminView && (!(it.unit_price > 0) || it.inventory <= 0)) return false;
     if (hideOos && it.inventory <= 0) { oosHidden++; return false; }
     return true;
   });

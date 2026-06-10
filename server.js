@@ -408,7 +408,7 @@ app.get('/api/items/categories', requireAuth, (req, res) => {
 // whenever BC adds a new fresh-fruit category code.
 const FRUIT_CATEGORIES_SRV = new Set(['Fruit fresh']);
 const categoryGroupSrv = cat => FRUIT_CATEGORIES_SRV.has(cat) ? 'fruit' : 'general';
-const groupLabelTH = g => g === 'fruit' ? 'ผลไม้สด' : 'สินค้าทั่วไป';
+const groupLabelTH = g => g === 'fruit' ? 'ประเภทของสด' : 'ประเภทของแห้ง';
 
 // Block-list helper: a FC with any past-due credit order can't place new
 // fruit orders until they've settled. Returns the count of outstanding
@@ -556,7 +556,7 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
   const groups = new Set(cartItems.map(ci => categoryGroupSrv(ci.category)));
   if (groups.size > 1) {
     return res.status(400).json({
-      error: 'ห้ามสั่งของข้ามหมวดในออร์เดอร์เดียว — ตะกร้ามีทั้ง "สินค้าทั่วไป" และ "ผลไม้สด" กรุณาแยกออร์เดอร์',
+      error: 'ห้ามสั่งของข้ามหมวดในออร์เดอร์เดียว — ตะกร้ามีทั้ง "ประเภทของแห้ง" และ "ประเภทของสด" กรุณาแยกออร์เดอร์',
     });
   }
 
@@ -1161,10 +1161,10 @@ async function postOrderToBC(orderId) {
   const soNo = so.number || '';
 
   // 2. Add order lines
-  // Resolve the CTI warehouse location for the ACTIVE BC env (cached). Location
+  // Resolve the INTRANSIT location for the ACTIVE BC env (cached). Location
   // GUIDs differ per environment, so never hardcode — findLocationIdByCode keeps
-  // this env-agnostic. On UAT-Dev 'CTI' resolves to 7e4291d6-… (unchanged).
-  const ctiLocId = await bc.findLocationIdByCode('CTI').catch(() => null);
+  // this env-agnostic. SO lines now ship from INTRANSIT per ops request (was CTI).
+  const soLocId = await bc.findLocationIdByCode('INTRANSIT').catch(() => null);
   for (const line of lines) {
     const item = db.prepare('SELECT id FROM items_cache WHERE item_no=?').get(line.item_no);
     await bc.addSalesOrderLine(soId, {
@@ -1173,7 +1173,7 @@ async function postOrderToBC(orderId) {
       quantity: line.quantity,
       unitPrice: line.unit_price,
       description: line.item_name,
-      locationId: ctiLocId || undefined, // CTI WH (resolved per active env)
+      locationId: soLocId || undefined, // INTRANSIT (resolved per active env)
     });
   }
 
