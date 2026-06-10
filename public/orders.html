@@ -42,7 +42,7 @@
   </div>
 </div>
 
-<script src="/js/app.js?v=20260604h"></script>
+<script src="/js/app.js?v=20260604j"></script>
 <script>
 if(!requireLogin()) throw '';
 if(!denyFinance()) throw '';
@@ -117,6 +117,7 @@ async function load() {
         <span>${o.created_at}</span>
         <span style="color:${isCancelled?'var(--muted)':'var(--gold)'};font-weight:700;font-size:16px;${isCancelled?'text-decoration:line-through':''}">฿${o.total.toLocaleString()}</span>
       </div>
+      ${o.note ? `<div style="margin-top:8px;color:var(--muted);font-size:12px;border-top:1px dashed var(--border);padding-top:6px">📝 ${o.note}</div>` : ''}
     </div>`;
   }).join('');
   startCountdownTimer();
