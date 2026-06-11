@@ -802,9 +802,11 @@ function renderNav(active) {
     links.push(['approvals.html?tab=pending','nav.pending_approvals']);
     links.push(['approvals.html?tab=approved','nav.approved_list']);
     links.push(['approvals.html?tab=rejected','nav.rejected_list']);
-    // Billing now lives in BC (Exsys Localize Billing); JC-Market shows the
+    // Monthly shipping-billing (Finance preview/generate/verify) stays app-side.
+    links.push(['shipping-billing.html','nav.shipping_billing']);
+    // Goods billing now lives in BC (Exsys Localize Billing); JC-Market shows the
     // consolidated Sale Billing docs read-only — branches pay, accounting reconciles
-    // in BC. Replaces the old app-side shipping/credit billing generators.
+    // in BC. Replaces the old app-side credit (Tuesday goods) billing generator.
     links.push(['sale-billing.html','nav.sale_billing']);
   } else if (isHq) {
     // super_admin / admin_scm — full HQ visibility minus the cart/stock flow
@@ -826,8 +828,9 @@ function renderNav(active) {
     links.push(['team.html', isHq ? 'nav.team' : 'nav.staff']);
   }
   if (!isFinance && isHq) links.push(['tms-admin.html','nav.tms']);
-  // Shipping-billing is a Finance function — hide it from SCM Admin (admin_scm).
-  // super_admin keeps it; Finance gets it via the isFinance branch above.
+  // Shipping-billing + Sale Billing are Finance functions — hide from SCM Admin
+  // (admin_scm). super_admin keeps them; Finance gets them via the isFinance branch.
+  if (!isFinance && isHq && u.role !== 'admin_scm') links.push(['shipping-billing.html','nav.shipping_billing']);
   if (!isFinance && isHq && u.role !== 'admin_scm') links.push(['sale-billing.html','nav.sale_billing']);
   if (!isFinance && isHq) links.push(['admin.html','nav.admin']);
   const lang = getLang();
