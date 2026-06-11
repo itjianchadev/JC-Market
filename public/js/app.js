@@ -267,7 +267,7 @@ const I18N = {
     'history.line_total':'รวม','history.payment':'สถานะ','history.date':'วันที่',
     'history.none':'ยังไม่มีการสั่งซื้อสินค้านี้',
     // Shipping — monthly consolidated billing
-    'nav.shipping':'ค่าขนส่ง','nav.shipping_billing':'เรียกเก็บค่าขนส่ง','nav.credit_billing':'วางบิลเครดิต',
+    'nav.shipping':'ค่าขนส่ง','nav.shipping_billing':'เรียกเก็บค่าขนส่ง','nav.credit_billing':'วางบิลเครดิต','nav.sale_billing':'ใบวางบิล',
     'shipinv.col.invoice':'เลขที่','shipinv.col.branch':'สาขา','shipinv.col.period':'งวด',
     'shipinv.col.orders':'ออเดอร์','shipinv.col.shipping':'ค่าขนส่ง','shipinv.col.vat':'VAT 7%',
     'shipinv.col.total':'รวม','shipinv.col.wht':'หัก ณ ที่จ่าย','shipinv.col.net':'ยอดสุทธิ',
@@ -560,7 +560,7 @@ const I18N = {
     'history.line_total':'Total','history.payment':'Status','history.date':'Date',
     'history.none':'No orders for this item yet',
     // Shipping — monthly consolidated billing
-    'nav.shipping':'Shipping','nav.shipping_billing':'Shipping Billing','nav.credit_billing':'Credit Billing',
+    'nav.shipping':'Shipping','nav.shipping_billing':'Shipping Billing','nav.credit_billing':'Credit Billing','nav.sale_billing':'Sale Billing',
     'shipinv.col.invoice':'Invoice','shipinv.col.branch':'Branch','shipinv.col.period':'Period',
     'shipinv.col.orders':'Orders','shipinv.col.shipping':'Shipping','shipinv.col.vat':'VAT 7%',
     'shipinv.col.total':'Total','shipinv.col.wht':'WHT','shipinv.col.net':'Net Payable',
@@ -772,6 +772,7 @@ const NAV_ICONS = {
 };
 NAV_ICONS['nav.staff'] = NAV_ICONS['nav.team']; // branch "จัดการพนักงาน" reuses the team icon
 NAV_ICONS['nav.credit_billing'] = NAV_ICONS['nav.shipping_billing']; // Tuesday goods-billing reuses the billing icon
+NAV_ICONS['nav.sale_billing'] = NAV_ICONS['nav.shipping_billing']; // BC Sale Billing reuses the billing icon
 
 // Flat (rectangular) national flag for the language toggle, instead of the OS
 // emoji flag (which renders glossy/waving and is inconsistent across platforms).
@@ -801,10 +802,10 @@ function renderNav(active) {
     links.push(['approvals.html?tab=pending','nav.pending_approvals']);
     links.push(['approvals.html?tab=approved','nav.approved_list']);
     links.push(['approvals.html?tab=rejected','nav.rejected_list']);
-    // Finance also runs the monthly shipping-billing center (preview/generate/verify).
-    links.push(['shipping-billing.html','nav.shipping_billing']);
-    // ...and the Tuesday consolidated goods-billing (credit) run.
-    links.push(['credit-billing.html','nav.credit_billing']);
+    // Billing now lives in BC (Exsys Localize Billing); JC-Market shows the
+    // consolidated Sale Billing docs read-only — branches pay, accounting reconciles
+    // in BC. Replaces the old app-side shipping/credit billing generators.
+    links.push(['sale-billing.html','nav.sale_billing']);
   } else if (isHq) {
     // super_admin / admin_scm — full HQ visibility minus the cart/stock flow
     links.push(['index.html','nav.shop']);
@@ -817,7 +818,7 @@ function renderNav(active) {
     links.push(['stock-balance.html','nav.stock']);
     links.push(['shipping.html','nav.shipping']);
     // FC franchises see their Tuesday goods-billing statements (own branch only).
-    if (u.branch_type === 'fc') links.push(['credit-billing.html','nav.credit_billing']);
+    if (u.branch_type === 'fc') links.push(['sale-billing.html','nav.sale_billing']);
   }
   // Branch users (FC/JF + JC) manage their own staff -> "จัดการพนักงาน".
   // HQ (super_admin/admin_scm) keeps the network-wide "จัดการผู้ใช้".
@@ -827,8 +828,7 @@ function renderNav(active) {
   if (!isFinance && isHq) links.push(['tms-admin.html','nav.tms']);
   // Shipping-billing is a Finance function — hide it from SCM Admin (admin_scm).
   // super_admin keeps it; Finance gets it via the isFinance branch above.
-  if (!isFinance && isHq && u.role !== 'admin_scm') links.push(['shipping-billing.html','nav.shipping_billing']);
-  if (!isFinance && isHq && u.role !== 'admin_scm') links.push(['credit-billing.html','nav.credit_billing']);
+  if (!isFinance && isHq && u.role !== 'admin_scm') links.push(['sale-billing.html','nav.sale_billing']);
   if (!isFinance && isHq) links.push(['admin.html','nav.admin']);
   const lang = getLang();
   const otherLang = lang === 'th' ? 'en' : 'th';

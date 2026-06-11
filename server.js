@@ -3225,6 +3225,112 @@ app.post('/api/credit-invoices/:id/verify', requireAuth, requireAdmin, (req, res
   return res.status(400).json({ error: "action ต้องเป็น 'approve' หรือ 'reject'" });
 });
 
+// ════════════════════════════════════════════════════════════════════════════
+// Sale Billing (SB) — consolidated bills authored in BC (Exsys Localize Billing).
+// JC-Market reads them LIVE via bc.getSalesBillings() and lets the branch pay.
+// Accounting applies the receipt in BC; the line Remaining_Amount → 0 and the next
+// read shows the bill paid. We persist ONLY the uploaded slip (sale_billing_payments).
+// This replaces the app-side credit/shipping billing generators (Anda's request).
+// ════════════════════════════════════════════════════════════════════════════
+function userCustomerNo(user) {
+  const u = db.prepare('SELECT bc_customer_no, branch_code FROM users WHERE id=?').get(user.id);
+  return (u && (u.bc_customer_no || u.branch_code)) || '';
+}
+// Merge the locally-stored slip (if any) onto each BC bill + derive a UI status.
+function attachSlips(bills) {
+  if (!bills.length) return bills;
+  const rows = db.prepare(`SELECT * FROM sale_billing_payments WHERE sb_no IN (${bills.map(() => '?').join(',')})`).all(...bills.map(b => b.no));
+  const bySb = {};
+  for (const r of rows) bySb[r.sb_no] = r;
+  return bills.map(b => {
+    const slip = bySb[b.no] || null;
+    return { ...b, slip_uploaded: !!slip, slip_path: slip ? slip.slip_path : '', slip_uploaded_at: slip ? slip.uploaded_at : '', ui_status: b.paid ? 'paid' : (slip ? 'slip_pending' : 'outstanding') };
+  });
+}
+// Load one SB by number, scoped to the requesting branch (HQ sees any).
+async function loadOneBill(req) {
+  const cust = isHqAdmin(req.user) ? undefined : userCustomerNo(req.user);
+  const list = await bc.getSalesBillings(cust, req.params.no);
+  return list[0] || null;
+}
+
+// List SB for a customer (FC: own; HQ: ?customer=XX or all) + ?status=outstanding|paid.
+app.get('/api/sale-billings', requireAuth, async (req, res) => {
+  try {
+    const customerNo = isHqAdmin(req.user) ? (req.query.customer || '').trim() : userCustomerNo(req.user);
+    if (!isHqAdmin(req.user) && !customerNo) return res.status(400).json({ error: 'ไม่พบเลขลูกค้า BC ของสาขา' });
+    let bills = attachSlips(await bc.getSalesBillings(customerNo || undefined));
+    const f = (req.query.status || '').trim();
+    if (f === 'outstanding') bills = bills.filter(b => !b.paid);
+    else if (f === 'paid') bills = bills.filter(b => b.paid);
+    bills.sort((a, b) => String(b.document_date || '').localeCompare(String(a.document_date || '')));
+    res.json({ customer_no: customerNo, count: bills.length, bills });
+  } catch (e) { res.status(502).json({ error: 'BC: ' + e.message }); }
+});
+
+// One SB detail (header + lines + slip).
+app.get('/api/sale-billings/:no', requireAuth, async (req, res) => {
+  try {
+    const bill = await loadOneBill(req);
+    if (!bill) return res.status(404).json({ error: 'ไม่พบใบวางบิล' });
+    res.json(attachSlips([bill])[0]);
+  } catch (e) { res.status(502).json({ error: 'BC: ' + e.message }); }
+});
+
+// PromptPay QR for the outstanding amount of an SB.
+app.get('/api/sale-billings/:no/qr', requireAuth, async (req, res) => {
+  try {
+    const bill = await loadOneBill(req);
+    if (!bill) return res.status(404).json({ error: 'ไม่พบใบวางบิล' });
+    if (bill.paid) return res.status(400).json({ error: 'ใบวางบิลนี้ชำระแล้ว' });
+    const qr = await generateQR(bill.remaining);
+    res.json({ qr_data_url: qr, total: bill.total, remaining: bill.remaining });
+  } catch (e) { res.status(502).json({ error: 'BC: ' + e.message }); }
+});
+
+// FC uploads a payment slip for an SB. Slip is stored + verified (hint only); the bill
+// is NOT marked paid here — accounting applies the receipt in BC and the next read
+// shows remaining=0.
+app.post('/api/sale-billings/:no/slip', requireAuth, upload.single('slip'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No slip file' });
+    const bill = await loadOneBill(req);
+    if (!bill) return res.status(404).json({ error: 'ไม่พบใบวางบิล' });
+    if (bill.paid) return res.status(400).json({ error: 'ใบวางบิลนี้ชำระแล้ว (BC)' });
+
+    const slipPath = '/uploads/' + req.file.filename;
+    const absPath = path.join(__dirname, 'uploads', req.file.filename);
+    const clientIp = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+
+    const checkDuplicate = async ({ hash, qrRef }) => {
+      if (qrRef) { const d = db.prepare('SELECT sb_no FROM sale_billing_payments WHERE qr_ref=? AND sb_no!=?').get(qrRef, bill.no); if (d) return { duplicate: true, reason: `สลิปนี้ (ref: ${qrRef}) ถูกใช้กับใบวางบิล ${d.sb_no} แล้ว` }; }
+      if (hash) { const d = db.prepare('SELECT sb_no FROM sale_billing_payments WHERE slip_hash=? AND sb_no!=?').get(hash, bill.no); if (d) return { duplicate: true, reason: `ภาพสลิปนี้เคยถูกใช้กับใบวางบิล ${d.sb_no} แล้ว` }; }
+      return { duplicate: false };
+    };
+
+    const result = await verifySlip(absPath, bill.remaining, { orderCreatedAt: bill.document_date, checkDuplicate });
+
+    if (!result.verified) {
+      try {
+        db.prepare(`INSERT INTO slip_fraud_log (order_id, user_id, username, ip, reason, slip_hash, qr_ref, slip_amount, expected_amount, trans_date, raw_response) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+          .run('SB:' + bill.no, req.user.id, req.user.username || '', clientIp, result.reason || '', result.slip_hash || '', result.ref || '', result.amount || 0, bill.remaining, result.transDate || '', result.raw ? JSON.stringify(result.raw).slice(0, 2000) : '');
+      } catch (e) { /* audit failure must not break flow */ }
+    }
+
+    // Upsert slip (one per SB; re-upload replaces while the bill is unpaid).
+    db.prepare(`
+      INSERT INTO sale_billing_payments (sb_no, customer_no, bill_total, slip_path, slip_hash, qr_ref, slip_amount, verify_ok, verify_reason, uploaded_by)
+      VALUES (?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(sb_no) DO UPDATE SET
+        slip_path=excluded.slip_path, slip_hash=excluded.slip_hash, qr_ref=excluded.qr_ref,
+        slip_amount=excluded.slip_amount, verify_ok=excluded.verify_ok, verify_reason=excluded.verify_reason,
+        uploaded_by=excluded.uploaded_by, uploaded_at=datetime('now','localtime')
+    `).run(bill.no, bill.customer_no, bill.total, slipPath, result.slip_hash || '', result.ref || '', result.amount || 0, result.verified ? 1 : 0, result.reason || '');
+
+    res.json({ ok: true, slip_path: slipPath, verify_ok: result.verified, verify_reason: result.reason || '', note: 'ส่งสลิปแล้ว · รอบัญชีตรวจสอบและตัดชำระใน BC' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ─── Regenerate the PromptPay QR for a shipping invoice (FC pays net of WHT) ───
 app.get('/api/shipping-invoices/:id/qr', requireAuth, async (req, res) => {
   const inv = db.prepare('SELECT * FROM shipping_invoices WHERE id=?').get(req.params.id);
