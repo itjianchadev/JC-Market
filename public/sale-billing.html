@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="th"><head>
+<meta charset="utf-8"><title>ใบวางบิล — JC-Market</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<style>
+.section{margin-bottom:28px}
+.section h3{font-size:16px;font-weight:700;margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid var(--gold);display:inline-block}
+.dtable{width:100%;border-collapse:collapse;font-size:13px}
+.dtable thead th{background:var(--beige);color:var(--gold-dark);padding:8px 10px;text-align:left;font-size:12px;font-weight:600;border-bottom:1px solid var(--gold);white-space:nowrap}
+.dtable thead th.num,.num{text-align:right;white-space:nowrap}
+.dtable tbody td{padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
+.dtable tbody tr.bill-row{cursor:pointer}
+.dtable tbody tr.bill-row:hover{background:rgba(173,156,130,.08)}
+.pay-badge{display:inline-block;padding:2px 10px;border-radius:99px;font-size:11px;font-weight:600;white-space:nowrap}
+.pay-pending{background:#fff3e0;color:#e65100}
+.pay-slip{background:#e3f2fd;color:#1565c0}
+.pay-paid{background:#e8f5e9;color:#2e7d32}
+.mini{padding:4px 10px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600;border:none;white-space:nowrap}
+.mini.ghost{background:transparent;color:var(--gold-dark);border:1px solid var(--border-strong)}
+.mini:hover{opacity:.85}
+.lines-row td{background:var(--beige);padding:0}
+.lines-inner{padding:8px 14px}
+.ltable{width:100%;border-collapse:collapse;font-size:12px}
+.ltable th{text-align:left;color:var(--muted);padding:4px 8px;font-weight:600}
+.ltable td{padding:4px 8px}
+.ltable th.num,.ltable td.num{text-align:right}
+.modal{position:fixed;inset:0;background:rgba(42,33,24,.5);backdrop-filter:blur(4px);z-index:1000;display:none;align-items:center;justify-content:center;padding:20px}
+.modal .box{background:#fff;border-radius:14px;max-width:420px;width:100%;max-height:86vh;overflow:auto;padding:22px;box-shadow:0 8px 30px rgba(0,0,0,.3)}
+@media(max-width:768px){.dtable{font-size:12px}.dtable thead th,.dtable tbody td{padding:6px 6px}}
+</style>
+</head><body>
+<div id="nav"></div>
+<div class="container">
+  <h2 style="margin-bottom:4px">ใบวางบิล (Sale Billing)</h2>
+  <p style="color:var(--muted);font-size:13px;margin-bottom:16px">ดึงจาก BC โดยตรง · จ่ายแล้วบัญชีตัดชำระใน BC สถานะจะอัปเดตอัตโนมัติ</p>
+
+  <div id="hqBar" class="card" style="display:none;margin-bottom:18px">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <label style="font-size:13px;color:var(--muted)">รหัสสาขา (BC Customer)</label>
+      <input id="custInput" placeholder="เช่น JF013 · เว้นว่าง = ทุกสาขา" style="padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px;font-family:inherit;font-size:13px">
+      <button class="btn sm" onclick="load()">โหลด</button>
+      <span id="loadInfo" style="font-size:12px;color:var(--muted)"></span>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>ค้างชำระ</h3>
+    <div class="card" style="overflow-x:auto">
+      <table class="dtable">
+        <thead><tr><th style="width:18px"></th><th>เลขที่</th><th>สาขา</th><th>วันที่</th><th>ครบกำหนด</th><th class="num">รายการ</th><th class="num">ยอดรวม</th><th>สถานะ</th><th>จัดการ</th></tr></thead>
+        <tbody id="outBody"></tbody>
+      </table>
+      <p id="outEmpty" style="display:none;color:var(--muted);padding:10px 0">ไม่มีใบวางบิลค้างชำระ</p>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>ชำระแล้ว (ประวัติ)</h3>
+    <div class="card" style="overflow-x:auto">
+      <table class="dtable">
+        <thead><tr><th style="width:18px"></th><th>เลขที่</th><th>สาขา</th><th>วันที่</th><th>ครบกำหนด</th><th class="num">รายการ</th><th class="num">ยอดรวม</th><th>สถานะ</th></tr></thead>
+        <tbody id="paidBody"></tbody>
+      </table>
+      <p id="paidEmpty" style="display:none;color:var(--muted);padding:10px 0">ยังไม่มีประวัติ</p>
+    </div>
+  </div>
+</div>
+
+<!-- Pay modal (FC: QR + slip upload) -->
+<div class="modal" id="payModal" onclick="if(event.target===this)this.style.display='none'">
+  <div class="box">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h3 style="margin:0">ชำระใบวางบิล</h3>
+      <button class="mini ghost" onclick="document.getElementById('payModal').style.display='none'">ปิด</button>
+    </div>
+    <div id="payHead" style="color:var(--muted);font-size:13px;margin-bottom:10px"></div>
+    <div style="text-align:center">
+      <div id="payAmount" style="font-size:26px;font-weight:700;color:var(--gold)"></div>
+      <img id="payQr" src="" style="max-width:240px;border-radius:12px;background:#fff;padding:10px;display:none">
+      <p style="font-size:12px;color:var(--muted);margin-top:4px">สแกน QR พร้อมเพย์ ชำระยอดรวม</p>
+    </div>
+    <div style="border:2px dashed var(--border);border-radius:12px;padding:18px;text-align:center;cursor:pointer;margin-top:12px" onclick="document.getElementById('paySlipFile').click()">
+      <input type="file" id="paySlipFile" accept="image/*,.pdf" style="display:none" onchange="onPaySlip(this)">
+      <p style="color:var(--muted);font-size:13px" id="paySlipHint">คลิกเพื่ออัพโหลดสลิป</p>
+      <img id="paySlipPrev" style="max-width:180px;border-radius:8px;margin-top:8px;display:none">
+    </div>
+    <button class="btn" style="width:100%;margin-top:12px" id="paySendBtn" onclick="sendPaySlip()" disabled>ส่งสลิป</button>
+    <div class="err" id="payErr" style="margin-top:8px"></div>
+  </div>
+</div>
+
+<script src="/js/app.js?v=20260604k"></script>
+<script>
+if(!requireLogin()) throw '';
+const u = getUser();
+document.getElementById('nav').innerHTML = renderNav('sale-billing.html');
+const isHq = ['super_admin','admin_scm','finance'].includes(u.role);
+if (isHq) document.getElementById('hqBar').style.display = '';
+
+const money = n => '฿' + Number(n||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+function fmtDate(d){ if(!d) return '-'; return new Date(d.replace(' ','T')).toLocaleDateString('th-TH',{day:'2-digit',month:'short',year:'2-digit'}); }
+const UI = {
+  outstanding:{th:'ค้างชำระ',cls:'pay-pending'},
+  slip_pending:{th:'ส่งสลิปแล้ว · รอตัดชำระ',cls:'pay-slip'},
+  paid:{th:'ชำระแล้ว',cls:'pay-paid'},
+};
+const badge = s => { const m=UI[s]||{th:s,cls:'pay-pending'}; return `<span class="pay-badge ${m.cls}">${m.th}</span>`; };
+
+let bills = [];
+async function load(){
+  const info = document.getElementById('loadInfo');
+  if (info) info.textContent = 'กำลังโหลด…';
+  try{
+    const cust = isHq ? (document.getElementById('custInput').value||'').trim() : '';
+    const qs = isHq && cust ? ('?customer='+encodeURIComponent(cust)) : '';
+    const r = await api('/api/sale-billings'+qs);
+    bills = r.bills||[];
+    if (info) info.textContent = 'พบ '+r.count+' ใบวางบิล';
+    render();
+  }catch(e){ if(info) info.textContent=''; toast(e.message); }
+}
+
+function billRow(b, withAction){
+  const act = withAction ? `<td onclick="event.stopPropagation()">${payAction(b)}</td>` : '';
+  return `<tr class="bill-row" onclick="toggleLines(this,'${b.no}')">
+    <td style="color:var(--muted)">▸</td>
+    <td><strong>${b.no}</strong></td>
+    <td>${b.customer_no||''}</td>
+    <td>${fmtDate(b.document_date)}</td>
+    <td>${fmtDate(b.due_date)}</td>
+    <td class="num">${b.lines.length}</td>
+    <td class="num">${money(b.total)}</td>
+    <td>${badge(b.ui_status)}</td>
+    ${act}
+  </tr>`;
+}
+function payAction(b){
+  if (b.ui_status==='slip_pending'){
+    let s = '<span style="font-size:12px;color:#1565c0">ส่งสลิปแล้ว</span>';
+    if (isHq && b.slip_path) s += ` · <a href="${b.slip_path}" target="_blank" class="mini ghost" style="text-decoration:none">ดูสลิป</a>`;
+    return s;
+  }
+  if (!isHq) return `<button class="mini" onclick="payBill('${b.no}')">จ่ายเงิน</button>`;
+  return '<span style="font-size:12px;color:var(--muted)">รอสาขาจ่าย</span>';
+}
+function linesHtml(b){
+  const rows = b.lines.map(l=>`<tr><td>${l.doc_type}</td><td>${l.doc_no}</td><td>${fmtDate(l.invoice_date)}</td><td class="num">${money(l.amount)}</td><td class="num">${money(l.remaining)}</td></tr>`).join('');
+  return `<div class="lines-inner"><table class="ltable">
+    <thead><tr><th>ประเภท</th><th>เลขเอกสาร</th><th>วันที่</th><th class="num">จำนวนเงิน</th><th class="num">คงค้าง</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>`;
+}
+function toggleLines(tr, no){
+  const next = tr.nextElementSibling;
+  if (next && next.classList.contains('lines-row')){ next.remove(); tr.firstElementChild.textContent='▸'; return; }
+  const b = bills.find(x=>x.no===no); if(!b) return;
+  const r = document.createElement('tr');
+  r.className='lines-row';
+  r.innerHTML = `<td colspan="${tr.children.length}">${linesHtml(b)}</td>`;
+  tr.after(r);
+  tr.firstElementChild.textContent='▾';
+}
+
+function render(){
+  const out = bills.filter(b=>!b.paid);
+  const paid = bills.filter(b=>b.paid);
+  document.getElementById('outBody').innerHTML = out.map(b=>billRow(b,true)).join('');
+  document.getElementById('paidBody').innerHTML = paid.map(b=>billRow(b,false)).join('');
+  document.getElementById('outEmpty').style.display = out.length?'none':'';
+  document.getElementById('paidEmpty').style.display = paid.length?'none':'';
+}
+
+// ── Pay (FC) ──
+let payNo=null, paySlipFile=null;
+async function payBill(no){
+  payNo=no; paySlipFile=null;
+  const b=bills.find(x=>x.no===no);
+  document.getElementById('payHead').textContent = no;
+  document.getElementById('payAmount').textContent = b?money(b.remaining):'';
+  document.getElementById('paySlipHint').textContent='คลิกเพื่ออัพโหลดสลิป';
+  document.getElementById('paySlipPrev').style.display='none';
+  document.getElementById('paySendBtn').disabled=true;
+  document.getElementById('payErr').textContent='';
+  const qrImg=document.getElementById('payQr'); qrImg.style.display='none';
+  document.getElementById('payModal').style.display='flex';
+  try{ const q=await api('/api/sale-billings/'+encodeURIComponent(no)+'/qr'); if(q.qr_data_url){qrImg.src=q.qr_data_url;qrImg.style.display='';} }
+  catch(e){ document.getElementById('payErr').textContent=e.message; }
+}
+function onPaySlip(input){
+  paySlipFile=input.files[0]; if(!paySlipFile) return;
+  document.getElementById('paySlipHint').textContent=paySlipFile.name;
+  const prev=document.getElementById('paySlipPrev');
+  if(paySlipFile.type.startsWith('image/')){ prev.src=URL.createObjectURL(paySlipFile); prev.style.display=''; } else prev.style.display='none';
+  document.getElementById('paySendBtn').disabled=false;
+}
+async function sendPaySlip(){
+  if(!paySlipFile||!payNo) return;
+  const btn=document.getElementById('paySendBtn'); btn.disabled=true; btn.textContent='กำลังส่ง…';
+  try{
+    const fd=new FormData(); fd.append('slip',paySlipFile);
+    const r=await fetch('/api/sale-billings/'+encodeURIComponent(payNo)+'/slip',{method:'POST',headers:{'Authorization':'Bearer '+getToken()},body:fd});
+    const j=await r.json(); if(!r.ok) throw new Error(j.error||'ส่งไม่สำเร็จ');
+    document.getElementById('payModal').style.display='none';
+    toast(j.note||'ส่งสลิปแล้ว');
+    load();
+  }catch(e){ document.getElementById('payErr').textContent=e.message; btn.disabled=false; }
+  finally{ btn.textContent='ส่งสลิป'; }
+}
+
+load();
+</script>
+</body></html>

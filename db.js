@@ -439,6 +439,30 @@ CREATE INDEX IF NOT EXISTS idx_crdinv_status ON credit_invoices(status);
 // Link an FC fruit order to the Tuesday billing run that swept it (double-bill guard).
 try { db.exec("ALTER TABLE orders ADD COLUMN credit_invoice_id TEXT DEFAULT ''"); } catch (e) {}
 
+// ─── Sale Billing payment slips (BC integration) ───
+// SB (Sale Billing) documents live in BC (Exsys Localize Billing ext) and are read
+// live via bc.getSalesBillings(). JC-Market stores ONLY the branch's payment slip per
+// SB here — the paid/unpaid truth stays in BC (each line's Remaining_Amount drops to 0
+// once accounting applies the receipt). One row per SB (re-upload replaces it while the
+// bill is still unpaid in BC).
+db.exec(`
+CREATE TABLE IF NOT EXISTS sale_billing_payments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sb_no TEXT UNIQUE NOT NULL,                       -- BC Billing No (e.g. SB202506001)
+  customer_no TEXT NOT NULL,                         -- Bill_to_Customer_No (branch)
+  bill_total REAL DEFAULT 0,                         -- SB total snapshot at slip upload
+  slip_path TEXT DEFAULT '',
+  slip_hash TEXT DEFAULT '',
+  qr_ref TEXT DEFAULT '',
+  slip_amount REAL DEFAULT 0,
+  verify_ok INTEGER DEFAULT 0,                       -- verifySlip result (informational hint)
+  verify_reason TEXT DEFAULT '',
+  uploaded_by TEXT DEFAULT '',
+  uploaded_at TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_sbpay_customer ON sale_billing_payments(customer_no);
+`);
+
 // ─── Seed admin + demo FC users ───
 // ─── Migration: add name_en column to existing items_cache if missing ───
 try {

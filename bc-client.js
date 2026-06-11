@@ -115,6 +115,50 @@ async function listItemUnitsOfMeasure() {
   return odataGet(`/ItemUnitOfMeasure?$select=Item_No,Code,Qty_per_Unit_of_Measure&$top=10000`);
 }
 
+// ─── Sale Billing (SB) — Exsys Localize Billing ext, table 70332 "Billing Header".
+// Read-only: a consolidated bill per customer (Bill_to_Customer_No) whose lines are
+// the posted Sales Invoices (SIV-) and Credit Memos (SCN-, negative). Branches view
+// these in JC-Market and pay; accounting applies the payment in BC and each line's
+// Remaining_Amount drops to 0. The header carries no total — it's sum(line Amount).
+// Returns a normalized array (header fields + computed total/remaining/paid + lines).
+async function getSalesBillings(customerNo, billNo) {
+  if (MOCK) return [];
+  const LINES = 'Posted_Sales_Billing_ExcelControl1000000015';
+  let path = `/Posted_Sales_Billing_Excel?$expand=${LINES}`;
+  const esc = v => String(v).replace(/'/g, "''"); // OData quote-escape
+  const filters = [];
+  if (customerNo) filters.push(`Bill_to_Customer_No eq '${esc(customerNo)}'`);
+  if (billNo) filters.push(`No eq '${esc(billNo)}'`);
+  if (filters.length) path += `&$filter=${filters.join(' and ')}`;
+  const round2 = n => Math.round((n || 0) * 100) / 100;
+  const j = await odataGet(path);
+  return (j.value || []).map(sb => {
+    const lines = (sb[LINES] || []).map(l => ({
+      doc_type: l.Document_Type,            // Invoice | Credit Memo
+      doc_no: l.Document_No,                // SIV-… / SCN-…
+      invoice_date: l.Invoice_Date,
+      description: l.Description || '',
+      amount: round2(l.Amount),
+      remaining: round2(l.Remaining_Amount),
+    }));
+    const total = round2(lines.reduce((s, l) => s + l.amount, 0));
+    const remaining = round2(lines.reduce((s, l) => s + l.remaining, 0));
+    return {
+      no: sb.No,
+      bill_type: sb.Bill_Type,
+      customer_no: sb.Bill_to_Customer_No,
+      document_date: sb.Document_Date,
+      due_date: sb.Due_Date,
+      status: sb.Status,
+      remark: sb.Remark || '',
+      total,
+      remaining,
+      paid: Math.abs(remaining) < 0.005,
+      lines,
+    };
+  });
+}
+
 // ─── Transfer Orders (Page 5740) — JC master outlets receive general goods
 // from CTI via Transfer Orders (no Sales Order, no payment). Service names
 // live in env vars so the user can fix typos in BC's "Web Services" page
@@ -396,4 +440,4 @@ async function receivePurchaseOrderLines(poId, lineQtyMap) {
   return { ok: true };
 }
 
-module.exports = { MOCK, getToken, listItems, listItemCategories, listItemCards, listSalesPrices, listItemUnitsOfMeasure, createSalesOrder, getSalesOrder, addSalesOrderLine, shipAndInvoiceSalesOrder, findPostedInvoiceByExternalDoc, createSalesInvoice, addInvoiceLine, postInvoice, deleteSalesInvoice, deleteSalesOrder, listVendors, findLocationIdByCode, findGLAccountIdByNo, createPurchaseOrder, getPurchaseOrder, addPurchaseOrderLine, patchPurchaseOrderLine, getPurchaseOrderLines, listPurchaseReceipts, receivePurchaseOrderLines, createTransferOrder, addTransferOrderLine };
+module.exports = { MOCK, getToken, listItems, listItemCategories, listItemCards, listSalesPrices, listItemUnitsOfMeasure, getSalesBillings, createSalesOrder, getSalesOrder, addSalesOrderLine, shipAndInvoiceSalesOrder, findPostedInvoiceByExternalDoc, createSalesInvoice, addInvoiceLine, postInvoice, deleteSalesInvoice, deleteSalesOrder, listVendors, findLocationIdByCode, findGLAccountIdByNo, createPurchaseOrder, getPurchaseOrder, addPurchaseOrderLine, patchPurchaseOrderLine, getPurchaseOrderLines, listPurchaseReceipts, receivePurchaseOrderLines, createTransferOrder, addTransferOrderLine };
