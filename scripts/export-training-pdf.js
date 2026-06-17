@@ -23,6 +23,8 @@ const DOCS = [
   { md: 'jc-master.md',        pdf: '02-jc-master.pdf',     title: 'คู่มือ JC (สาขา Master)' },
   { md: 'finance.md',          pdf: '03-finance.pdf',       title: 'คู่มือ Finance' },
   { md: 'it-admin.md',         pdf: '04-it-admin.pdf',      title: 'คู่มือ IT / Admin' },
+  { md: 'tms-cti.md',          pdf: '05-tms-cti.pdf',       title: 'คู่มือ TMS — คลัง CTI' },
+  { md: 'tms-transport.md',    pdf: '06-tms-transport.pdf', title: 'คู่มือ TMS — ขนส่ง (คนขับ)' },
 ];
 
 // Inline images as data URIs so the rendered HTML works from any base URL.
