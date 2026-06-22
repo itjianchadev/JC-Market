@@ -3424,7 +3424,7 @@ app.get('/api/supplier/pos', requireAuth, requireSupplier, (req, res) => {
   const vendor = req.user.vendor_no || '';
   if (!vendor) return res.json([]);
   const rows = db.prepare(`
-    SELECT s.id, s.order_id, s.shipment_number, s.status, s.delivered_at, s.created_at, s.note,
+    SELECT s.id, s.order_id, s.shipment_number, s.status, s.delivered_at, s.created_at, s.note, s.deliverer,
            o.order_number, o.bc_po_no, o.po_vendor_no, o.total,
            o.branch_code, b.name as branch_name
     FROM shipments s
@@ -3455,12 +3455,15 @@ app.post('/api/supplier/shipments/:id/status', requireAuth, requireSupplier, (re
   if (!next) return res.status(400).json({ error: `สถานะ '${row.status}' เปลี่ยนต่อไม่ได้แล้ว` });
   const want = String(req.body.status || '').trim();
   if (want && want !== next) return res.status(400).json({ error: `เปลี่ยนได้เฉพาะ ${row.status} → ${next}` });
+  // Delivery employee name — required so each transition is attributable.
+  const deliverer = String(req.body.deliverer || '').trim();
+  if (!deliverer) return res.status(400).json({ error: 'กรุณาระบุชื่อพนักงานผู้จัดส่ง' });
   if (next === 'delivered') {
-    db.prepare("UPDATE shipments SET status='delivered', delivered_at=datetime('now','localtime') WHERE id=?").run(row.id);
+    db.prepare("UPDATE shipments SET status='delivered', deliverer=?, delivered_at=datetime('now','localtime') WHERE id=?").run(deliverer, row.id);
   } else {
-    db.prepare('UPDATE shipments SET status=? WHERE id=?').run(next, row.id);
+    db.prepare('UPDATE shipments SET status=?, deliverer=? WHERE id=?').run(next, deliverer, row.id);
   }
-  res.json({ ok: true, status: next });
+  res.json({ ok: true, status: next, deliverer });
 });
 
 // ─── Trips (Phase 1.3 — admin trip builder) ───
