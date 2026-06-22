@@ -51,9 +51,9 @@
   <div class="card" style="padding:0;overflow-x:auto">
     <table class="dtable">
       <thead><tr>
-        <th>Shipment</th><th>เลขที่ PO</th><th>สาขาปลายทาง</th><th>รายการ</th><th>ผู้จัดส่ง</th><th>สถานะ</th><th>จัดการ</th>
+        <th>Shipment</th><th>เลขที่ PO</th><th>สาขาปลายทาง</th><th>ผู้จัดส่ง</th><th>สถานะ</th><th>จัดการ</th>
       </tr></thead>
-      <tbody id="body"><tr><td colspan="7" style="text-align:center;padding:20px;color:var(--muted)">กำลังโหลด…</td></tr></tbody>
+      <tbody id="body"><tr><td colspan="6" style="text-align:center;padding:20px;color:var(--muted)">กำลังโหลด…</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -101,10 +101,9 @@ function render() {
      <div class="box"><div class="n">${c.intransit}</div><div class="l">กำลังจัดส่ง</div></div>
      <div class="box"><div class="n">${c.delivered}</div><div class="l">จัดส่งแล้ว</div></div>`;
   const body = document.getElementById('body');
-  if (!list.length) { body.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--muted)">ไม่มีรายการ</td></tr>`; return; }
+  if (!list.length) { body.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--muted)">ไม่มีรายการ</td></tr>`; return; }
   body.innerHTML = list.map(r => {
     const [lbl, cls] = STt[r.status] || [r.status, ''];
-    const items = (r.lines || []).map(l => `${esc(l.item_name)} ×${(+l.quantity).toLocaleString()}`).join(', ');
     const nx = NEXT[r.status];
     const act = nx
       ? `<button class="btn sm" onclick="openModal(${r.id})">${nx.label}</button>`
@@ -113,7 +112,6 @@ function render() {
       <td><strong>${esc(r.shipment_number)}</strong></td>
       <td><a href="#" class="po-link" onclick="openModal(${r.id});return false">${esc(r.bc_po_no) || '(รอ PO)'}</a></td>
       <td>${esc(r.branch_name) || esc(r.branch_code) || '—'}</td>
-      <td class="items">${items || '—'}</td>
       <td>${esc(r.deliverer) || '<span class="hint">—</span>'}</td>
       <td><span class="st ${cls}">${lbl}</span></td>
       <td>${act}</td>
