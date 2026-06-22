@@ -17,4 +17,14 @@ async function generateQR(amount) {
   return dataUrl;
 }
 
-module.exports = { generateQR };
+// Generic QR for any text/URL (e.g. the driver-app link printed on the trip
+// manifest). Tighter margin than the payment QR.
+async function generateTextQR(text) {
+  return QRCode.toDataURL(text, {
+    width: 240,
+    margin: 1,
+    color: { dark: '#000', light: '#fff' },
+  });
+}
+
+module.exports = { generateQR, generateTextQR };
