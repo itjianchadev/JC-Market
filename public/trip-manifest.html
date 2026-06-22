@@ -80,7 +80,7 @@ table.stops .sign-line .blk{display:block;border-bottom:1px solid #555;height:14
 if (!requireLogin()) throw '';
 const me = getUser();
 const HQ_ROLES = ['super_admin','admin_scm'];
-if (!me || !HQ_ROLES.includes(me.role)) {
+if (!me || (!HQ_ROLES.includes(me.role) && me.role !== 'cti')) {
   location.href = '/index.html'; throw '';
 }
 
@@ -185,6 +185,7 @@ function fmtMoney(n) { return (n || 0).toLocaleString('en-US', { minimumFraction
           <h3>คนขับ + รถ</h3>
           <div class="v">${trip.driver_name || trip.driver_username || '-'}</div>
           <div class="sub">📞 ${trip.driver_phone || '-'} · ทะเบียน ${trip.vehicle_plate || '-'} ${trip.driver_province ? '(' + trip.driver_province + ')' : ''}</div>
+          ${trip.driver_app_qr ? `<div style="margin-top:10px;text-align:center"><img src="${trip.driver_app_qr}" alt="QR แอปคนขับ" style="width:96px;height:96px;border:1px solid #ddd;border-radius:6px;display:block;margin:0 auto"><div class="sub" style="margin:4px 0 0">สแกนเปิด<b>แอปคนขับ</b> · เข้าระบบด้วยเบอร์มือถือ</div></div>` : ''}
         </div>
       </div>
       <div class="row-cols">

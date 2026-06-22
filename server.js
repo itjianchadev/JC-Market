@@ -8,7 +8,7 @@ const bcrypt = require('bcryptjs');
 const { login, requireAuth, requireAdmin, requireSuperAdmin, requireTmsManager, requireSupplier, canManageBranch, isHqAdmin, isSuperAdmin, isTmsManager, HQ_ROLES, PORTAL_ROLES, NON_BRANCH_ROLES, BRANCH_ROLES, driverLogin, requireDriver, normalizePhone } = require('./auth');
 const bc = require('./bc-client');
 const { syncItems, getLastSync } = require('./sync');
-const { generateQR } = require('./qr');
+const { generateQR, generateTextQR } = require('./qr');
 const { verifySlip, hashFile, MOCK_VERIFY } = require('./slip-verify');
 
 const PORT = process.env.PORT || 3862;
@@ -3645,7 +3645,8 @@ app.delete('/api/tms/trips/:id', requireAuth, requireTmsManager, (req, res) => {
 // + the order's lines (so the driver/branch knows what's in the box).
 // Auth: HQ admin (planner / accounting). Driver doesn't need this endpoint
 // because they see the same data through /api/tms/driver/today.
-app.get('/api/tms/trips/:id/manifest', requireAuth, requireTmsManager, (req, res) => {
+app.get('/api/tms/trips/:id/manifest', requireAuth, requireTmsManager, async (req, res) => {
+  try {
   const trip = db.prepare(`
     SELECT t.*, c.code as carrier_code, c.name as carrier_name, c.contact_phone as carrier_phone,
            d.username as driver_username, d.full_name as driver_name, d.phone as driver_phone,
@@ -3677,7 +3678,13 @@ app.get('/api/tms/trips/:id/manifest', requireAuth, requireTmsManager, (req, res
     s.lines = s.order_id ? lineStmt.all(s.order_id) : [];
   }
   trip.stops = stops;
+  // Driver-app QR for the printed sheet — drivers scan it to open the phone-login
+  // PWA. The link is static (login is by phone), so one QR serves every driver.
+  const driverUrl = process.env.DRIVER_APP_URL || ('https://' + (req.get('host') || 'jianchathailand.com') + '/driver.html');
+  trip.driver_app_url = driverUrl;
+  trip.driver_app_qr = await generateTextQR(driverUrl).catch(() => '');
   res.json(trip);
+  } catch (e) { console.error('[manifest]', e.message); res.status(500).json({ error: e.message }); }
 });
 
 // ─── Driver PWA (Phase 1.4a — login + trip view) ───
