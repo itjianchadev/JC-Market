@@ -8,6 +8,10 @@ function setAuth(t,u){localStorage.setItem(TOKEN_KEY,t);localStorage.setItem(USE
 function clearAuth(){localStorage.removeItem(TOKEN_KEY);localStorage.removeItem(USER_KEY);location.href='/login.html'}
 function requireLogin(){if(!getToken()){location.href='/login.html';return false}return true}
 function denyFinance(){const u=getUser();if(u&&u.role==='finance'){location.href='/approvals.html?tab=pending';return false}return true}
+// Landing page per role — keep in sync with auth.js roles.
+function roleHome(u){u=u||getUser();if(!u)return '/login.html';if(u.role==='finance')return '/approvals.html?tab=pending';if(u.role==='supplier')return '/supplier.html';if(u.role==='cti')return '/tms-admin.html';return '/index.html'}
+// Keep portal logins (supplier/cti) out of the shop + branch pages.
+function denyPortal(){const u=getUser();if(u&&(u.role==='supplier'||u.role==='cti')){location.href=roleHome(u);return false}return true}
 
 /* ─────────────── i18n ─────────────── */
 const I18N = {
@@ -15,7 +19,7 @@ const I18N = {
     // Nav
     'nav.shop':'ร้านค้า','nav.cart':'ตะกร้า','nav.orders':'คำสั่งซื้อ',
     'nav.stock':'Stock','nav.admin':'Admin','nav.logout':'ออกจากระบบ',
-    'nav.team':'จัดการผู้ใช้','nav.staff':'จัดการพนักงาน','nav.tms':'ขนส่ง',
+    'nav.team':'จัดการผู้ใช้','nav.staff':'จัดการพนักงาน','nav.tms':'ขนส่ง','nav.supplier':'จัดส่งของสด',
     'nav.pending_approvals':'รายการต้องอนุมัติ','nav.approved_list':'รายการที่อนุมัติแล้ว','nav.rejected_list':'ปฏิเสธ',
     // Common
     'common.loading':'กำลังโหลด...','common.close':'ปิด','common.confirm':'ยืนยัน','common.cancel':'ยกเลิก',
@@ -308,7 +312,7 @@ const I18N = {
     // Nav
     'nav.shop':'Shop','nav.cart':'Cart','nav.orders':'Orders',
     'nav.stock':'Stock','nav.admin':'Admin','nav.logout':'Logout',
-    'nav.team':'Users','nav.staff':'Manage Staff','nav.tms':'Transport',
+    'nav.team':'Users','nav.staff':'Manage Staff','nav.tms':'Transport','nav.supplier':'Fresh Deliveries',
     'nav.pending_approvals':'Pending Approval','nav.approved_list':'Approved','nav.rejected_list':'Rejected',
     // Common
     'common.loading':'Loading...','common.close':'Close','common.confirm':'Confirm','common.cancel':'Cancel',
@@ -794,8 +798,16 @@ function renderNav(active) {
   const HQ_ROLES = ['super_admin','admin_scm','finance'];
   const isHq = HQ_ROLES.includes(u.role);
   const isFinance = u.role === 'finance';
+  const isSupplier = u.role === 'supplier';
+  const isCti = u.role === 'cti';
   const links = [];
-  if (isFinance) {
+  if (isSupplier) {
+    // Fresh-goods supplier — single-purpose delivery portal.
+    links.push(['supplier.html','nav.supplier']);
+  } else if (isCti) {
+    // CTI warehouse dispatcher — straight into the TMS trip builder.
+    links.push(['tms-admin.html','nav.tms']);
+  } else if (isFinance) {
     // Finance is a focused role — just the three approval queues. They
     // don't shop, manage users, or browse the full orders list, so those
     // links are deliberately omitted.

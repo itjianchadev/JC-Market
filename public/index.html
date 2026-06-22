@@ -162,6 +162,7 @@
 <script>
 if(!requireLogin()) throw '';
 if(!denyFinance()) throw '';
+if(!denyPortal()) throw '';
 document.getElementById('nav').innerHTML = renderNav('index.html');
 
 const me = getUser();

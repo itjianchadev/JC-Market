@@ -15,7 +15,7 @@ function login(username, password) {
     ? db.prepare('SELECT branch_type FROM branches WHERE code = ?').get(user.branch_code)
     : null;
   const branch_type = (branchRow && branchRow.branch_type) || 'fc';
-  const token = jwt.sign({ id: user.id, username: user.username, role: user.role, branch_code: user.branch_code, branch_type }, SECRET, { expiresIn: EXPIRES });
+  const token = jwt.sign({ id: user.id, username: user.username, role: user.role, branch_code: user.branch_code, branch_type, vendor_no: user.vendor_no || '' }, SECRET, { expiresIn: EXPIRES });
   return {
     token,
     user: {
@@ -23,6 +23,7 @@ function login(username, password) {
       role: user.role, branch_code: user.branch_code, branch_name: user.branch_name,
       branch_type,
       bc_customer_no: user.bc_customer_no,
+      vendor_no: user.vendor_no || '',
       can_order: !!user.can_order,
     },
   };
@@ -33,6 +34,14 @@ function login(username, password) {
 // finance = approves bank-slip transfers and gates BC SO creation.
 const HQ_ROLES = new Set(['super_admin', 'admin_scm', 'finance']);
 const ADMIN_ROLES = HQ_ROLES;                                   // กลุ่มที่ผ่าน requireAdmin
+// Portal roles — external / limited logins that are NEITHER branch users NOR
+// HQ admins. Like HQ roles they carry no branch_code, but they must NOT pass
+// requireAdmin. Each gets its own scoped surface:
+//   supplier — fresh-goods (ของสด) vendor: sees its own PO deliveries + updates status
+//   cti      — CTI warehouse dispatcher: runs the TMS trip builder for general goods
+const PORTAL_ROLES = new Set(['supplier', 'cti']);
+// Roles that legitimately have no branch_code (used by user-creation validation).
+const NON_BRANCH_ROLES = new Set([...HQ_ROLES, ...PORTAL_ROLES]);
 // Branch-level role hierarchy (top → bottom):
 //   branch_owner   — manages users in own branch + everything below
 //   store_manager  — daily ops + approvals
@@ -44,6 +53,8 @@ const BRANCH_ROLES = new Set(['branch_owner', 'store_manager', 'cashier', 'stock
 
 function isHqAdmin(user) { return !!user && ADMIN_ROLES.has(user.role); }
 function isSuperAdmin(user) { return !!user && user.role === 'super_admin'; }
+// TMS trip management surface: HQ admins PLUS the CTI warehouse dispatcher.
+function isTmsManager(user) { return isHqAdmin(user) || (!!user && user.role === 'cti'); }
 
 // Can manage users in a given branch? (HQ admin for any, branch_owner for own)
 function canManageBranch(user, branchCode) {
@@ -83,6 +94,19 @@ function requireAdmin(req, res, next) {
 
 function requireSuperAdmin(req, res, next) {
   if (!isSuperAdmin(req.user)) return res.status(403).json({ error: 'Super Admin only' });
+  next();
+}
+
+// CTI warehouse dispatcher OR HQ admin — gates the TMS trip-builder surface so
+// CTI can run general-goods dispatch without full HQ-admin powers.
+function requireTmsManager(req, res, next) {
+  if (!isTmsManager(req.user)) return res.status(403).json({ error: 'TMS manager only' });
+  next();
+}
+
+// Fresh-goods supplier — gates the supplier delivery portal.
+function requireSupplier(req, res, next) {
+  if (!req.user || req.user.role !== 'supplier') return res.status(403).json({ error: 'Supplier only' });
   next();
 }
 
@@ -158,4 +182,4 @@ function requireDriver(req, res, next) {
   }
 }
 
-module.exports = { login, requireAuth, requireAdmin, requireSuperAdmin, canManageBranch, requireBranchManage, isHqAdmin, isSuperAdmin, HQ_ROLES, BRANCH_ROLES, SECRET, driverLogin, requireDriver, normalizePhone };
+module.exports = { login, requireAuth, requireAdmin, requireSuperAdmin, requireTmsManager, requireSupplier, canManageBranch, requireBranchManage, isHqAdmin, isSuperAdmin, isTmsManager, HQ_ROLES, PORTAL_ROLES, NON_BRANCH_ROLES, BRANCH_ROLES, SECRET, driverLogin, requireDriver, normalizePhone };

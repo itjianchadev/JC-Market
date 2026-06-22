@@ -41,7 +41,7 @@ document.getElementById('f').onsubmit = async (e) => {
   try {
     const r = await api('/api/login', { method:'POST', body: JSON.stringify({ username: fd.get('username'), password: fd.get('password') }) });
     setAuth(r.token, r.user);
-    location.href = r.user && r.user.role === 'finance' ? '/approvals.html?tab=pending' : '/index.html';
+    location.href = roleHome(r.user);
   } catch (err) { document.getElementById('err').textContent = err.message; }
 };
 </script>

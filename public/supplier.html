@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="th"><head>
+<meta charset="utf-8"><title>จัดส่งของสด — JC-Market</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<style>
+.dtable{width:100%;border-collapse:collapse;font-size:13px}
+.dtable thead th{background:var(--beige);color:var(--gold-dark);padding:10px;text-align:left;font-size:12px;font-weight:600;border-bottom:1px solid var(--gold)}
+.dtable tbody td{padding:10px;border-bottom:1px solid var(--border);vertical-align:middle}
+.dtable tbody tr:nth-child(even){background:var(--beige)}
+.st{display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:600;white-space:nowrap}
+.st-pending{background:#fff3cd;color:#8a6d00}
+.st-intransit{background:#cfe8ff;color:#0b5cad}
+.st-delivered{background:#d4edda;color:#1c7a3a}
+.items{font-size:12px;color:var(--muted);max-width:280px}
+.filters{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center}
+.kpi{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0 16px}
+.kpi .box{background:var(--beige);border:1px solid var(--border);border-radius:10px;padding:8px 16px;min-width:90px}
+.kpi .n{font-size:20px;font-weight:700;color:var(--gold-dark)}
+.kpi .l{font-size:11px;color:var(--muted)}
+</style>
+</head><body>
+<div id="nav"></div>
+<div class="container">
+  <h2 style="color:var(--gold-dark);margin-bottom:2px">รายการจัดส่งของสด (PO)</h2>
+  <p class="hint" id="vendorLine"></p>
+  <div class="kpi" id="kpi"></div>
+  <div class="filters">
+    <select id="fStatus" onchange="render()">
+      <option value="">ทุกสถานะ</option>
+      <option value="pending">รอจัดส่ง</option>
+      <option value="intransit">กำลังจัดส่ง</option>
+      <option value="delivered">จัดส่งแล้ว</option>
+    </select>
+    <button class="btn sm ghost" onclick="load()">รีเฟรช</button>
+  </div>
+  <div class="card" style="padding:0;overflow-x:auto">
+    <table class="dtable">
+      <thead><tr>
+        <th>Shipment</th><th>เลขที่ PO</th><th>สาขาปลายทาง</th><th>รายการ</th><th>สถานะ</th><th>จัดการ</th>
+      </tr></thead>
+      <tbody id="body"><tr><td colspan="6" style="text-align:center;padding:20px;color:var(--muted)">กำลังโหลด…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+<script src="/js/app.js?v=20260604l"></script>
+<script>
+if (!requireLogin()) throw '';
+const me = getUser();
+if (!me || me.role !== 'supplier') { location.href = roleHome(me); throw ''; }
+document.getElementById('nav').innerHTML = renderNav('supplier.html');
+document.getElementById('vendorLine').textContent = 'Vendor: ' + (me.vendor_no || '—') + ' · ' + (me.full_name || '');
+
+let rows = [];
+const STt = { pending:['รอจัดส่ง','st-pending'], intransit:['กำลังจัดส่ง','st-intransit'], delivered:['จัดส่งแล้ว','st-delivered'] };
+const NEXT = { pending:{ to:'intransit', label:'เริ่มจัดส่ง' }, intransit:{ to:'delivered', label:'ยืนยันส่งถึง' } };
+
+async function load() {
+  try {
+    rows = await api('/api/supplier/pos');
+    render();
+  } catch (e) { toast(e.message); }
+}
+
+function render() {
+  const f = document.getElementById('fStatus').value;
+  const list = f ? rows.filter(r => r.status === f) : rows;
+  // KPI counts (over the full set, not the filtered view)
+  const c = { pending:0, intransit:0, delivered:0 };
+  rows.forEach(r => { if (c[r.status] != null) c[r.status]++; });
+  document.getElementById('kpi').innerHTML =
+    `<div class="box"><div class="n">${c.pending}</div><div class="l">รอจัดส่ง</div></div>
+     <div class="box"><div class="n">${c.intransit}</div><div class="l">กำลังจัดส่ง</div></div>
+     <div class="box"><div class="n">${c.delivered}</div><div class="l">จัดส่งแล้ว</div></div>`;
+  const body = document.getElementById('body');
+  if (!list.length) { body.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--muted)">ไม่มีรายการ</td></tr>`; return; }
+  body.innerHTML = list.map(r => {
+    const [lbl, cls] = STt[r.status] || [r.status, ''];
+    const items = (r.lines || []).map(l => `${l.item_name} ×${(+l.quantity).toLocaleString()}`).join(', ');
+    const nx = NEXT[r.status];
+    const act = nx
+      ? `<button class="btn sm" onclick="advance(${r.id},'${nx.to}')">${nx.label}</button>`
+      : (r.delivered_at ? `<span class="hint">ส่งแล้ว ${r.delivered_at}</span>` : '—');
+    return `<tr>
+      <td><strong>${r.shipment_number}</strong></td>
+      <td>${r.bc_po_no || '<span class="hint">รอ PO</span>'}</td>
+      <td>${r.branch_name || r.branch_code || '—'}</td>
+      <td class="items">${items || '—'}</td>
+      <td><span class="st ${cls}">${lbl}</span></td>
+      <td>${act}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function advance(id, to) {
+  const prompt = to === 'delivered' ? 'ยืนยันจัดส่งถึงสาขาแล้ว?' : 'เริ่มจัดส่งรายการนี้?';
+  if (!confirm(prompt)) return;
+  try {
+    await api('/api/supplier/shipments/' + id + '/status', { method:'POST', body: JSON.stringify({ status: to }) });
+    toast('อัปเดตสถานะแล้ว');
+    load();
+  } catch (e) { toast(e.message); }
+}
+
+load();
+</script>
+</body></html>
