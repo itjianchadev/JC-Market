@@ -181,7 +181,7 @@
           </select>
         </div>
         <div class="form-row"><label data-i18n="tms.col.driver">คนขับ</label>
-          <select name="driver_id"><option value="">—</option></select>
+          <select name="driver_id" onchange="onTripDriverChange()"><option value="">—</option></select>
         </div>
       </div>
       <div class="form-grid2">
@@ -626,8 +626,18 @@ async function onTripCarrierChange() {
   try {
     const drivers = await api(`/api/tms/carriers/${cid}/drivers`);
     driverSel.innerHTML = '<option value="">—</option>' +
-      drivers.filter(d => d.active).map(d => `<option value="${d.id}">${d.username} — ${d.full_name}${d.vehicle_plate ? ' ('+d.vehicle_plate+')' : ''}</option>`).join('');
+      drivers.filter(d => d.active).map(d => `<option value="${d.id}" data-plate="${d.vehicle_plate || ''}">${d.username} — ${d.full_name}${d.vehicle_plate ? ' ('+d.vehicle_plate+')' : ''}</option>`).join('');
   } catch (e) { driverSel.innerHTML = '<option value="">—</option>'; }
+}
+
+// Auto-fill the vehicle plate from the chosen driver's default vehicle.
+function onTripDriverChange() {
+  const sel = document.querySelector('#tripForm select[name=driver_id]');
+  if (!sel || sel.selectedIndex <= 0) return; // "—" selected → keep the current plate
+  const plate = sel.options[sel.selectedIndex].dataset.plate || '';
+  if (!plate) return; // driver has no default vehicle → don't wipe a manual entry
+  const plateInput = document.querySelector('#tripForm input[name=vehicle_plate]');
+  if (plateInput) plateInput.value = plate;
 }
 
 async function loadPool() {
