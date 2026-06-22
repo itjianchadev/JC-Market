@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const multer = require('multer');
 const db = require('./db');
 const bcrypt = require('bcryptjs');
-const { login, requireAuth, requireAdmin, requireSuperAdmin, canManageBranch, isHqAdmin, isSuperAdmin, HQ_ROLES, BRANCH_ROLES, driverLogin, requireDriver, normalizePhone } = require('./auth');
+const { login, requireAuth, requireAdmin, requireSuperAdmin, requireTmsManager, requireSupplier, canManageBranch, isHqAdmin, isSuperAdmin, isTmsManager, HQ_ROLES, PORTAL_ROLES, NON_BRANCH_ROLES, BRANCH_ROLES, driverLogin, requireDriver, normalizePhone } = require('./auth');
 const bc = require('./bc-client');
 const { syncItems, getLastSync } = require('./sync');
 const { generateQR } = require('./qr');
@@ -171,7 +171,7 @@ app.delete('/api/branches/:code', requireAuth, requireSuperAdmin, (req, res) => 
 
 // ─────────────── Users (HQ or branch_owner CRUD) ───────────────
 
-const ROLES_ALL = new Set([...HQ_ROLES, ...BRANCH_ROLES]);
+const ROLES_ALL = new Set([...HQ_ROLES, ...PORTAL_ROLES, ...BRANCH_ROLES]);
 
 app.get('/api/users', requireAuth, (req, res) => {
   const branchCode = req.query.branch_code || '';
@@ -193,7 +193,7 @@ app.get('/api/users', requireAuth, (req, res) => {
 });
 
 app.post('/api/users', requireAuth, (req, res) => {
-  const { username, password, full_name, role, branch_code, phone = '', can_order } = req.body || {};
+  const { username, password, full_name, role, branch_code, phone = '', can_order, vendor_no = '' } = req.body || {};
   if (!username || !password || !full_name || !role) return res.status(400).json({ error: 'Missing fields' });
   if (!ROLES_ALL.has(role)) return res.status(400).json({ error: 'Invalid role' });
 
@@ -206,6 +206,10 @@ app.post('/api/users', requireAuth, (req, res) => {
   if (role === 'super_admin' && !isSuper) {
     return res.status(403).json({ error: 'Only Super Admin can create Super Admin' });
   }
+  // Portal roles (supplier / cti) are HQ-level too — only super_admin creates them.
+  if (PORTAL_ROLES.has(role) && !isSuper) {
+    return res.status(403).json({ error: 'Only Super Admin can create supplier/cti users' });
+  }
   // admin_scm can only create admin_scm (fellow SCM dept members)
   if (isScm && role !== 'admin_scm') {
     return res.status(403).json({ error: 'SCM Admin can only create SCM Admin users' });
@@ -215,9 +219,11 @@ app.post('/api/users', requireAuth, (req, res) => {
     if (branch_code !== req.user.branch_code) return res.status(403).json({ error: 'Cannot create outside own branch' });
     if (HQ_ROLES.has(role) || role === 'branch_owner') return res.status(403).json({ error: 'Cannot create HQ/branch_owner roles' });
   }
-  // HQ roles must have no branch; branch roles must have branch
-  if (HQ_ROLES.has(role) && branch_code) return res.status(400).json({ error: 'HQ role must not have branch_code' });
-  if (!HQ_ROLES.has(role) && !branch_code) return res.status(400).json({ error: 'branch_code required' });
+  // Non-branch roles (HQ + portal) must have no branch; branch roles must have one.
+  if (NON_BRANCH_ROLES.has(role) && branch_code) return res.status(400).json({ error: 'This role must not have branch_code' });
+  if (!NON_BRANCH_ROLES.has(role) && !branch_code) return res.status(400).json({ error: 'branch_code required' });
+  // A supplier login must be scoped to a BC vendor (its fresh-goods POs).
+  if (role === 'supplier' && !vendor_no) return res.status(400).json({ error: 'supplier ต้องระบุ vendor_no' });
 
   if (db.prepare('SELECT 1 FROM users WHERE username=?').get(username)) {
     return res.status(400).json({ error: 'Username already exists' });
@@ -237,10 +243,10 @@ app.post('/api/users', requireAuth, (req, res) => {
   const co = (can_order === undefined ? defaultCanOrder : (can_order ? 1 : 0));
 
   const id = crypto.randomUUID();
-  db.prepare(`INSERT INTO users (id, username, password, full_name, role, branch_code, branch_name, bc_customer_no, phone, can_order)
-    VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
+  db.prepare(`INSERT INTO users (id, username, password, full_name, role, branch_code, branch_name, bc_customer_no, vendor_no, phone, can_order)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(
     id, username, bcrypt.hashSync(password, 10), full_name, role,
-    branch_code || '', branchName, bcCust, phone, co
+    branch_code || '', branchName, bcCust, (role === 'supplier' ? vendor_no : ''), phone, co
   );
   res.json({ ok: true, id });
 });
@@ -983,14 +989,25 @@ function genShipmentNumber() {
 function createShipmentForOrder(orderId, opts = {}) {
   const existing = db.prepare('SELECT * FROM shipments WHERE order_id=?').get(orderId);
   if (existing) return { already: true, shipment: existing };
-  const order = db.prepare('SELECT branch_code FROM orders WHERE id=?').get(orderId);
+  const order = db.prepare('SELECT branch_code, po_vendor_no FROM orders WHERE id=?').get(orderId);
   if (!order) throw new Error('Order not found: ' + orderId);
+  // Delivery channel: fresh goods (ของสด) are drop-shipped by the supplier and
+  // never enter a TMS trip (channel='supplier'); everything else moves through
+  // CTI's TMS (channel='cti'). Orders are single-category (enforced at checkout),
+  // so a single fruit line means the whole order is supplier-fulfilled.
+  const lines = db.prepare(`
+    SELECT ol.item_no, ic.category
+    FROM order_lines ol LEFT JOIN items_cache ic ON ic.item_no = ol.item_no
+    WHERE ol.order_id = ?`).all(orderId);
+  const isFruit = lines.some(l => categoryGroupSrv(l.category || '', l.item_no) === 'fruit');
+  const channel = opts.channel || (isFruit ? 'supplier' : 'cti');
+  const origin = opts.origin || (channel === 'supplier' ? (order.po_vendor_no || 'SUPPLIER') : 'CTI');
   const shipmentNumber = genShipmentNumber();
   const r = db.prepare(`INSERT INTO shipments
-    (shipment_number, order_id, origin, dest_branch_code, status, note)
-    VALUES (?,?,?,?,?,?)`).run(
-    shipmentNumber, orderId, opts.origin || 'CTI', order.branch_code,
-    'pending', opts.note || ''
+    (shipment_number, order_id, origin, dest_branch_code, status, channel, note)
+    VALUES (?,?,?,?,?,?,?)`).run(
+    shipmentNumber, orderId, origin, order.branch_code,
+    'pending', channel, opts.note || ''
   );
   return {
     already: false,
@@ -3263,7 +3280,7 @@ app.delete('/api/tms/carriers/:id', requireAuth, requireSuperAdmin, (req, res) =
 
 // ─── Carrier drivers ───
 // List drivers of a carrier (admin only).
-app.get('/api/tms/carriers/:id/drivers', requireAuth, requireAdmin, (req, res) => {
+app.get('/api/tms/carriers/:id/drivers', requireAuth, requireTmsManager, (req, res) => {
   const rows = db.prepare('SELECT id, carrier_id, username, full_name, phone, vehicle_plate, vehicle_province, active, created_at FROM carrier_drivers WHERE carrier_id=? ORDER BY username').all(req.params.id);
   for (const d of rows) d.active = !!d.active;
   res.json(rows);
@@ -3382,8 +3399,10 @@ app.get('/api/tms/shipments', requireAuth, (req, res) => {
 // Convenience endpoint for the (upcoming Phase 1.3) trip builder — return
 // shipments that don't belong to any trip yet, oldest-first so the admin
 // works through them in arrival order.
-app.get('/api/tms/shipments/unassigned', requireAuth, requireAdmin, (req, res) => {
-  const rows = db.prepare(shipmentJoinSql('WHERE s.trip_id IS NULL AND s.status IN (\'pending\',\'planned\')') + ' ORDER BY s.created_at ASC LIMIT 500').all();
+app.get('/api/tms/shipments/unassigned', requireAuth, requireTmsManager, (req, res) => {
+  // channel='cti' only — fresh-goods (supplier) shipments are drop-shipped and
+  // must never appear in the TMS trip pool.
+  const rows = db.prepare(shipmentJoinSql('WHERE s.trip_id IS NULL AND s.channel = \'cti\' AND s.status IN (\'pending\',\'planned\')') + ' ORDER BY s.created_at ASC LIMIT 500').all();
   res.json(rows);
 });
 
@@ -3394,6 +3413,54 @@ app.get('/api/tms/shipments/:id', requireAuth, (req, res) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
   res.json(row);
+});
+
+// ─── Supplier portal (fresh-goods vendor) ──────────────────────────────────
+// A 'supplier' login sees ONLY the fresh-goods (ของสด) deliveries for its own
+// vendor: shipment.channel='supplier' joined to orders.po_vendor_no = user.vendor_no.
+// It advances the delivery status (drop-ship, no TMS trip). App-side only —
+// nothing here posts to BC; goods receipt stays the branch's separate flow.
+app.get('/api/supplier/pos', requireAuth, requireSupplier, (req, res) => {
+  const vendor = req.user.vendor_no || '';
+  if (!vendor) return res.json([]);
+  const rows = db.prepare(`
+    SELECT s.id, s.order_id, s.shipment_number, s.status, s.delivered_at, s.created_at, s.note,
+           o.order_number, o.bc_po_no, o.po_vendor_no, o.total,
+           o.branch_code, b.name as branch_name
+    FROM shipments s
+    JOIN orders o ON o.id = s.order_id
+    LEFT JOIN branches b ON b.code = s.dest_branch_code
+    WHERE s.channel = 'supplier' AND o.po_vendor_no = ?
+    ORDER BY s.created_at DESC LIMIT 500
+  `).all(vendor);
+  const lineStmt = db.prepare('SELECT item_no, item_name, quantity FROM order_lines WHERE order_id = ?');
+  for (const r of rows) r.lines = lineStmt.all(r.order_id);
+  res.json(rows);
+});
+
+// Advance a fresh-goods shipment's delivery status. Linear + app-side:
+//   pending → intransit (กำลังจัดส่ง) → delivered (จัดส่งแล้ว; stamps delivered_at).
+const SUPPLIER_NEXT = { pending: 'intransit', intransit: 'delivered' };
+app.post('/api/supplier/shipments/:id/status', requireAuth, requireSupplier, (req, res) => {
+  const vendor = req.user.vendor_no || '';
+  const row = db.prepare(`
+    SELECT s.id, s.status, s.channel, o.po_vendor_no
+    FROM shipments s JOIN orders o ON o.id = s.order_id
+    WHERE s.id = ?
+  `).get(req.params.id);
+  if (!row || row.channel !== 'supplier' || row.po_vendor_no !== vendor) {
+    return res.status(404).json({ error: 'Shipment not found' });
+  }
+  const next = SUPPLIER_NEXT[row.status];
+  if (!next) return res.status(400).json({ error: `สถานะ '${row.status}' เปลี่ยนต่อไม่ได้แล้ว` });
+  const want = String(req.body.status || '').trim();
+  if (want && want !== next) return res.status(400).json({ error: `เปลี่ยนได้เฉพาะ ${row.status} → ${next}` });
+  if (next === 'delivered') {
+    db.prepare("UPDATE shipments SET status='delivered', delivered_at=datetime('now','localtime') WHERE id=?").run(row.id);
+  } else {
+    db.prepare('UPDATE shipments SET status=? WHERE id=?').run(next, row.id);
+  }
+  res.json({ ok: true, status: next });
 });
 
 // ─── Trips (Phase 1.3 — admin trip builder) ───
@@ -3423,7 +3490,7 @@ function tripJoinSql(extraWhere = '') {
   `;
 }
 
-app.get('/api/tms/trips', requireAuth, requireAdmin, (req, res) => {
+app.get('/api/tms/trips', requireAuth, requireTmsManager, (req, res) => {
   const { date, status, carrier_id } = req.query;
   const wheres = [], params = [];
   if (date) { wheres.push('t.scheduled_date = ?'); params.push(date); }
@@ -3434,7 +3501,7 @@ app.get('/api/tms/trips', requireAuth, requireAdmin, (req, res) => {
   res.json(rows);
 });
 
-app.get('/api/tms/trips/:id', requireAuth, requireAdmin, (req, res) => {
+app.get('/api/tms/trips/:id', requireAuth, requireTmsManager, (req, res) => {
   const trip = db.prepare(tripJoinSql('WHERE t.id = ?')).get(req.params.id);
   if (!trip) return res.status(404).json({ error: 'Trip not found' });
   const stops = db.prepare(`
@@ -3452,7 +3519,7 @@ app.get('/api/tms/trips/:id', requireAuth, requireAdmin, (req, res) => {
 
 // Create trip + atomically assign shipments. shipment_ids[] is required;
 // each must currently be unassigned + 'pending' (otherwise abort the tx).
-app.post('/api/tms/trips', requireAuth, requireAdmin, (req, res) => {
+app.post('/api/tms/trips', requireAuth, requireTmsManager, (req, res) => {
   const { carrier_id, driver_id = null, vehicle_plate = '', scheduled_date,
           cost_agreed = 0, note = '', shipment_ids = [] } = req.body || {};
   if (!carrier_id || !scheduled_date) return res.status(400).json({ error: 'carrier_id และ scheduled_date จำเป็น' });
@@ -3469,12 +3536,13 @@ app.post('/api/tms/trips', requireAuth, requireAdmin, (req, res) => {
       const r = db.prepare(`INSERT INTO trips (trip_number, carrier_id, driver_id, vehicle_plate, scheduled_date, cost_agreed, note, created_by)
         VALUES (?,?,?,?,?,?,?,?)`).run(tripNumber, carrier_id, driver_id, vehicle_plate, scheduled_date, Number(cost_agreed)||0, note, req.user.id);
       const newTripId = r.lastInsertRowid;
-      const checkStmt = db.prepare("SELECT id, trip_id, status FROM shipments WHERE id=?");
+      const checkStmt = db.prepare("SELECT id, trip_id, status, channel FROM shipments WHERE id=?");
       const assignStmt = db.prepare("UPDATE shipments SET trip_id=?, stop_seq=?, status='planned' WHERE id=?");
       let seq = 1;
       for (const sid of shipment_ids) {
         const s = checkStmt.get(sid);
         if (!s) throw new Error(`Shipment ${sid} ไม่พบ`);
+        if (s.channel !== 'cti') throw new Error(`Shipment ${sid} เป็นของสด (supplier) — ไม่เข้า TMS trip`);
         if (s.trip_id) throw new Error(`Shipment ${sid} ผูกกับ trip อื่นอยู่แล้ว`);
         if (s.status !== 'pending') throw new Error(`Shipment ${sid} status = ${s.status} (ต้อง pending)`);
         assignStmt.run(newTripId, seq++, sid);
@@ -3491,7 +3559,7 @@ app.post('/api/tms/trips', requireAuth, requireAdmin, (req, res) => {
 // Update trip header. Cannot mutate shipment list here — use the dedicated
 // /shipments endpoint below. status changes are gated: can't move out of
 // 'dispatched' or 'completed' from here (those are driver-PWA-driven).
-app.put('/api/tms/trips/:id', requireAuth, requireAdmin, (req, res) => {
+app.put('/api/tms/trips/:id', requireAuth, requireTmsManager, (req, res) => {
   const trip = db.prepare('SELECT * FROM trips WHERE id=?').get(req.params.id);
   if (!trip) return res.status(404).json({ error: 'Trip not found' });
   if (trip.status !== 'planned') return res.status(400).json({ error: `แก้ไม่ได้ — สถานะ trip = ${trip.status}` });
@@ -3519,7 +3587,7 @@ app.put('/api/tms/trips/:id', requireAuth, requireAdmin, (req, res) => {
 
 // Add / remove shipments after a trip exists. Add: shipment must be in the
 // unassigned pool. Remove: shipment goes back to status='pending', trip_id=NULL.
-app.post('/api/tms/trips/:id/shipments', requireAuth, requireAdmin, (req, res) => {
+app.post('/api/tms/trips/:id/shipments', requireAuth, requireTmsManager, (req, res) => {
   const trip = db.prepare('SELECT * FROM trips WHERE id=?').get(req.params.id);
   if (!trip) return res.status(404).json({ error: 'Trip not found' });
   if (trip.status !== 'planned') return res.status(400).json({ error: `แก้ไม่ได้ — สถานะ trip = ${trip.status}` });
@@ -3530,11 +3598,12 @@ app.post('/api/tms/trips/:id/shipments', requireAuth, requireAdmin, (req, res) =
       // Continue numbering after current max stop_seq.
       const max = db.prepare("SELECT COALESCE(MAX(stop_seq),0) m FROM shipments WHERE trip_id=?").get(req.params.id).m;
       let seq = max + 1;
-      const checkStmt = db.prepare("SELECT id, trip_id, status FROM shipments WHERE id=?");
+      const checkStmt = db.prepare("SELECT id, trip_id, status, channel FROM shipments WHERE id=?");
       const assignStmt = db.prepare("UPDATE shipments SET trip_id=?, stop_seq=?, status='planned' WHERE id=?");
       for (const sid of shipment_ids) {
         const s = checkStmt.get(sid);
         if (!s) throw new Error(`Shipment ${sid} ไม่พบ`);
+        if (s.channel !== 'cti') throw new Error(`Shipment ${sid} เป็นของสด (supplier) — ไม่เข้า TMS trip`);
         if (s.trip_id) throw new Error(`Shipment ${sid} ผูกกับ trip อื่นอยู่แล้ว`);
         if (s.status !== 'pending') throw new Error(`Shipment ${sid} status = ${s.status} (ต้อง pending)`);
         assignStmt.run(req.params.id, seq++, sid);
@@ -3544,7 +3613,7 @@ app.post('/api/tms/trips/:id/shipments', requireAuth, requireAdmin, (req, res) =
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-app.delete('/api/tms/trips/:id/shipments/:shipmentId', requireAuth, requireAdmin, (req, res) => {
+app.delete('/api/tms/trips/:id/shipments/:shipmentId', requireAuth, requireTmsManager, (req, res) => {
   const trip = db.prepare('SELECT * FROM trips WHERE id=?').get(req.params.id);
   if (!trip) return res.status(404).json({ error: 'Trip not found' });
   if (trip.status !== 'planned') return res.status(400).json({ error: `แก้ไม่ได้ — สถานะ trip = ${trip.status}` });
@@ -3555,7 +3624,7 @@ app.delete('/api/tms/trips/:id/shipments/:shipmentId', requireAuth, requireAdmin
 
 // Cancel a trip — flips status='cancelled' and frees its shipments back to
 // the unassigned pool. We avoid hard-delete so audit history stays.
-app.delete('/api/tms/trips/:id', requireAuth, requireAdmin, (req, res) => {
+app.delete('/api/tms/trips/:id', requireAuth, requireTmsManager, (req, res) => {
   const trip = db.prepare('SELECT * FROM trips WHERE id=?').get(req.params.id);
   if (!trip) return res.status(404).json({ error: 'Trip not found' });
   if (trip.status === 'dispatched' || trip.status === 'completed') {
@@ -3573,7 +3642,7 @@ app.delete('/api/tms/trips/:id', requireAuth, requireAdmin, (req, res) => {
 // + the order's lines (so the driver/branch knows what's in the box).
 // Auth: HQ admin (planner / accounting). Driver doesn't need this endpoint
 // because they see the same data through /api/tms/driver/today.
-app.get('/api/tms/trips/:id/manifest', requireAuth, requireAdmin, (req, res) => {
+app.get('/api/tms/trips/:id/manifest', requireAuth, requireTmsManager, (req, res) => {
   const trip = db.prepare(`
     SELECT t.*, c.code as carrier_code, c.name as carrier_name, c.contact_phone as carrier_phone,
            d.username as driver_username, d.full_name as driver_name, d.phone as driver_phone,

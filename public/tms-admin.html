@@ -262,11 +262,18 @@
 if (!requireLogin()) throw '';
 const me = getUser();
 const HQ_ROLES = ['super_admin','admin_scm'];
-if (!me || !HQ_ROLES.includes(me.role)) {
+const isCti = !!me && me.role === 'cti';
+if (!me || (!HQ_ROLES.includes(me.role) && !isCti)) {
   location.href = '/index.html'; throw '';
 }
 const isSuper = me.role === 'super_admin';
+// CTI dispatcher runs the trip builder but cannot edit carrier/driver master.
+const canMaster = HQ_ROLES.includes(me.role);
 document.getElementById('nav').innerHTML = renderNav('tms-admin.html');
+if (!canMaster) {
+  const addC = document.getElementById('btnAddCarrier');
+  if (addC) addC.style.display = 'none';
+}
 
 let carriersCache = [];
 let driversCache = [];
@@ -309,7 +316,7 @@ function renderCarriers() {
       <td>${c.driver_count || 0}</td>
       <td>${c.active ? `<span class="pill-on">${t('tms.active')}</span>` : `<span class="pill-off">${t('tms.inactive')}</span>`}</td>
       <td onclick="event.stopPropagation()">
-        <button class="btn sm ghost" onclick='openCarrierModal(${JSON.stringify(c).replace(/'/g,"&#39;")})'>${t('common.edit')}</button>
+        ${canMaster ? `<button class="btn sm ghost" onclick='openCarrierModal(${JSON.stringify(c).replace(/'/g,"&#39;")})'>${t('common.edit')}</button>` : ''}
         ${isSuper ? `<button class="btn sm ghost" style="color:var(--err);border-color:var(--err);margin-left:4px" onclick="deleteCarrier(${c.id},'${c.code}')">${t('common.delete')}</button>` : ''}
       </td>
     </tr>
@@ -323,7 +330,7 @@ function renderCarriers() {
             <span style="color:var(--muted);font-weight:400;font-size:12px;margin-left:6px">· ${c.code} ${c.name}</span>
           </h4>
           <div style="flex:1"></div>
-          <button class="btn sm" id="btnAddDriver" onclick="openDriverModal()" data-i18n="tms.add_driver">+ เพิ่มคนขับ</button>
+          ${canMaster ? `<button class="btn sm" id="btnAddDriver" onclick="openDriverModal()" data-i18n="tms.add_driver">+ เพิ่มคนขับ</button>` : ''}
         </div>
         <div class="card" style="padding:0;overflow-x:auto">
           <table class="dtable" style="font-size:12px">
@@ -387,7 +394,7 @@ function renderDrivers() {
       <td>${d.vehicle_plate || '-'}${d.vehicle_province ? `<br><small style="color:var(--muted)">${d.vehicle_province}</small>` : ''}</td>
       <td>${d.active ? `<span class="pill-on">${t('tms.active')}</span>` : `<span class="pill-off">${t('tms.inactive')}</span>`}</td>
       <td>
-        <button class="btn sm ghost" onclick='openDriverModal(${JSON.stringify(d).replace(/'/g,"&#39;")})'>${t('common.edit')}</button>
+        ${canMaster ? `<button class="btn sm ghost" onclick='openDriverModal(${JSON.stringify(d).replace(/'/g,"&#39;")})'>${t('common.edit')}</button>` : ''}
         ${isSuper ? `<button class="btn sm ghost" style="color:var(--err);border-color:var(--err);margin-left:4px" onclick="deleteDriver(${d.id},'${d.username}')">${t('common.delete')}</button>` : ''}
       </td>
     </tr>

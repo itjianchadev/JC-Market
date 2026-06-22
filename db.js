@@ -701,6 +701,30 @@ try {
   console.error('[db] driver phone unique index failed (duplicates?):', e.message);
 }
 
+// ─── Migrate: supplier portal (users.vendor_no) + shipment delivery channel ───
+// vendor_no scopes a 'supplier' login to its own fresh-goods POs (matched against
+// orders.po_vendor_no). Empty for every non-supplier user.
+try { db.exec("ALTER TABLE users ADD COLUMN vendor_no TEXT DEFAULT ''"); } catch (e) { /* already exists */ }
+// channel routes a shipment to its fulfilment lane:
+//   'supplier' — fresh goods (ของสด): drop-shipped by the vendor, status managed in
+//                the supplier portal, never enters a TMS trip
+//   'cti'      — general goods: dispatched through CTI's TMS trip system (default)
+try { db.exec("ALTER TABLE shipments ADD COLUMN channel TEXT DEFAULT 'cti'"); } catch (e) { /* already exists */ }
+// One-time backfill of shipments created before the channel column existed: tag
+// fresh-goods orders 'supplier', leave the rest 'cti'. Mirrors categoryGroupSrv()
+// in server.js — keep the 030xxx fresh-item list in sync if BC adds fresh categories.
+// Safe to re-run: the channel='cti' guard skips already-tagged rows.
+try {
+  const r = db.prepare(`UPDATE shipments SET channel='supplier'
+    WHERE channel='cti' AND order_id IN (
+      SELECT DISTINCT ol.order_id FROM order_lines ol
+      LEFT JOIN items_cache ic ON ic.item_no = ol.item_no
+      WHERE ic.category = 'Fruit fresh'
+         OR ol.item_no IN ('030024','030081','030012','030013','030014','030019')
+    )`).run();
+  if (r.changes) console.log(`[db] Migration: tagged ${r.changes} fresh-goods shipment(s) channel='supplier'`);
+} catch (e) { console.error('[db] shipment channel backfill failed:', e.message); }
+
 // Seed a sample carrier + driver so admins can exercise the UI on day 1.
 // Idempotent: skipped if any carrier exists. Default password is 'drv1234' —
 // change after first login (driver PWA exposes /api/tms/driver/me/password later).
