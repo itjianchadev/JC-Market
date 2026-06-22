@@ -77,6 +77,11 @@
       <span data-i18n="tms.trips">Trips</span>
       <span class="badge" id="sideTripCount">0</span>
     </button>
+    <button class="tms-sidebar-item" data-tab="deliveries" onclick="switchTab('deliveries')">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>
+      <span>จัดส่งสำเร็จ</span>
+      <span class="badge" id="sideDeliveryCount">0</span>
+    </button>
   </aside>
 
   <main>
@@ -138,6 +143,24 @@
         </table>
       </div>
     </div>
+
+    <!-- Completed deliveries + POD -->
+    <div class="tms-panel" id="panel-deliveries">
+      <div class="toolbar">
+        <h3 style="margin:0;color:var(--gold-dark)">จัดส่งสำเร็จ + หลักฐานการรับ (POD)</h3>
+        <div class="spacer" style="flex:1"></div>
+        <button class="btn sm ghost" onclick="loadDeliveries()">รีเฟรช</button>
+      </div>
+      <p class="hint">รายการที่คนขับส่งถึงปลายทางแล้ว · กด "ดูหลักฐาน" เพื่อดูรูปสินค้า + ลายเซ็นผู้รับ</p>
+      <div class="card" style="padding:0;overflow-x:auto">
+        <table class="dtable">
+          <thead><tr>
+            <th>Shipment</th><th>ปลายทาง</th><th>คนขับ</th><th>ส่งเมื่อ</th><th>ผู้รับ</th><th>หลักฐาน</th>
+          </tr></thead>
+          <tbody id="deliveryBody"><tr><td colspan="6" class="empty">—</td></tr></tbody>
+        </table>
+      </div>
+    </div>
   </main>
 </div>
 
@@ -165,6 +188,16 @@
         <button type="submit" class="btn" data-i18n="common.save">บันทึก</button>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- POD view modal (proof of delivery evidence) -->
+<div class="modal" id="podViewModal">
+  <div class="box" style="max-width:560px">
+    <button class="close" onclick="closePodView()">×</button>
+    <h3 style="color:var(--gold-dark)">หลักฐานการรับ — <span id="pvShip"></span></h3>
+    <div id="pvMeta" style="font-size:13px;line-height:1.9;margin-bottom:12px"></div>
+    <div id="pvImgs" style="display:flex;gap:14px;flex-wrap:wrap"></div>
   </div>
 </div>
 
@@ -286,7 +319,52 @@ function switchTab(tab) {
   document.querySelectorAll('.tms-panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + tab));
   document.querySelectorAll('.tms-sidebar-item').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   if (tab === 'trips') loadTrips();
+  if (tab === 'deliveries') loadDeliveries();
 }
+
+let deliveriesCache = [];
+async function loadDeliveries() {
+  try {
+    deliveriesCache = await api('/api/tms/deliveries');
+    document.getElementById('sideDeliveryCount').textContent = deliveriesCache.length;
+    renderDeliveries();
+  } catch (e) { toast(e.message); }
+}
+function renderDeliveries() {
+  const el = document.getElementById('deliveryBody');
+  if (!deliveriesCache.length) { el.innerHTML = `<tr><td colspan="6" class="empty">ยังไม่มีรายการจัดส่งสำเร็จ</td></tr>`; return; }
+  el.innerHTML = deliveriesCache.map(d => {
+    const hasPod = d.photo_url || d.signature_url;
+    return `<tr>
+      <td><strong>${d.shipment_number}</strong><br><small style="color:var(--muted)">${d.order_number || d.bc_so_no || ''}</small></td>
+      <td>${d.branch_name || d.dest_branch_code || '-'}</td>
+      <td>${d.driver_name || '-'}${d.vehicle_plate ? `<br><small style="color:var(--muted)">${d.vehicle_plate}</small>` : ''}</td>
+      <td>${d.delivered_at || '-'}</td>
+      <td>${d.signed_by_name || '<span style="color:var(--muted)">-</span>'}</td>
+      <td>${hasPod ? `<button class="btn sm ghost" onclick="openPodView(${d.id})">ดูหลักฐาน</button>` : '<span style="color:var(--muted)">ไม่มี POD</span>'}</td>
+    </tr>`;
+  }).join('');
+}
+function openPodView(id) {
+  const d = deliveriesCache.find(x => x.id === id);
+  if (!d) return;
+  document.getElementById('pvShip').textContent = d.shipment_number;
+  const gps = (d.driver_lat != null && d.driver_lng != null)
+    ? `<a href="https://maps.google.com/?q=${d.driver_lat},${d.driver_lng}" target="_blank" rel="noopener">${d.driver_lat.toFixed(5)}, ${d.driver_lng.toFixed(5)} (แผนที่)</a>`
+    : '-';
+  document.getElementById('pvMeta').innerHTML =
+    `<b>ปลายทาง:</b> ${d.branch_name || d.dest_branch_code || '-'}<br>` +
+    `<b>คนขับ:</b> ${d.driver_name || '-'}${d.driver_phone ? ' · ' + d.driver_phone : ''}<br>` +
+    `<b>ส่งเมื่อ:</b> ${d.delivered_at || '-'}<br>` +
+    `<b>ผู้รับ:</b> ${d.signed_by_name || '-'}<br>` +
+    `<b>พิกัด GPS:</b> ${gps}` +
+    (d.pod_notes ? `<br><b>หมายเหตุ:</b> ${d.pod_notes}` : '');
+  document.getElementById('pvImgs').innerHTML =
+    (d.photo_url ? `<div><div style="font-size:12px;color:var(--muted);margin-bottom:4px">รูปสินค้า</div><a href="${d.photo_url}" target="_blank"><img src="${d.photo_url}" style="width:210px;max-width:100%;border-radius:8px;border:1px solid var(--border)"></a></div>` : '') +
+    (d.signature_url ? `<div><div style="font-size:12px;color:var(--muted);margin-bottom:4px">ลายเซ็นผู้รับ</div><img src="${d.signature_url}" style="width:210px;max-width:100%;height:auto;border-radius:8px;border:1px solid var(--border);background:#fafafa"></div>` : '');
+  document.getElementById('podViewModal').style.display = 'flex';
+}
+function closePodView() { document.getElementById('podViewModal').style.display = 'none'; }
 
 async function loadCarriers() {
   try {
@@ -728,6 +806,7 @@ async function cancelTrip(id, tripNo) {
 
 loadCarriers();
 loadTrips();
+loadDeliveries();
 applyI18n(document.body);
 </script>
 </body></html>
