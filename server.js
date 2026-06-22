@@ -3238,7 +3238,7 @@ app.get('/api/tms/carriers/:id', requireAuth, requireAdmin, (req, res) => {
   res.json(c);
 });
 
-app.post('/api/tms/carriers', requireAuth, requireAdmin, (req, res) => {
+app.post('/api/tms/carriers', requireAuth, requireTmsManager, (req, res) => {
   const { code, name, contact_phone = '', contact_email = '', default_cost_per_trip = 0, note = '' } = req.body || {};
   if (!code || !name) return res.status(400).json({ error: 'code/name required' });
   if (db.prepare('SELECT 1 FROM carriers WHERE code=?').get(code)) {
@@ -3249,7 +3249,7 @@ app.post('/api/tms/carriers', requireAuth, requireAdmin, (req, res) => {
   res.json({ ok: true, id: r.lastInsertRowid });
 });
 
-app.put('/api/tms/carriers/:id', requireAuth, requireAdmin, (req, res) => {
+app.put('/api/tms/carriers/:id', requireAuth, requireTmsManager, (req, res) => {
   const c = db.prepare('SELECT * FROM carriers WHERE id=?').get(req.params.id);
   if (!c) return res.status(404).json({ error: 'Carrier not found' });
   const fields = ['name', 'contact_phone', 'contact_email', 'default_cost_per_trip', 'note', 'active'];
@@ -3286,7 +3286,7 @@ app.get('/api/tms/carriers/:id/drivers', requireAuth, requireTmsManager, (req, r
   res.json(rows);
 });
 
-app.post('/api/tms/carriers/:id/drivers', requireAuth, requireAdmin, (req, res) => {
+app.post('/api/tms/carriers/:id/drivers', requireAuth, requireTmsManager, (req, res) => {
   const carrierId = req.params.id;
   const { username, full_name, phone = '', vehicle_plate = '', vehicle_province = '' } = req.body || {};
   if (!username || !full_name) return res.status(400).json({ error: 'username/full_name required' });
@@ -3316,7 +3316,7 @@ app.post('/api/tms/carriers/:id/drivers', requireAuth, requireAdmin, (req, res) 
   res.json({ ok: true, id: r.lastInsertRowid });
 });
 
-app.put('/api/tms/drivers/:id', requireAuth, requireAdmin, (req, res) => {
+app.put('/api/tms/drivers/:id', requireAuth, requireTmsManager, (req, res) => {
   const d = db.prepare('SELECT * FROM carrier_drivers WHERE id=?').get(req.params.id);
   if (!d) return res.status(404).json({ error: 'Driver not found' });
   const fields = ['full_name', 'phone', 'vehicle_plate', 'vehicle_province', 'active'];
