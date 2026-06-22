@@ -583,8 +583,12 @@ function openPod(shipmentId, branchCode, seq) {
       document.getElementById('podGeo').textContent = '📍 (ไม่ได้รับตำแหน่ง)';
     });
   }
-  setupSignatureCanvas();
+  // Show the modal FIRST, then size the signature canvas. A hidden canvas has a
+  // 0×0 bounding rect, which made the drawing bitmap 0×0 so strokes never
+  // rendered (esp. mobile touch). getBoundingClientRect forces layout, so once
+  // the modal is visible the canvas measures correctly.
   document.getElementById('podModal').style.display = 'flex';
+  setupSignatureCanvas();
 }
 function closePod() {
   document.getElementById('podModal').style.display = 'none';
