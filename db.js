@@ -724,6 +724,9 @@ try {
     )`).run();
   if (r.changes) console.log(`[db] Migration: tagged ${r.changes} fresh-goods shipment(s) channel='supplier'`);
 } catch (e) { console.error('[db] shipment channel backfill failed:', e.message); }
+// Delivery employee name recorded by the supplier at each status transition
+// (captured at เริ่มจัดส่ง, verifiable at ยืนยันส่งถึง).
+try { db.exec("ALTER TABLE shipments ADD COLUMN deliverer TEXT DEFAULT ''"); } catch (e) { /* already exists */ }
 
 // Seed a sample carrier + driver so admins can exercise the UI on day 1.
 // Idempotent: skipped if any carrier exists. Default password is 'drv1234' —

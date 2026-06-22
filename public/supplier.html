@@ -14,12 +14,24 @@
 .st-pending{background:#fff3cd;color:#8a6d00}
 .st-intransit{background:#cfe8ff;color:#0b5cad}
 .st-delivered{background:#d4edda;color:#1c7a3a}
-.items{font-size:12px;color:var(--muted);max-width:280px}
+.items{font-size:12px;color:var(--muted);max-width:260px}
+.po-link{color:var(--gold-dark);font-weight:600;text-decoration:none;border-bottom:1px dashed var(--gold)}
+.po-link:hover{color:var(--brand)}
 .filters{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center}
 .kpi{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0 16px}
 .kpi .box{background:var(--beige);border:1px solid var(--border);border-radius:10px;padding:8px 16px;min-width:90px}
 .kpi .n{font-size:20px;font-weight:700;color:var(--gold-dark)}
 .kpi .l{font-size:11px;color:var(--muted)}
+/* modal */
+.modal-backdrop{position:fixed;inset:0;background:rgba(40,33,24,.45);display:none;align-items:center;justify-content:center;z-index:100;padding:20px}
+.modal-card{background:#fff;border-radius:14px;padding:22px;max-width:560px;width:100%;max-height:86vh;overflow:auto;position:relative;box-shadow:0 12px 40px rgba(0,0,0,.25)}
+.modal-card .close{position:absolute;top:10px;right:14px;border:none;background:none;font-size:26px;line-height:1;cursor:pointer;color:var(--muted)}
+.modal-card h3{margin:0 0 12px;color:var(--gold-dark)}
+.meta{font-size:13px;color:var(--text);margin-bottom:14px;line-height:1.8}
+.meta b{color:var(--gold-dark)}
+.modal-card label{display:block;font-size:13px;font-weight:600;margin:12px 0 4px}
+.modal-card input{width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:14px;box-sizing:border-box}
+.modal-card input:focus{outline:none;border-color:var(--gold)}
 </style>
 </head><body>
 <div id="nav"></div>
@@ -39,12 +51,27 @@
   <div class="card" style="padding:0;overflow-x:auto">
     <table class="dtable">
       <thead><tr>
-        <th>Shipment</th><th>เลขที่ PO</th><th>สาขาปลายทาง</th><th>รายการ</th><th>สถานะ</th><th>จัดการ</th>
+        <th>Shipment</th><th>เลขที่ PO</th><th>สาขาปลายทาง</th><th>รายการ</th><th>ผู้จัดส่ง</th><th>สถานะ</th><th>จัดการ</th>
       </tr></thead>
-      <tbody id="body"><tr><td colspan="6" style="text-align:center;padding:20px;color:var(--muted)">กำลังโหลด…</td></tr></tbody>
+      <tbody id="body"><tr><td colspan="7" style="text-align:center;padding:20px;color:var(--muted)">กำลังโหลด…</td></tr></tbody>
     </table>
   </div>
 </div>
+
+<!-- PO detail + delivery-action modal -->
+<div id="modal" class="modal-backdrop" onclick="if(event.target===this)closeModal()">
+  <div class="modal-card">
+    <button class="close" onclick="closeModal()">&times;</button>
+    <h3 id="mTitle">รายละเอียด PO</h3>
+    <div id="mMeta" class="meta"></div>
+    <div style="overflow-x:auto"><table class="dtable">
+      <thead><tr><th>สินค้า</th><th style="text-align:right">จำนวน</th></tr></thead>
+      <tbody id="mLines"></tbody>
+    </table></div>
+    <div id="mAction"></div>
+  </div>
+</div>
+
 <script src="/js/app.js?v=20260622a"></script>
 <script>
 if (!requireLogin()) throw '';
@@ -54,20 +81,19 @@ document.getElementById('nav').innerHTML = renderNav('supplier.html');
 document.getElementById('vendorLine').textContent = 'Vendor: ' + (me.vendor_no || '—') + ' · ' + (me.full_name || '');
 
 let rows = [];
+let modalId = null;
 const STt = { pending:['รอจัดส่ง','st-pending'], intransit:['กำลังจัดส่ง','st-intransit'], delivered:['จัดส่งแล้ว','st-delivered'] };
 const NEXT = { pending:{ to:'intransit', label:'เริ่มจัดส่ง' }, intransit:{ to:'delivered', label:'ยืนยันส่งถึง' } };
+const esc = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
 
 async function load() {
-  try {
-    rows = await api('/api/supplier/pos');
-    render();
-  } catch (e) { toast(e.message); }
+  try { rows = await api('/api/supplier/pos'); render(); }
+  catch (e) { toast(e.message); }
 }
 
 function render() {
   const f = document.getElementById('fStatus').value;
   const list = f ? rows.filter(r => r.status === f) : rows;
-  // KPI counts (over the full set, not the filtered view)
   const c = { pending:0, intransit:0, delivered:0 };
   rows.forEach(r => { if (c[r.status] != null) c[r.status]++; });
   document.getElementById('kpi').innerHTML =
@@ -75,35 +101,71 @@ function render() {
      <div class="box"><div class="n">${c.intransit}</div><div class="l">กำลังจัดส่ง</div></div>
      <div class="box"><div class="n">${c.delivered}</div><div class="l">จัดส่งแล้ว</div></div>`;
   const body = document.getElementById('body');
-  if (!list.length) { body.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--muted)">ไม่มีรายการ</td></tr>`; return; }
+  if (!list.length) { body.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--muted)">ไม่มีรายการ</td></tr>`; return; }
   body.innerHTML = list.map(r => {
     const [lbl, cls] = STt[r.status] || [r.status, ''];
-    const items = (r.lines || []).map(l => `${l.item_name} ×${(+l.quantity).toLocaleString()}`).join(', ');
+    const items = (r.lines || []).map(l => `${esc(l.item_name)} ×${(+l.quantity).toLocaleString()}`).join(', ');
     const nx = NEXT[r.status];
     const act = nx
-      ? `<button class="btn sm" onclick="advance(${r.id},'${nx.to}')">${nx.label}</button>`
+      ? `<button class="btn sm" onclick="openModal(${r.id})">${nx.label}</button>`
       : (r.delivered_at ? `<span class="hint">ส่งแล้ว ${r.delivered_at}</span>` : '—');
     return `<tr>
-      <td><strong>${r.shipment_number}</strong></td>
-      <td>${r.bc_po_no || '<span class="hint">รอ PO</span>'}</td>
-      <td>${r.branch_name || r.branch_code || '—'}</td>
+      <td><strong>${esc(r.shipment_number)}</strong></td>
+      <td><a href="#" class="po-link" onclick="openModal(${r.id});return false">${esc(r.bc_po_no) || '(รอ PO)'}</a></td>
+      <td>${esc(r.branch_name) || esc(r.branch_code) || '—'}</td>
       <td class="items">${items || '—'}</td>
+      <td>${esc(r.deliverer) || '<span class="hint">—</span>'}</td>
       <td><span class="st ${cls}">${lbl}</span></td>
       <td>${act}</td>
     </tr>`;
   }).join('');
 }
 
-async function advance(id, to) {
-  const prompt = to === 'delivered' ? 'ยืนยันจัดส่งถึงสาขาแล้ว?' : 'เริ่มจัดส่งรายการนี้?';
-  if (!confirm(prompt)) return;
+function openModal(id) {
+  const r = rows.find(x => x.id === id);
+  if (!r) return;
+  modalId = id;
+  const [lbl] = STt[r.status] || [r.status];
+  document.getElementById('mTitle').textContent = 'PO ' + (r.bc_po_no || r.shipment_number);
+  document.getElementById('mMeta').innerHTML =
+    `<b>Shipment:</b> ${esc(r.shipment_number)}<br>` +
+    `<b>สาขาปลายทาง:</b> ${esc(r.branch_name) || esc(r.branch_code) || '—'}<br>` +
+    `<b>สถานะ:</b> ${lbl}` + (r.delivered_at ? ` · ส่งถึง ${r.delivered_at}` : '');
+  document.getElementById('mLines').innerHTML = (r.lines || []).length
+    ? r.lines.map(l => `<tr><td>${esc(l.item_name)}<br><small style="color:var(--muted)">${esc(l.item_no)}</small></td><td style="text-align:right">${(+l.quantity).toLocaleString()}</td></tr>`).join('')
+    : `<tr><td colspan="2" style="text-align:center;color:var(--muted)">—</td></tr>`;
+  const nx = NEXT[r.status];
+  const mAction = document.getElementById('mAction');
+  if (nx) {
+    mAction.innerHTML =
+      `<label>ชื่อพนักงานผู้จัดส่ง <span style="color:var(--err)">*</span></label>` +
+      `<input id="mDeliverer" placeholder="ระบุชื่อผู้จัดส่ง / คนขับ" value="${esc(r.deliverer)}" autocomplete="off">` +
+      `<div id="mErr" style="color:var(--err);font-size:13px;margin-top:6px"></div>` +
+      `<button class="btn" style="margin-top:12px;width:100%" onclick="doAdvance()">${nx.label}</button>`;
+    setTimeout(() => { const i = document.getElementById('mDeliverer'); if (i) i.focus(); }, 50);
+  } else {
+    mAction.innerHTML = r.deliverer ? `<div class="meta" style="margin:8px 0 0"><b>ผู้จัดส่ง:</b> ${esc(r.deliverer)}</div>` : '';
+  }
+  document.getElementById('modal').style.display = 'flex';
+}
+function closeModal() { document.getElementById('modal').style.display = 'none'; modalId = null; }
+
+async function doAdvance() {
+  const r = rows.find(x => x.id === modalId);
+  if (!r) return;
+  const nx = NEXT[r.status];
+  if (!nx) return;
+  const deliverer = (document.getElementById('mDeliverer').value || '').trim();
+  if (!deliverer) { document.getElementById('mErr').textContent = 'กรุณาระบุชื่อพนักงานผู้จัดส่ง'; return; }
   try {
-    await api('/api/supplier/shipments/' + id + '/status', { method:'POST', body: JSON.stringify({ status: to }) });
-    toast('อัปเดตสถานะแล้ว');
+    await api('/api/supplier/shipments/' + r.id + '/status', { method:'POST', body: JSON.stringify({ status: nx.to, deliverer }) });
+    toast(nx.to === 'delivered' ? 'ยืนยันส่งถึงแล้ว' : 'เริ่มจัดส่งแล้ว');
+    closeModal();
     load();
-  } catch (e) { toast(e.message); }
+  } catch (e) { document.getElementById('mErr').textContent = e.message; }
 }
 
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 load();
 </script>
 </body></html>
