@@ -3687,6 +3687,31 @@ app.get('/api/tms/trips/:id/manifest', requireAuth, requireTmsManager, async (re
   } catch (e) { console.error('[manifest]', e.message); res.status(500).json({ error: e.message }); }
 });
 
+// ─── Completed deliveries + POD (CTI warehouse visibility) ───
+// Delivered general-goods (channel='cti') shipments with their proof-of-delivery
+// (photo, signature, recipient, GPS, time) so the CTI dispatcher can review them.
+app.get('/api/tms/deliveries', requireAuth, requireTmsManager, (req, res) => {
+  const rows = db.prepare(`
+    SELECT s.id, s.shipment_number, s.dest_branch_code, s.delivered_at, s.trip_id,
+           o.order_number, o.bc_so_no, o.total,
+           b.name as branch_name,
+           t.trip_number, t.vehicle_plate, c.name as carrier_name,
+           d.full_name as driver_name, d.phone as driver_phone,
+           p.photo_url, p.signature_url, p.signed_by_name, p.notes as pod_notes,
+           p.driver_lat, p.driver_lng, p.received_at
+    FROM shipments s
+    LEFT JOIN orders o ON o.id = s.order_id
+    LEFT JOIN branches b ON b.code = s.dest_branch_code
+    LEFT JOIN trips t ON t.id = s.trip_id
+    LEFT JOIN carriers c ON c.id = t.carrier_id
+    LEFT JOIN carrier_drivers d ON d.id = t.driver_id
+    LEFT JOIN pods p ON p.id = (SELECT id FROM pods WHERE shipment_id = s.id ORDER BY id DESC LIMIT 1)
+    WHERE s.status = 'delivered' AND s.channel = 'cti'
+    ORDER BY s.delivered_at DESC LIMIT 500
+  `).all();
+  res.json(rows);
+});
+
 // ─── Driver PWA (Phase 1.4a — login + trip view) ───
 // Drivers authenticate against carrier_drivers, get a JWT with kind='driver'
 // that requireDriver checks. The endpoints below scope every query to the
