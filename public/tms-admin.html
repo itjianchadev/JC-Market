@@ -267,8 +267,9 @@ if (!me || (!HQ_ROLES.includes(me.role) && !isCti)) {
   location.href = '/index.html'; throw '';
 }
 const isSuper = me.role === 'super_admin';
-// CTI dispatcher runs the trip builder but cannot edit carrier/driver master.
-const canMaster = HQ_ROLES.includes(me.role);
+// CTI + HQ admins can add/edit carrier & driver master; only super_admin can
+// DELETE them (isSuper-gated below).
+const canMaster = HQ_ROLES.includes(me.role) || isCti;
 document.getElementById('nav').innerHTML = renderNav('tms-admin.html');
 if (!canMaster) {
   const addC = document.getElementById('btnAddCarrier');
