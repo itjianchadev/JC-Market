@@ -31,15 +31,19 @@ Node.js + Express + better-sqlite3 + D365 Business Central integration.
 
 | Path | Trigger | BC docs created | TMS shipment | Finance? | Payment? |
 |---|---|---|---|---|---|
-| FC + general | `verify` approve | SO + PO | on verify | yes | slip |
+| FC + general | `verify` approve | SO + PO | **warehouse pick** | yes | slip |
 | FC + fruit + immediate | `verify` approve | SO + PO | on verify | yes | slip |
 | FC + fruit + credit_7d | `verify` approve | SO + PO | on verify | yes | slip within 7d |
-| JC + general | checkout | **TRO** (CTI → JC0xx) | on checkout | no | — |
+| JC + general | checkout | **TRO** (CTI → JC0xx) | **warehouse pick** | no | — |
 | JC + fruit | checkout | PO only (no SO) | on checkout | no | — |
 
 All FC orders (general / fruit / credit_7d) share one rule: BC SO + PO are NOT created at checkout — Finance must verify first. This avoids BC orphans if the FC cancels before paying. JC orders bypass Finance and create BC docs immediately at checkout.
 
-Each row above also auto-creates one TMS `shipments` row when its BC trigger document succeeds (Phase 1.2). FC shipment is gated on BC SO; JC general on BC TRO; JC fruit on BC PO. `createShipmentForOrder()` is idempotent so retries / repeated verify calls won't duplicate rows. Shipments start `status='pending'`, `trip_id=NULL` — the Phase 1.3 trip builder picks them up.
+After its BC trigger document succeeds, `routeOrderFulfilment()` (Phase 1.2) sends the order down one of two fulfilment lanes by category/channel:
+- **Fresh goods (`channel='supplier'`)** — `shipments` row created immediately; drop-shipped by the vendor, never enters a CTI trip.
+- **General goods (`channel='cti'`)** — order parks in the **warehouse pick queue** (`orders.pick_status='to_pick'`); the `shipments` row is created only when the warehouse confirms picking (→ `picked`) from the CTI portal's *จัดของ* tab, which also records the picker (`picked_by_name`). So for FC-general the BC SO is created on verify but the shipment waits for the pick; same for JC-general (BC TRO on checkout, shipment on pick).
+
+`createShipmentForOrder()` is idempotent so retries / repeated calls won't duplicate rows. Shipments start `status='pending'`, `trip_id=NULL` — the Phase 1.3 trip builder picks them up. (Picked-order history is on the CTI portal's *ประวัติจัดของ* tab, filterable by branch, read-only.)
 
 - Auto-cancel timer: 30 min for FC `pending`. Skipped for `payment_method='credit_7d'` and JC orders (status flips to `verified` immediately).
 - Overdue credit (`payment_method='credit_7d'` + past `credit_due_at`): FC blocked from new fruit orders until cleared. General products still allowed.
