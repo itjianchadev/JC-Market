@@ -701,6 +701,56 @@ try {
   console.error('[db] driver phone unique index failed (duplicates?):', e.message);
 }
 
+// ─── Multiple phone numbers per driver ───
+// A driver (1 person / 1 vehicle) may register more than one phone; logging in
+// with ANY of them resolves to the same driver. carrier_drivers.phone stays the
+// PRIMARY phone (shown in lists, returned by login); the full set lives here,
+// which also enforces phone uniqueness across every driver.
+db.exec(`
+CREATE TABLE IF NOT EXISTS carrier_driver_phones (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  driver_id INTEGER NOT NULL REFERENCES carrier_drivers(id) ON DELETE CASCADE,
+  phone TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_driver_phones_uniq ON carrier_driver_phones(phone);
+CREATE INDEX IF NOT EXISTS idx_driver_phones_driver ON carrier_driver_phones(driver_id);
+`);
+// Backfill: seed each existing driver's primary phone into the phones table so
+// post-migration logins (which read the phones table) keep working.
+try {
+  const r = db.prepare(`
+    INSERT INTO carrier_driver_phones (driver_id, phone)
+    SELECT d.id, d.phone FROM carrier_drivers d
+    WHERE d.phone <> '' AND NOT EXISTS (
+      SELECT 1 FROM carrier_driver_phones p WHERE p.phone = d.phone
+    )`).run();
+  if (r.changes) console.log(`[db] Migration: backfilled ${r.changes} driver phone(s) into carrier_driver_phones`);
+} catch (e) { console.error('[db] driver phones backfill failed:', e.message); }
+
+// ─── Multiple POD photos per delivery ───
+// A driver may attach up to 5 proof-of-delivery photos. pods.photo_url keeps the
+// FIRST photo (mirror — existing deliveries view / manifest still read it); the
+// full set lives in pod_photos.
+db.exec(`
+CREATE TABLE IF NOT EXISTS pod_photos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pod_id INTEGER NOT NULL REFERENCES pods(id) ON DELETE CASCADE,
+  photo_url TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_pod_photos_pod ON pod_photos(pod_id);
+`);
+// Backfill: seed each existing POD's single photo into pod_photos.
+try {
+  const r = db.prepare(`
+    INSERT INTO pod_photos (pod_id, photo_url)
+    SELECT id, photo_url FROM pods
+    WHERE photo_url <> '' AND NOT EXISTS (SELECT 1 FROM pod_photos pp WHERE pp.pod_id = pods.id)
+  `).run();
+  if (r.changes) console.log(`[db] Migration: backfilled ${r.changes} POD photo(s) into pod_photos`);
+} catch (e) { console.error('[db] pod_photos backfill failed:', e.message); }
+
 // ─── Migrate: supplier portal (users.vendor_no) + shipment delivery channel ───
 // vendor_no scopes a 'supplier' login to its own fresh-goods POs (matched against
 // orders.po_vendor_no). Empty for every non-supplier user.
@@ -727,6 +777,19 @@ try {
 // Delivery employee name recorded by the supplier at each status transition
 // (captured at เริ่มจัดส่ง, verifiable at ยืนยันส่งถึง).
 try { db.exec("ALTER TABLE shipments ADD COLUMN deliverer TEXT DEFAULT ''"); } catch (e) { /* already exists */ }
+
+// ─── Warehouse picking gate (TMS, general goods only) ───
+// General-goods (channel='cti') orders now pass through a warehouse PICK queue
+// BEFORE a shipment exists, so the warehouse and the transport desk see distinct
+// work. Lifecycle:
+//   ''        — not in the pick flow (fruit/supplier orders, or pre-feature rows)
+//   'to_pick' — BC SO/TO done; waiting for the warehouse to pick & pack
+//   'picked'  — warehouse confirmed; Shipment number issued → enters CTI trip pool
+// Distinct from fulfillment_status, which tracks goods-RECEIPT at the branch.
+try { db.exec("ALTER TABLE orders ADD COLUMN pick_status TEXT DEFAULT ''"); } catch (e) { /* already exists */ }
+try { db.exec("ALTER TABLE orders ADD COLUMN picked_at TEXT"); } catch (e) { /* already exists */ }
+try { db.exec("ALTER TABLE orders ADD COLUMN picked_by TEXT"); } catch (e) { /* already exists */ } // login that confirmed the pick
+try { db.exec("ALTER TABLE orders ADD COLUMN picked_by_name TEXT DEFAULT ''"); } catch (e) { /* already exists */ } // free-text: who physically picked/packed
 
 // Seed a sample carrier + driver so admins can exercise the UI on day 1.
 // Idempotent: skipped if any carrier exists. Default password is 'drv1234' —

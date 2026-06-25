@@ -48,7 +48,7 @@ const I18N = {
     // Trips
     'tms.trips':'เที่ยววิ่ง (Trips)','tms.new_trip':'+ สร้าง Trip ใหม่','tms.edit_trip':'แก้ไข Trip',
     'tms.no_trips':'ยังไม่มี Trip','tms.confirm_cancel_trip':'ยกเลิก Trip {n} ใช่ไหม? shipments จะกลับเป็น unassigned',
-    'tms.col.trip_no':'เลขที่','tms.col.date':'วันที่','tms.col.carrier':'Carrier','tms.col.driver':'คนขับ',
+    'tms.col.trip_no':'เลขที่','tms.col.date':'วันที่จัดส่ง','tms.col.carrier':'Carrier','tms.col.driver':'คนขับ',
     'tms.col.stops':'จุดส่ง','tms.col.cost':'ค่าเที่ยว','tms.col.shipment_no':'Shipment',
     'tms.col.dest':'ปลายทาง','tms.col.order_no':'Order',
     'tms.trip.status.planned':'วางแผน','tms.trip.status.dispatched':'ออกรถแล้ว','tms.trip.status.completed':'ส่งครบ',
@@ -341,7 +341,7 @@ const I18N = {
     // Trips
     'tms.trips':'Trips','tms.new_trip':'+ New Trip','tms.edit_trip':'Edit Trip',
     'tms.no_trips':'No trips yet','tms.confirm_cancel_trip':'Cancel Trip {n}? Shipments will go back to unassigned.',
-    'tms.col.trip_no':'No.','tms.col.date':'Date','tms.col.carrier':'Carrier','tms.col.driver':'Driver',
+    'tms.col.trip_no':'No.','tms.col.date':'Delivery Date','tms.col.carrier':'Carrier','tms.col.driver':'Driver',
     'tms.col.stops':'Stops','tms.col.cost':'Cost','tms.col.shipment_no':'Shipment',
     'tms.col.dest':'Destination','tms.col.order_no':'Order',
     'tms.trip.status.planned':'Planned','tms.trip.status.dispatched':'Dispatched','tms.trip.status.completed':'Completed',

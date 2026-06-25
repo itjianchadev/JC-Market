@@ -53,10 +53,27 @@
 .tms-panel{display:none}
 .tms-panel.active{display:block}
 
+.tms-side-group{font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.04em;text-transform:uppercase;padding:10px 8px 4px}
+.pick-list{display:flex;flex-direction:column;gap:6px}
+.pick-row{border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--card,#fff)}
+.pick-row-head{display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer;user-select:none}
+.pick-row-head:hover{background:#faf7f1}
+.pick-caret{color:var(--muted);font-size:11px;transition:transform .15s;flex:none}
+.pick-row.open .pick-caret{transform:rotate(90deg)}
+.pick-row-main{display:flex;flex-direction:column;min-width:0}
+.pick-row-spacer{flex:1}
+.pick-row-meta{display:flex;align-items:center;gap:12px;text-align:right;white-space:nowrap}
+.pick-pill{display:inline-block;padding:1px 9px;border-radius:10px;background:#f1ece2;color:var(--gold-dark);font-size:12px;font-weight:600}
+.pick-doctag{display:inline-block;padding:0 6px;border-radius:4px;background:var(--gold-dark);color:#fff;font-size:11px;font-weight:700;vertical-align:middle}
+.pick-row-body{padding:2px 12px 12px;border-top:1px solid var(--border)}
+.pick-lines{width:100%;font-size:13px;margin-top:8px}
+.pick-lines td{padding:4px 6px;border-bottom:1px solid var(--border)}
+@media(max-width:640px){.pick-row-meta{gap:8px;font-size:12px}.pick-row-meta small{display:none}}
 @media(max-width:880px){
   .tms-layout{grid-template-columns:1fr}
   .tms-sidebar{position:static;display:flex;flex-wrap:wrap;gap:4px}
   .tms-sidebar-item{flex:1;min-width:120px;justify-content:center}
+  .tms-side-group{flex-basis:100%;padding:6px 4px 2px}
 }
 @media(max-width:640px){.form-grid2{grid-template-columns:1fr}}
 </style>
@@ -67,7 +84,19 @@
 <div class="tms-layout">
   <!-- Sidebar -->
   <aside class="tms-sidebar">
-    <button class="tms-sidebar-item active" data-tab="carriers" onclick="switchTab('carriers')">
+    <div class="tms-side-group">คลัง · จัดของ</div>
+    <button class="tms-sidebar-item active" data-tab="picking" onclick="switchTab('picking')">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+      <span>จัดของ</span>
+      <span class="badge" id="sidePickCount">0</span>
+    </button>
+    <button class="tms-sidebar-item" data-tab="pickhistory" onclick="switchTab('pickhistory')">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></svg>
+      <span>ประวัติจัดของ</span>
+      <span class="badge" id="sidePickHistCount">0</span>
+    </button>
+    <div class="tms-side-group">ขนส่ง</div>
+    <button class="tms-sidebar-item" data-tab="carriers" onclick="switchTab('carriers')">
       <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="14" height="10" rx="1"/><path d="M17 11h3l2 3v3h-5z"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg>
       <span data-i18n="tms.carriers">Carriers</span>
       <span class="badge" id="sideCarrierCount">0</span>
@@ -85,8 +114,34 @@
   </aside>
 
   <main>
+    <!-- Picking panel (warehouse worklist) -->
+    <div class="tms-panel active" id="panel-picking">
+      <div class="toolbar">
+        <h3 style="margin:0;color:var(--gold-dark)">จัดของ — รายการรอจัด (คลัง)</h3>
+        <div class="spacer" style="flex:1"></div>
+        <button class="btn sm ghost" onclick="loadPicking()">รีเฟรช</button>
+      </div>
+      <p class="hint">ออเดอร์ที่ BC SO/TO เสร็จแล้ว รอคลังจัด &amp; แพ็ก · คลิกแถวเพื่อกางดูรายการสินค้า แล้วกด "ยืนยันจัดของเสร็จ" เพื่อออกเลข Shipment ส่งต่อให้ขนส่งสร้าง Trip</p>
+      <div id="pickList" class="pick-list"><p class="empty">—</p></div>
+    </div>
+
+    <!-- Picking history panel (read-only) -->
+    <div class="tms-panel" id="panel-pickhistory">
+      <div class="toolbar">
+        <h3 style="margin:0;color:var(--gold-dark)">ประวัติการจัดของ</h3>
+        <select id="pickHistBranch" onchange="renderPickHistory()" style="padding:6px 10px;width:auto">
+          <option value="">ทุกสาขา</option>
+        </select>
+        <span id="pickHistCount" class="pick-pill" style="align-self:center"></span>
+        <div class="spacer" style="flex:1"></div>
+        <button class="btn sm ghost" onclick="loadPickHistory()">รีเฟรช</button>
+      </div>
+      <p class="hint">รายการที่จัดเสร็จแล้ว (ออกเลข Shipment ไปแล้ว) · กรองตามสาขาได้ · คลิกแถวเพื่อดูรายการสินค้า — ดูได้อย่างเดียว ยืนยันซ้ำไม่ได้</p>
+      <div id="pickHistList" class="pick-list"><p class="empty">—</p></div>
+    </div>
+
     <!-- Carriers panel (drivers nested inside) -->
-    <div class="tms-panel active" id="panel-carriers">
+    <div class="tms-panel" id="panel-carriers">
       <div class="toolbar">
         <h3 style="margin:0;color:var(--gold-dark)" data-i18n="tms.carriers">ผู้ให้บริการขนส่ง (Carriers)</h3>
         <div class="spacer" style="flex:1"></div>
@@ -115,7 +170,7 @@
     <div class="tms-panel" id="panel-trips">
       <div class="toolbar">
         <h3 style="margin:0;color:var(--gold-dark)"><span data-i18n="tms.trips">เที่ยววิ่ง (Trips)</span></h3>
-        <input type="date" id="tripDateFilter" onchange="loadTrips()" style="padding:6px 10px;width:auto">
+        <input type="date" id="tripDateFilter" onchange="loadTrips()" title="กรองตามวันที่จัดส่ง" style="padding:6px 10px;width:auto">
         <select id="tripStatusFilter" onchange="loadTrips()" style="padding:6px 10px;width:auto">
           <option value="">All status</option>
           <option value="planned">planned</option>
@@ -130,7 +185,7 @@
         <table class="dtable">
           <thead><tr>
             <th data-i18n="tms.col.trip_no">เลขที่</th>
-            <th data-i18n="tms.col.date">วันที่</th>
+            <th data-i18n="tms.col.date">วันที่จัดส่ง</th>
             <th data-i18n="tms.col.carrier">Carrier</th>
             <th data-i18n="tms.col.driver">คนขับ</th>
             <th data-i18n="tms.col.plate">ทะเบียนรถ</th>
@@ -191,6 +246,21 @@
   </div>
 </div>
 
+<!-- Confirm-pick modal (warehouse) — capture picker name + issue Shipment -->
+<div class="modal" id="pickModal">
+  <div class="box" style="max-width:420px">
+    <button class="close" onclick="closePickModal()">×</button>
+    <h3 style="color:var(--gold-dark)">ยืนยันจัดของเสร็จ</h3>
+    <p style="font-size:13px;color:var(--muted);margin:-4px 0 12px"><span id="pickModalRef"></span></p>
+    <div class="form-row"><label>ชื่อผู้จัดของ <span style="color:var(--err)">*</span></label><input id="pickerName" placeholder="ชื่อพนักงานที่จัด/แพ็ก" autocomplete="off" onkeydown="if(event.key==='Enter')submitPick()"></div>
+    <p id="pickModalErr" style="color:var(--err);font-size:12px;min-height:18px;margin:6px 0"></p>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button type="button" class="btn ghost" onclick="closePickModal()">ยกเลิก</button>
+      <button type="button" class="btn" id="pickModalConfirm" onclick="submitPick()">ยืนยัน → ออกเลข Shipment</button>
+    </div>
+  </div>
+</div>
+
 <!-- POD view modal (proof of delivery evidence) -->
 <div class="modal" id="podViewModal">
   <div class="box" style="max-width:560px">
@@ -218,7 +288,7 @@
         </div>
       </div>
       <div class="form-grid2">
-        <div class="form-row"><label data-i18n="tms.col.date">วันที่</label><input name="scheduled_date" type="date" required></div>
+        <div class="form-row"><label data-i18n="tms.col.date">วันที่จัดส่ง</label><input name="scheduled_date" type="date" required></div>
         <div class="form-row"><label data-i18n="tms.col.plate">ทะเบียนรถ</label><input name="vehicle_plate"></div>
       </div>
       <div class="form-grid2">
@@ -266,6 +336,22 @@
   </div>
 </div>
 
+<!-- Driver import modal (xlsx/csv) -->
+<div class="modal" id="importModal">
+  <div class="box" style="max-width:540px">
+    <button class="close" onclick="closeImport()">×</button>
+    <h3 style="color:var(--gold-dark)">Import คนขับ <span id="importCarrierName" style="font-size:13px;color:var(--muted);font-weight:400"></span></h3>
+    <p class="hint">อัปโหลด <b>.xlsx</b> หรือ <b>.csv</b> · คอลัมน์ (TH/EN สลับลำดับได้): <b>ชื่อ</b> · <b>เบอร์</b> (หลายเบอร์คั่นด้วย , ) · <b>ทะเบียนรถ</b> · <b>จังหวัด</b> · username (เว้นว่าง = auto)</p>
+    <input type="file" id="importFile" accept=".xlsx,.xls,.csv" style="margin:8px 0">
+    <p id="importErr" style="color:var(--err);font-size:12px;min-height:18px;margin:4px 0"></p>
+    <div id="importResult" style="font-size:13px;max-height:230px;overflow:auto"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px">
+      <button type="button" class="btn ghost" onclick="closeImport()">ปิด</button>
+      <button type="button" class="btn" id="importBtn" onclick="doImport()">Import</button>
+    </div>
+  </div>
+</div>
+
 <!-- Driver modal (add/edit) -->
 <div class="modal" id="driverModal">
   <div class="box">
@@ -273,10 +359,14 @@
     <h3 id="driverModalTitle" data-i18n="tms.add_driver">เพิ่มคนขับ</h3>
     <form id="driverForm" onsubmit="return saveDriver(event)">
       <div class="form-grid2">
-        <div class="form-row"><label>Username</label><input name="username" required pattern="[a-zA-Z0-9_]+"></div>
-        <div class="form-row"><label>เบอร์มือถือ <span style="color:var(--muted);font-weight:400">(ใช้ login)</span></label><input name="phone" type="tel" inputmode="numeric" pattern="[0-9 +\-()]+" placeholder="0812345678" required></div>
+        <div class="form-row"><label>Username <span style="color:var(--muted);font-weight:400">(เว้นว่าง = auto)</span></label><input name="username" pattern="[a-zA-Z0-9_]+"></div>
+        <div class="form-row"><label data-i18n="tms.col.full_name">ชื่อ-นามสกุล</label><input name="full_name" required></div>
       </div>
-      <div class="form-row"><label data-i18n="tms.col.full_name">ชื่อ-นามสกุล</label><input name="full_name" required></div>
+      <div class="form-row">
+        <label>เบอร์มือถือ <span style="color:var(--muted);font-weight:400">(ใช้ login · เพิ่มได้หลายเบอร์ — เบอร์ไหนก็ login ได้)</span></label>
+        <div id="phoneList"></div>
+        <button type="button" class="btn sm ghost" onclick="addPhoneInput()" style="margin-top:2px">+ เพิ่มเบอร์</button>
+      </div>
       <div class="form-grid2">
         <div class="form-row"><label data-i18n="tms.col.plate">ทะเบียนรถ</label><input name="vehicle_plate" placeholder="กข-1234"></div>
         <div class="form-row"><label>จังหวัดทะเบียน</label><input name="vehicle_province" placeholder="เชียงใหม่"></div>
@@ -318,6 +408,8 @@ let selectedCarrier = null;
 function switchTab(tab) {
   document.querySelectorAll('.tms-panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + tab));
   document.querySelectorAll('.tms-sidebar-item').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  if (tab === 'picking') loadPicking();
+  if (tab === 'pickhistory') loadPickHistory();
   if (tab === 'trips') loadTrips();
   if (tab === 'deliveries') loadDeliveries();
 }
@@ -359,12 +451,149 @@ function openPodView(id) {
     `<b>ผู้รับ:</b> ${d.signed_by_name || '-'}<br>` +
     `<b>พิกัด GPS:</b> ${gps}` +
     (d.pod_notes ? `<br><b>หมายเหตุ:</b> ${d.pod_notes}` : '');
+  const podPhotos = (d.photos && d.photos.length) ? d.photos : (d.photo_url ? [d.photo_url] : []);
   document.getElementById('pvImgs').innerHTML =
-    (d.photo_url ? `<div><div style="font-size:12px;color:var(--muted);margin-bottom:4px">รูปสินค้า</div><a href="${d.photo_url}" target="_blank"><img src="${d.photo_url}" style="width:210px;max-width:100%;border-radius:8px;border:1px solid var(--border)"></a></div>` : '') +
-    (d.signature_url ? `<div><div style="font-size:12px;color:var(--muted);margin-bottom:4px">ลายเซ็นผู้รับ</div><img src="${d.signature_url}" style="width:210px;max-width:100%;height:auto;border-radius:8px;border:1px solid var(--border);background:#fafafa"></div>` : '');
+    podPhotos.map((u, i) => `<div><div style="font-size:12px;color:var(--muted);margin-bottom:4px">รูปสินค้า ${i + 1}</div><a href="${u}" target="_blank"><img src="${u}" style="width:160px;max-width:100%;border-radius:8px;border:1px solid var(--border)"></a></div>`).join('') +
+    (d.signature_url ? `<div><div style="font-size:12px;color:var(--muted);margin-bottom:4px">ลายเซ็นผู้รับ</div><img src="${d.signature_url}" style="width:160px;max-width:100%;height:auto;border-radius:8px;border:1px solid var(--border);background:#fafafa"></div>` : '');
   document.getElementById('podViewModal').style.display = 'flex';
 }
 function closePodView() { document.getElementById('podViewModal').style.display = 'none'; }
+
+// ─── Picking (warehouse worklist) ───
+// General-goods orders waiting to be picked. Confirming one issues its Shipment
+// number server-side, which then surfaces in the transport pool (loadPool).
+let pickingCache = [];
+async function loadPicking() {
+  try {
+    pickingCache = await api('/api/tms/warehouse/queue');
+    document.getElementById('sidePickCount').textContent = pickingCache.length;
+    renderPicking();
+  } catch (e) { toast(e.message); }
+}
+function renderPicking() {
+  const el = document.getElementById('pickList');
+  if (!pickingCache.length) { el.innerHTML = `<p class="empty">ไม่มีรายการรอจัด — เคลียร์หมดแล้ว</p>`; return; }
+  el.innerHTML = pickingCache.map(o => {
+    // Headline = the real BC document number (SO for sales, TRO for JC transfers),
+    // since that's what the warehouse cross-references in BC. order_number is the
+    // internal id, kept as secondary text.
+    const bcNo = o.bc_so_no || o.bc_to_no || '';
+    const docType = o.bc_so_no ? 'SO' : (o.bc_to_no ? 'TRO' : '');
+    const headline = bcNo || o.order_number || o.id;
+    const sub = (o.order_number && o.order_number !== headline) ? o.order_number : '';
+    const n = (o.lines || []).length;
+    const lines = (o.lines || []).map(l =>
+      `<tr><td>${l.item_no}</td><td>${l.item_name || ''}</td><td style="text-align:right;white-space:nowrap"><strong>${(+l.quantity).toLocaleString()}</strong> ${l.uom || ''}</td></tr>`
+    ).join('') || `<tr><td colspan="3" class="empty">ไม่มีรายการสินค้า</td></tr>`;
+    return `<div class="pick-row" data-id="${o.id}">
+      <div class="pick-row-head" onclick="togglePickRow(this)">
+        <span class="pick-caret">▶</span>
+        <div class="pick-row-main">
+          <strong>${docType ? `<span class="pick-doctag">${docType}</span> ` : ''}${headline}</strong>
+          ${sub ? `<small style="color:var(--muted)">${sub}</small>` : ''}
+        </div>
+        <div class="pick-row-spacer"></div>
+        <div class="pick-row-meta">
+          <span style="font-weight:700;color:var(--gold-dark)">${o.branch_name || o.branch_code || '-'}</span>
+          <span class="pick-pill">${n} รายการ</span>
+          <small style="color:var(--muted)">${o.created_at || ''}</small>
+          <button class="btn sm pick-confirm-btn" onclick="event.stopPropagation(); openPickModal('${o.id}')">ยืนยันจัดของเสร็จ</button>
+        </div>
+      </div>
+      <div class="pick-row-body" hidden>
+        <table class="dtable pick-lines"><thead><tr><th>รหัส</th><th>สินค้า</th><th style="text-align:right">จำนวน</th></tr></thead><tbody>${lines}</tbody></table>
+      </div>
+    </div>`;
+  }).join('');
+}
+// Expand/collapse a pick row to reveal its line items.
+function togglePickRow(head) {
+  const row = head.closest('.pick-row');
+  const body = row.querySelector('.pick-row-body');
+  if (body.hasAttribute('hidden')) { body.removeAttribute('hidden'); row.classList.add('open'); }
+  else { body.setAttribute('hidden', ''); row.classList.remove('open'); }
+}
+// Confirm-pick modal — captures who physically picked/packed, then issues the
+// Shipment number for that order.
+let pickModalId = null;
+function openPickModal(id) {
+  pickModalId = id;
+  const o = pickingCache.find(x => x.id === id);
+  const ref = o ? (o.bc_so_no || o.bc_to_no || o.order_number || id) : id;
+  document.getElementById('pickModalRef').textContent = ref + (o && o.branch_name ? ' · ' + o.branch_name : '');
+  document.getElementById('pickerName').value = '';
+  document.getElementById('pickModalErr').textContent = '';
+  document.getElementById('pickModal').style.display = 'flex';
+  setTimeout(() => document.getElementById('pickerName').focus(), 50);
+}
+function closePickModal() { document.getElementById('pickModal').style.display = 'none'; pickModalId = null; }
+async function submitPick() {
+  const name = document.getElementById('pickerName').value.trim();
+  const err = document.getElementById('pickModalErr');
+  if (!name) { err.textContent = 'กรุณาระบุชื่อผู้จัดของ'; return; }
+  const btn = document.getElementById('pickModalConfirm');
+  btn.disabled = true; btn.textContent = 'กำลังออกเลข Shipment…';
+  try {
+    const r = await api(`/api/tms/warehouse/orders/${pickModalId}/pick`, { method: 'POST', body: JSON.stringify({ picked_by_name: name }) });
+    closePickModal();
+    toast('จัดของเสร็จ · Shipment ' + (r.shipment_number || '—'));
+    await loadPicking();
+    if (typeof loadPool === 'function') { try { loadPool(); } catch (e) {} }
+  } catch (e) {
+    err.textContent = e.message;
+    btn.disabled = false; btn.textContent = 'ยืนยัน → ออกเลข Shipment';
+  }
+}
+
+// ─── Picking history (read-only) ───
+let pickHistCache = [];
+async function loadPickHistory() {
+  try {
+    pickHistCache = await api('/api/tms/warehouse/history');
+    document.getElementById('sidePickHistCount').textContent = pickHistCache.length;
+    // branch filter options from distinct branches present (keep current selection)
+    const sel = document.getElementById('pickHistBranch');
+    const cur = sel.value, seen = new Map();
+    pickHistCache.forEach(o => { const c = o.branch_code || o.branch_name; if (c && !seen.has(c)) seen.set(c, o.branch_name || o.branch_code); });
+    sel.innerHTML = '<option value="">ทุกสาขา</option>' + [...seen].map(([c, nm]) => `<option value="${c}">${nm}</option>`).join('');
+    sel.value = cur;
+    renderPickHistory();
+  } catch (e) { toast(e.message); }
+}
+function renderPickHistory() {
+  const el = document.getElementById('pickHistList');
+  const bf = document.getElementById('pickHistBranch').value;
+  const list = bf ? pickHistCache.filter(o => (o.branch_code || '') === bf) : pickHistCache;
+  document.getElementById('pickHistCount').textContent = 'จัดเสร็จ ' + list.length + ' รายการ';
+  if (!list.length) { el.innerHTML = `<p class="empty">ยังไม่มีประวัติ${bf ? 'ของสาขานี้' : ''}</p>`; return; }
+  el.innerHTML = list.map(o => {
+    const docType = o.bc_so_no ? 'SO' : (o.bc_to_no ? 'TRO' : '');
+    const headline = o.bc_so_no || o.bc_to_no || o.order_number || o.id;
+    const n = (o.lines || []).length;
+    const lines = (o.lines || []).map(l =>
+      `<tr><td>${l.item_no}</td><td>${l.item_name || ''}</td><td style="text-align:right;white-space:nowrap"><strong>${(+l.quantity).toLocaleString()}</strong> ${l.uom || ''}</td></tr>`
+    ).join('') || `<tr><td colspan="3" class="empty">—</td></tr>`;
+    return `<div class="pick-row" data-id="${o.id}">
+      <div class="pick-row-head" onclick="togglePickRow(this)">
+        <span class="pick-caret">▶</span>
+        <div class="pick-row-main">
+          <strong>${docType ? `<span class="pick-doctag">${docType}</span> ` : ''}${headline}</strong>
+          <small style="color:var(--muted)">${o.shipment_number ? 'Shipment ' + o.shipment_number : (o.order_number || '')}</small>
+        </div>
+        <div class="pick-row-spacer"></div>
+        <div class="pick-row-meta">
+          <span style="font-weight:700;color:var(--gold-dark)">${o.branch_name || o.branch_code || '-'}</span>
+          <span class="pick-pill">${n} รายการ</span>
+          <small style="color:var(--muted)">${o.picked_at || ''}</small>
+        </div>
+      </div>
+      <div class="pick-row-body" hidden>
+        <table class="dtable pick-lines"><thead><tr><th>รหัส</th><th>สินค้า</th><th style="text-align:right">จำนวน</th></tr></thead><tbody>${lines}</tbody></table>
+        <p style="font-size:13px;color:var(--muted);margin:8px 2px 0">ผู้จัด: <strong>${o.picked_by_name || '-'}</strong>${o.shipment_number ? ' · Shipment ' + o.shipment_number : ''} · จัดเมื่อ ${o.picked_at || '-'}</p>
+      </div>
+    </div>`;
+  }).join('');
+}
 
 async function loadCarriers() {
   try {
@@ -409,7 +638,7 @@ function renderCarriers() {
             <span style="color:var(--muted);font-weight:400;font-size:12px;margin-left:6px">· ${c.code} ${c.name}</span>
           </h4>
           <div style="flex:1"></div>
-          ${canMaster ? `<button class="btn sm" id="btnAddDriver" onclick="openDriverModal()" data-i18n="tms.add_driver">+ เพิ่มคนขับ</button>` : ''}
+          ${canMaster ? `<button class="btn sm ghost" onclick="exportDrivers()" style="margin-right:6px" title="ส่งออกเป็น Excel">⬇ Export</button><button class="btn sm ghost" onclick="openImportModal()" style="margin-right:6px" title="นำเข้าจาก Excel/CSV">⬆ Import</button><button class="btn sm" id="btnAddDriver" onclick="openDriverModal()" data-i18n="tms.add_driver">+ เพิ่มคนขับ</button>` : ''}
         </div>
         <div class="card" style="padding:0;overflow-x:auto">
           <table class="dtable" style="font-size:12px">
@@ -469,7 +698,7 @@ function renderDrivers() {
     <tr style="${d.active?'':'opacity:.55'}">
       <td><strong>${d.username}</strong></td>
       <td>${d.full_name}</td>
-      <td>${d.phone || '-'}</td>
+      <td>${d.phones && d.phones.length ? d.phones[0] + (d.phones.length > 1 ? `<br><small style="color:var(--muted)">+${d.phones.length - 1} เบอร์</small>` : '') : (d.phone || '-')}</td>
       <td>${d.vehicle_plate || '-'}${d.vehicle_province ? `<br><small style="color:var(--muted)">${d.vehicle_province}</small>` : ''}</td>
       <td>${d.active ? `<span class="pill-on">${t('tms.active')}</span>` : `<span class="pill-off">${t('tms.inactive')}</span>`}</td>
       <td>
@@ -548,28 +777,50 @@ function openDriverModal(d) {
     form.username.value = d.username;
     form.username.readOnly = true;
     form.full_name.value = d.full_name || '';
-    form.phone.value = d.phone || '';
     form.vehicle_plate.value = d.vehicle_plate || '';
     form.vehicle_province.value = d.vehicle_province || '';
+    setPhoneInputs(d.phones && d.phones.length ? d.phones : (d.phone ? [d.phone] : ['']));
     form.dataset.editId = d.id;
   } else {
     form.username.readOnly = false;
+    setPhoneInputs(['']);
     delete form.dataset.editId;
   }
   document.getElementById('driverModal').style.display = 'flex';
 }
 function closeDriver() { document.getElementById('driverModal').style.display = 'none'; }
 
+// ─── Driver phone inputs (multiple per driver) ───
+function phoneInputHtml(val) {
+  return `<div class="phone-row" style="display:flex;gap:6px;margin-bottom:6px">
+    <input class="phone-input" type="tel" inputmode="numeric" pattern="[0-9 +\\-()]+" placeholder="0812345678" value="${val || ''}" style="flex:1">
+    <button type="button" class="btn sm ghost" onclick="this.closest('.phone-row').remove()" title="ลบเบอร์นี้">×</button>
+  </div>`;
+}
+function addPhoneInput(val) { document.getElementById('phoneList').insertAdjacentHTML('beforeend', phoneInputHtml(val)); }
+function setPhoneInputs(phones) {
+  const el = document.getElementById('phoneList');
+  el.innerHTML = '';
+  (phones && phones.length ? phones : ['']).forEach(p => addPhoneInput(p));
+}
+function getPhoneInputs() { return [...document.querySelectorAll('#phoneList .phone-input')].map(i => i.value.trim()).filter(Boolean); }
+
 async function saveDriver(e) {
   e.preventDefault();
   const form = e.target;
-  const fd = new FormData(form);
-  const body = Object.fromEntries(fd.entries());
+  const phones = getPhoneInputs();
+  if (!phones.length) { document.getElementById('driverErr').textContent = 'ต้องมีเบอร์โทรอย่างน้อย 1 เบอร์'; return false; }
+  const body = {
+    full_name: form.full_name.value.trim(),
+    vehicle_plate: form.vehicle_plate.value.trim(),
+    vehicle_province: form.vehicle_province.value.trim(),
+    phones,
+  };
   try {
     if (form.dataset.editId) {
-      delete body.username;
       await api('/api/tms/drivers/' + form.dataset.editId, { method:'PUT', body: JSON.stringify(body) });
     } else {
+      body.username = form.username.value.trim(); // optional — server auto-generates if blank
       await api(`/api/tms/carriers/${selectedCarrier.id}/drivers`, { method:'POST', body: JSON.stringify(body) });
     }
     toast('OK');
@@ -580,6 +831,62 @@ async function saveDriver(e) {
     document.getElementById('driverErr').textContent = err.message;
   }
   return false;
+}
+
+// ─── Driver import (xlsx/csv) ───
+function openImportModal() {
+  if (!selectedCarrier) { toast(t('tms.select_carrier_first')); return; }
+  document.getElementById('importCarrierName').textContent = '· ' + selectedCarrier.code + ' ' + selectedCarrier.name;
+  document.getElementById('importFile').value = '';
+  document.getElementById('importErr').textContent = '';
+  document.getElementById('importResult').innerHTML = '';
+  document.getElementById('importModal').style.display = 'flex';
+}
+function closeImport() { document.getElementById('importModal').style.display = 'none'; }
+async function doImport() {
+  const fileEl = document.getElementById('importFile');
+  const err = document.getElementById('importErr');
+  if (!fileEl.files.length) { err.textContent = 'เลือกไฟล์ .xlsx/.csv ก่อน'; return; }
+  const btn = document.getElementById('importBtn');
+  btn.disabled = true; btn.textContent = 'กำลัง import…'; err.textContent = '';
+  try {
+    const fd = new FormData();
+    fd.append('file', fileEl.files[0]);
+    // multipart — call fetch directly (api() forces JSON content-type); let the
+    // browser set the multipart boundary itself, only attach the auth token.
+    const r = await fetch(`/api/tms/carriers/${selectedCarrier.id}/drivers/import`, {
+      method: 'POST', headers: { Authorization: 'Bearer ' + getToken() }, body: fd,
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'import ไม่สำเร็จ');
+    document.getElementById('importResult').innerHTML =
+      `<div style="color:var(--gold-dark);font-weight:600">นำเข้าสำเร็จ ${data.imported}/${data.total} รายการ</div>` +
+      (data.errors && data.errors.length
+        ? `<div style="margin-top:6px;color:var(--err)">ผิดพลาด ${data.errors.length} แถว:</div><ul style="margin:4px 0 0;padding-left:18px">${data.errors.map(x => `<li>แถว ${x.row} (${x.name}): ${x.reason}</li>`).join('')}</ul>`
+        : '<div style="color:var(--muted);margin-top:4px">ไม่มีแถวผิดพลาด</div>');
+    loadDrivers();
+    loadCarriers();
+  } catch (e) {
+    err.textContent = e.message;
+  } finally {
+    btn.disabled = false; btn.textContent = 'Import';
+  }
+}
+async function exportDrivers() {
+  if (!selectedCarrier) { toast(t('tms.select_carrier_first')); return; }
+  try {
+    // Auth'd download → fetch as blob (can't use a plain <a href>, the endpoint
+    // needs the Bearer token), then trigger a save via an object URL.
+    const r = await fetch(`/api/tms/carriers/${selectedCarrier.id}/drivers/export`, { headers: { Authorization: 'Bearer ' + getToken() } });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || 'export ไม่สำเร็จ'); }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `drivers-${selectedCarrier.code || selectedCarrier.id}.xlsx`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    toast('ส่งออกแล้ว');
+  } catch (e) { toast(e.message); }
 }
 
 async function deleteDriver(id, username) {
@@ -804,6 +1111,8 @@ async function cancelTrip(id, tripNo) {
   } catch (e) { toast(e.message); }
 }
 
+loadPicking();
+loadPickHistory();
 loadCarriers();
 loadTrips();
 loadDeliveries();

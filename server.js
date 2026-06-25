@@ -3,6 +3,7 @@ const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
 const multer = require('multer');
+const xlsx = require('xlsx');
 const db = require('./db');
 const bcrypt = require('bcryptjs');
 const { login, requireAuth, requireAdmin, requireSuperAdmin, requireTmsManager, requireSupplier, canManageBranch, isHqAdmin, isSuperAdmin, isTmsManager, HQ_ROLES, PORTAL_ROLES, NON_BRANCH_ROLES, BRANCH_ROLES, driverLogin, requireDriver, normalizePhone } = require('./auth');
@@ -703,8 +704,8 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
     }
     // TMS shipment row — only if BC TO succeeded.
     if (bcToResult && bcToResult.bc_to_no) {
-      try { createShipmentForOrder(orderId); }
-      catch (e) { console.error('[checkout → shipment]', e.message); }
+      try { routeOrderFulfilment(orderId); }
+      catch (e) { console.error('[checkout → fulfilment]', e.message); }
     }
   } else if (orderType === 'jc_purchase') {
     if (defaultVendor) {
@@ -718,8 +719,8 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
     }
     // TMS shipment row — only if BC PO succeeded.
     if (bcPoResult && bcPoResult.bc_po_no) {
-      try { createShipmentForOrder(orderId); }
-      catch (e) { console.error('[checkout → shipment]', e.message); }
+      try { routeOrderFulfilment(orderId); }
+      catch (e) { console.error('[checkout → fulfilment]', e.message); }
     }
   } else if (orderType === 'fc_purchase' && paymentMethod === 'credit_7d') {
     // FC fruit = credit (billed on the Tuesday cycle, no upfront slip). Auto-create
@@ -743,8 +744,8 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
     }
     // TMS shipment row — only if BC SO succeeded.
     if (bcSoResult && bcSoResult.bc_so_no) {
-      try { createShipmentForOrder(orderId); }
-      catch (e) { console.error('[checkout → shipment]', e.message); }
+      try { routeOrderFulfilment(orderId); }
+      catch (e) { console.error('[checkout → fulfilment]', e.message); }
     }
   }
 
@@ -986,21 +987,41 @@ function genShipmentNumber() {
   return prefix + String(seq).padStart(4, '0');
 }
 
-function createShipmentForOrder(orderId, opts = {}) {
-  const existing = db.prepare('SELECT * FROM shipments WHERE order_id=?').get(orderId);
-  if (existing) return { already: true, shipment: existing };
-  const order = db.prepare('SELECT branch_code, po_vendor_no FROM orders WHERE id=?').get(orderId);
-  if (!order) throw new Error('Order not found: ' + orderId);
-  // Delivery channel: fresh goods (ของสด) are drop-shipped by the supplier and
-  // never enter a TMS trip (channel='supplier'); everything else moves through
-  // CTI's TMS (channel='cti'). Orders are single-category (enforced at checkout),
-  // so a single fruit line means the whole order is supplier-fulfilled.
+// Delivery channel for an order: fresh goods (ของสด) are drop-shipped by the
+// supplier and never enter a TMS trip ('supplier'); everything else moves
+// through CTI's TMS ('cti'). Orders are single-category (enforced at checkout),
+// so a single fruit line means the whole order is supplier-fulfilled.
+function orderChannel(orderId) {
   const lines = db.prepare(`
     SELECT ol.item_no, ic.category
     FROM order_lines ol LEFT JOIN items_cache ic ON ic.item_no = ol.item_no
     WHERE ol.order_id = ?`).all(orderId);
   const isFruit = lines.some(l => categoryGroupSrv(l.category || '', l.item_no) === 'fruit');
-  const channel = opts.channel || (isFruit ? 'supplier' : 'cti');
+  return isFruit ? 'supplier' : 'cti';
+}
+
+// Route an order to its fulfilment lane once its BC docs exist:
+//   supplier (fresh) → shipment created immediately (drop-ship, no warehouse step)
+//   cti (general)    → parked in the warehouse pick queue (pick_status='to_pick');
+//                      the Shipment number is issued only when the warehouse marks
+//                      it picked (POST /api/tms/warehouse/orders/:id/pick).
+// Idempotent: a shipment that already exists, or an order already past 'to_pick',
+// is left untouched so retries / repeated verify calls never regress state.
+function routeOrderFulfilment(orderId, opts = {}) {
+  const channel = opts.channel || orderChannel(orderId);
+  if (channel === 'supplier') return createShipmentForOrder(orderId, { ...opts, channel });
+  const existing = db.prepare('SELECT id FROM shipments WHERE order_id=?').get(orderId);
+  if (existing) return { already: true };
+  db.prepare("UPDATE orders SET pick_status='to_pick' WHERE id=? AND COALESCE(pick_status,'')=''").run(orderId);
+  return { queued: true };
+}
+
+function createShipmentForOrder(orderId, opts = {}) {
+  const existing = db.prepare('SELECT * FROM shipments WHERE order_id=?').get(orderId);
+  if (existing) return { already: true, shipment: existing };
+  const order = db.prepare('SELECT branch_code, po_vendor_no FROM orders WHERE id=?').get(orderId);
+  if (!order) throw new Error('Order not found: ' + orderId);
+  const channel = opts.channel || orderChannel(orderId);
   const origin = opts.origin || (channel === 'supplier' ? (order.po_vendor_no || 'SUPPLIER') : 'CTI');
   const shipmentNumber = genShipmentNumber();
   const r = db.prepare(`INSERT INTO shipments
@@ -1084,21 +1105,24 @@ app.post('/api/orders/:id/verify', requireAuth, requireAdmin, async (req, res) =
       }
     }
 
-    // TMS shipment row — only if BC SO succeeded (BC SO is the source-of-truth
-    // for the goods that need to move). PO failure does not block shipment
-    // creation: PO is procurement-side, shipment is delivery-side.
+    // Fulfilment routing — only if BC SO succeeded (BC SO is the source-of-truth
+    // for the goods that need to move). General goods are parked in the warehouse
+    // pick queue (Shipment issued on pick); fresh goods get a shipment now. PO
+    // failure does not block this: PO is procurement-side, fulfilment is delivery-side.
     let shipmentResult = null;
     if (bcResult && bcResult.bc_so_no) {
       try {
-        shipmentResult = createShipmentForOrder(order.id);
+        shipmentResult = routeOrderFulfilment(order.id);
       } catch (e) {
-        console.error('[verify approve → shipment]', e.message);
+        console.error('[verify approve → fulfilment]', e.message);
       }
     }
 
     const soMsg = bcResult && bcResult.bc_so_no ? ` · BC SO ${bcResult.bc_so_no}` : (bcResult && bcResult.error ? ' · BC SO ค้าง (retry ได้)' : '');
     const poMsg = bcPoResult && bcPoResult.bc_po_no ? ` · BC PO ${bcPoResult.bc_po_no}` : (bcPoResult && bcPoResult.error ? ' · BC PO ค้าง (retry ได้)' : '');
-    const shpMsg = shipmentResult && shipmentResult.shipment ? ` · Shipment ${shipmentResult.shipment.shipment_number}` : '';
+    const shpMsg = shipmentResult && shipmentResult.shipment
+      ? ` · Shipment ${shipmentResult.shipment.shipment_number}`
+      : (shipmentResult && shipmentResult.queued ? ' · เข้าคิวจัดของที่คลัง' : '');
     res.json({
       ok: true,
       receipt_number: rcptNo,
@@ -3280,66 +3304,165 @@ app.delete('/api/tms/carriers/:id', requireAuth, requireSuperAdmin, (req, res) =
 
 // ─── Carrier drivers ───
 // List drivers of a carrier (admin only).
+// ─── Driver creation helpers (shared by single-add + bulk import) ───
+// Login is phone-based, so username is just an identifier; auto-generate a unique
+// one when none is supplied. Kept disjoint from drivers AND regular users.
+function genDriverUsername(seedPhone) {
+  const base = ('drv' + String(seedPhone || '').replace(/[^0-9]/g, '').slice(-8)) || 'drv';
+  let u = base, i = 1;
+  while (db.prepare('SELECT 1 FROM carrier_drivers WHERE username=?').get(u) ||
+         db.prepare('SELECT 1 FROM users WHERE username=?').get(u)) u = base + (i++);
+  return u;
+}
+
+// Create one driver with one-or-more phones. Throws { status, error } on any
+// validation failure so callers map it to an HTTP response (single add) or a
+// per-row error (import). Phone uniqueness is enforced across ALL drivers.
+function createDriverRow({ carrierId, username, full_name, phones, vehicle_plate = '', vehicle_province = '' }) {
+  full_name = String(full_name || '').trim();
+  const norm = [...new Set((phones || []).map(normalizePhone).filter(Boolean))];
+  if (!full_name) throw { status: 400, error: 'ต้องมีชื่อ-นามสกุล' };
+  if (!norm.length) throw { status: 400, error: 'ต้องมีเบอร์โทรอย่างน้อย 1 เบอร์' };
+  let uname = String(username || '').trim() || genDriverUsername(norm[0]);
+  if (db.prepare('SELECT 1 FROM carrier_drivers WHERE username=?').get(uname) ||
+      db.prepare('SELECT 1 FROM users WHERE username=?').get(uname)) throw { status: 400, error: `username ซ้ำ: ${uname}` };
+  for (const p of norm) {
+    if (db.prepare('SELECT 1 FROM carrier_driver_phones WHERE phone=?').get(p)) throw { status: 400, error: `เบอร์ ${p} มีคนขับใช้แล้ว` };
+  }
+  const dummy = bcrypt.hashSync(crypto.randomUUID(), 10);
+  let id;
+  db.transaction(() => {
+    const r = db.prepare(`INSERT INTO carrier_drivers (carrier_id, username, password, full_name, phone, vehicle_plate, vehicle_province)
+      VALUES (?,?,?,?,?,?,?)`).run(carrierId, uname, dummy, full_name, norm[0], vehicle_plate, vehicle_province);
+    id = r.lastInsertRowid;
+    const ins = db.prepare('INSERT INTO carrier_driver_phones (driver_id, phone) VALUES (?,?)');
+    for (const p of norm) ins.run(id, p);
+  })();
+  return { id, username: uname, phones: norm };
+}
+
 app.get('/api/tms/carriers/:id/drivers', requireAuth, requireTmsManager, (req, res) => {
   const rows = db.prepare('SELECT id, carrier_id, username, full_name, phone, vehicle_plate, vehicle_province, active, created_at FROM carrier_drivers WHERE carrier_id=? ORDER BY username').all(req.params.id);
-  for (const d of rows) d.active = !!d.active;
+  const phStmt = db.prepare('SELECT phone FROM carrier_driver_phones WHERE driver_id=? ORDER BY id');
+  for (const d of rows) {
+    d.active = !!d.active;
+    d.phones = phStmt.all(d.id).map(p => p.phone);
+    if (!d.phones.length && d.phone) d.phones = [d.phone]; // defensive (pre-backfill row)
+  }
   res.json(rows);
 });
 
 app.post('/api/tms/carriers/:id/drivers', requireAuth, requireTmsManager, (req, res) => {
   const carrierId = req.params.id;
-  const { username, full_name, phone = '', vehicle_plate = '', vehicle_province = '' } = req.body || {};
-  if (!username || !full_name) return res.status(400).json({ error: 'username/full_name required' });
-  const normalizedPhone = normalizePhone(phone);
-  if (!normalizedPhone) return res.status(400).json({ error: 'phone required (เบอร์มือถือ ใช้ login)' });
-  if (!db.prepare('SELECT 1 FROM carriers WHERE id=?').get(carrierId)) {
-    return res.status(404).json({ error: 'Carrier not found' });
+  if (!db.prepare('SELECT 1 FROM carriers WHERE id=?').get(carrierId)) return res.status(404).json({ error: 'Carrier not found' });
+  const b = req.body || {};
+  // Accept `phones` (array) or a single `phone` (back-compat). username optional.
+  const phones = Array.isArray(b.phones) ? b.phones : (b.phone != null ? [b.phone] : []);
+  try {
+    const out = createDriverRow({ carrierId, username: b.username, full_name: b.full_name, phones, vehicle_plate: b.vehicle_plate, vehicle_province: b.vehicle_province });
+    res.json({ ok: true, id: out.id, username: out.username, phones: out.phones });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.error || e.message || 'create failed' });
   }
-  if (db.prepare('SELECT 1 FROM carrier_drivers WHERE username=?').get(username)) {
-    return res.status(400).json({ error: 'Driver username already exists' });
-  }
-  // Driver usernames must NOT collide with regular users — login surfaces
-  // are separate, but username doubles as a display identifier in admin UI
-  // and we keep them disjoint to avoid future ambiguity.
-  if (db.prepare('SELECT 1 FROM users WHERE username=?').get(username)) {
-    return res.status(400).json({ error: 'Username already used by a regular user' });
-  }
-  if (db.prepare("SELECT 1 FROM carrier_drivers WHERE phone=? AND phone<>''").get(normalizedPhone)) {
-    return res.status(400).json({ error: 'เบอร์โทรนี้มี driver ใช้แล้ว' });
-  }
-  // password column is NOT NULL in schema but no longer used by the login
-  // flow. Stuff in random bytes so the column stays satisfied and is
-  // useless to attackers.
-  const dummy = bcrypt.hashSync(crypto.randomUUID(), 10);
-  const r = db.prepare(`INSERT INTO carrier_drivers (carrier_id, username, password, full_name, phone, vehicle_plate, vehicle_province)
-    VALUES (?,?,?,?,?,?,?)`).run(carrierId, username, dummy, full_name, normalizedPhone, vehicle_plate, vehicle_province);
-  res.json({ ok: true, id: r.lastInsertRowid });
 });
 
 app.put('/api/tms/drivers/:id', requireAuth, requireTmsManager, (req, res) => {
-  const d = db.prepare('SELECT * FROM carrier_drivers WHERE id=?').get(req.params.id);
+  const id = req.params.id;
+  const d = db.prepare('SELECT * FROM carrier_drivers WHERE id=?').get(id);
   if (!d) return res.status(404).json({ error: 'Driver not found' });
-  const fields = ['full_name', 'phone', 'vehicle_plate', 'vehicle_province', 'active'];
-  const sets = [], vals = [];
-  for (const f of fields) {
-    if (f in (req.body || {})) {
-      let v = req.body[f];
-      if (f === 'active') v = v ? 1 : 0;
-      else if (f === 'phone') {
-        v = normalizePhone(v);
-        if (!v) return res.status(400).json({ error: 'phone required' });
-        // Block duplicates against any OTHER driver.
-        const dup = db.prepare("SELECT id FROM carrier_drivers WHERE phone=? AND phone<>'' AND id<>?").get(v, req.params.id);
-        if (dup) return res.status(400).json({ error: 'เบอร์โทรนี้มี driver ใช้แล้ว' });
-      }
-      sets.push(`${f}=?`); vals.push(v);
+  const b = req.body || {};
+  // Phone set (carrier_driver_phones) is replaced wholesale when `phones` (array)
+  // or a single `phone` is supplied; phones[0] mirrors to carrier_drivers.phone.
+  let phones = null;
+  if (Array.isArray(b.phones)) phones = b.phones;
+  else if ('phone' in b) phones = [b.phone];
+  if (phones) {
+    const norm = [...new Set(phones.map(normalizePhone).filter(Boolean))];
+    if (!norm.length) return res.status(400).json({ error: 'ต้องมีเบอร์โทรอย่างน้อย 1 เบอร์' });
+    for (const p of norm) {
+      const dup = db.prepare('SELECT driver_id FROM carrier_driver_phones WHERE phone=? AND driver_id<>?').get(p, id);
+      if (dup) return res.status(400).json({ error: `เบอร์ ${p} มีคนขับอื่นใช้แล้ว` });
     }
+    try {
+      db.transaction(() => {
+        db.prepare('DELETE FROM carrier_driver_phones WHERE driver_id=?').run(id);
+        const ins = db.prepare('INSERT INTO carrier_driver_phones (driver_id, phone) VALUES (?,?)');
+        for (const p of norm) ins.run(id, p);
+        db.prepare('UPDATE carrier_drivers SET phone=? WHERE id=?').run(norm[0], id);
+      })();
+    } catch (e) { return res.status(400).json({ error: 'อัปเดตเบอร์ไม่สำเร็จ: ' + e.message }); }
   }
-  if (sets.length) {
-    vals.push(req.params.id);
-    db.prepare(`UPDATE carrier_drivers SET ${sets.join(', ')} WHERE id=?`).run(...vals);
+  // Other editable fields.
+  const sets = [], vals = [];
+  for (const f of ['full_name', 'vehicle_plate', 'vehicle_province', 'active']) {
+    if (f in b) { let v = b[f]; if (f === 'active') v = v ? 1 : 0; sets.push(`${f}=?`); vals.push(v); }
   }
+  if (sets.length) { vals.push(id); db.prepare(`UPDATE carrier_drivers SET ${sets.join(', ')} WHERE id=?`).run(...vals); }
   res.json({ ok: true });
+});
+
+// Bulk-import drivers into a carrier from an uploaded .xlsx/.csv. Columns (TH/EN,
+// any order): ชื่อ/full_name · เบอร์/phone (multiple ok — comma / ; / newline) ·
+// ทะเบียน/plate · จังหวัด/province · username (optional, auto when blank). Each
+// row is validated independently: good rows import, bad rows are reported back.
+const driverImportUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+app.post('/api/tms/carriers/:id/drivers/import', requireAuth, requireTmsManager, driverImportUpload.single('file'), (req, res) => {
+  const carrierId = req.params.id;
+  if (!db.prepare('SELECT 1 FROM carriers WHERE id=?').get(carrierId)) return res.status(404).json({ error: 'Carrier not found' });
+  if (!req.file) return res.status(400).json({ error: 'ไม่พบไฟล์ (field name = file)' });
+  let rows;
+  try {
+    const wb = xlsx.read(req.file.buffer, { type: 'buffer' });
+    rows = xlsx.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
+  } catch (e) { return res.status(400).json({ error: 'อ่านไฟล์ไม่ได้: ' + e.message }); }
+  const pick = (row, keys) => { for (const k of Object.keys(row)) { if (keys.includes(k.toLowerCase().trim())) return String(row[k]).trim(); } return ''; };
+  const NAME = ['ชื่อ', 'ชื่อ-นามสกุล', 'ชื่อคนขับ', 'full_name', 'fullname', 'name'];
+  const PHONE = ['เบอร์', 'เบอร์โทร', 'เบอร์มือถือ', 'โทร', 'phone', 'phones', 'mobile', 'tel'];
+  const PLATE = ['ทะเบียน', 'ทะเบียนรถ', 'plate', 'vehicle_plate'];
+  const PROV = ['จังหวัด', 'จังหวัดทะเบียน', 'province', 'vehicle_province'];
+  const USER = ['username', 'user', 'ชื่อผู้ใช้'];
+  const result = { imported: 0, total: 0, errors: [] };
+  rows.forEach((row, i) => {
+    const full_name = pick(row, NAME);
+    const phoneCell = pick(row, PHONE);
+    if (!full_name && !phoneCell) return; // skip blank line
+    result.total++;
+    const phones = phoneCell.split(/[,;/\n]+/).map(s => s.trim()).filter(Boolean);
+    try {
+      createDriverRow({ carrierId, username: pick(row, USER), full_name, phones, vehicle_plate: pick(row, PLATE), vehicle_province: pick(row, PROV) });
+      result.imported++;
+    } catch (e) {
+      result.errors.push({ row: i + 2, name: full_name || '(ไม่มีชื่อ)', reason: e.error || e.message || String(e) });
+    }
+  });
+  res.json(result);
+});
+
+// Export a carrier's drivers to .xlsx — same columns as the importer so the
+// file round-trips (ชื่อ · เบอร์ joined by comma · ทะเบียนรถ · จังหวัด · username),
+// plus a read-only สถานะ column.
+app.get('/api/tms/carriers/:id/drivers/export', requireAuth, requireTmsManager, (req, res) => {
+  const carrier = db.prepare('SELECT id, code, name FROM carriers WHERE id=?').get(req.params.id);
+  if (!carrier) return res.status(404).json({ error: 'Carrier not found' });
+  const drivers = db.prepare('SELECT id, username, full_name, vehicle_plate, vehicle_province, active FROM carrier_drivers WHERE carrier_id=? ORDER BY username').all(carrier.id);
+  const phStmt = db.prepare('SELECT phone FROM carrier_driver_phones WHERE driver_id=? ORDER BY id');
+  const rows = drivers.map(d => ({
+    'ชื่อ': d.full_name || '',
+    'เบอร์': phStmt.all(d.id).map(p => p.phone).join(', '),
+    'ทะเบียนรถ': d.vehicle_plate || '',
+    'จังหวัด': d.vehicle_province || '',
+    'username': d.username || '',
+    'สถานะ': d.active ? 'ใช้งาน' : 'ปิด',
+  }));
+  // Keep headers even when empty so the file is a usable import template too.
+  const ws = xlsx.utils.json_to_sheet(rows, { header: ['ชื่อ', 'เบอร์', 'ทะเบียนรถ', 'จังหวัด', 'username', 'สถานะ'] });
+  const wb = xlsx.utils.book_new();
+  xlsx.utils.book_append_sheet(wb, ws, 'drivers');
+  const buf = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  const safe = String(carrier.code || carrier.id).replace(/[^a-zA-Z0-9_-]/g, '');
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="drivers-${safe || 'carrier'}.xlsx"`);
+  res.send(buf);
 });
 
 // password reset endpoint — kept as a no-op for back-compat with any old
@@ -3671,8 +3794,9 @@ app.get('/api/tms/trips/:id/manifest', requireAuth, requireTmsManager, async (re
   `).all(req.params.id);
   // Lines per stop (a single batched query keeps round-trips low).
   const lineStmt = db.prepare(`
-    SELECT item_no, item_name, quantity, unit_price, line_total
-    FROM order_lines WHERE order_id = ? ORDER BY id
+    SELECT ol.item_no, ol.item_name, ol.quantity, ol.unit_price, ol.line_total, ic.uom
+    FROM order_lines ol LEFT JOIN items_cache ic ON ic.item_no = ol.item_no
+    WHERE ol.order_id = ? ORDER BY ol.id
   `);
   for (const s of stops) {
     s.lines = s.order_id ? lineStmt.all(s.order_id) : [];
@@ -3697,7 +3821,7 @@ app.get('/api/tms/deliveries', requireAuth, requireTmsManager, (req, res) => {
            b.name as branch_name,
            t.trip_number, t.vehicle_plate, c.name as carrier_name,
            d.full_name as driver_name, d.phone as driver_phone,
-           p.photo_url, p.signature_url, p.signed_by_name, p.notes as pod_notes,
+           p.id as pod_id, p.photo_url, p.signature_url, p.signed_by_name, p.notes as pod_notes,
            p.driver_lat, p.driver_lng, p.received_at
     FROM shipments s
     LEFT JOIN orders o ON o.id = s.order_id
@@ -3709,7 +3833,92 @@ app.get('/api/tms/deliveries', requireAuth, requireTmsManager, (req, res) => {
     WHERE s.status = 'delivered' AND s.channel = 'cti'
     ORDER BY s.delivered_at DESC LIMIT 500
   `).all();
+  // Attach the full POD photo set (up to 5) to each delivery row.
+  const photoStmt = db.prepare('SELECT photo_url FROM pod_photos WHERE pod_id=? ORDER BY id');
+  for (const r of rows) {
+    r.photos = r.pod_id ? photoStmt.all(r.pod_id).map(p => p.photo_url) : [];
+    if (!r.photos.length && r.photo_url) r.photos = [r.photo_url]; // legacy fallback
+  }
   res.json(rows);
+});
+
+// ─── Warehouse picking (TMS, general goods only) ───
+// The warehouse worklist: general-goods (channel='cti') orders whose BC SO/TO is
+// done and that are waiting to be picked & packed (pick_status='to_pick'). This
+// is the stage BEFORE the transport desk's trip pool — picking must finish first.
+// Gated by requireTmsManager (CTI portal role + HQ admins).
+app.get('/api/tms/warehouse/queue', requireAuth, requireTmsManager, (req, res) => {
+  const orders = db.prepare(`
+    SELECT o.id, o.order_number, o.branch_code, o.bc_so_no, o.bc_to_no, o.created_at,
+           b.name as branch_name
+    FROM orders o
+    LEFT JOIN branches b ON b.code = o.branch_code
+    WHERE o.pick_status = 'to_pick'
+    ORDER BY o.created_at ASC
+  `).all();
+  const lineStmt = db.prepare(`
+    SELECT ol.item_no, ol.item_name, ol.quantity, ic.uom
+    FROM order_lines ol
+    LEFT JOIN items_cache ic ON ic.item_no = ol.item_no
+    WHERE ol.order_id = ?
+    ORDER BY ol.item_no
+  `);
+  res.json(orders.map(o => ({ ...o, lines: lineStmt.all(o.id) })));
+});
+
+// Warehouse confirms an order is picked & packed → issue its Shipment number,
+// which drops it into the CTI transport pool (/api/tms/shipments/unassigned).
+// Idempotent: a repeat call on an already-picked order returns its shipment.
+app.post('/api/tms/warehouse/orders/:id/pick', requireAuth, requireTmsManager, (req, res) => {
+  const order = db.prepare('SELECT id, pick_status FROM orders WHERE id=?').get(req.params.id);
+  if (!order) return res.status(404).json({ error: 'ไม่พบคำสั่งซื้อ' });
+  if (order.pick_status === 'picked') {
+    const ship = db.prepare('SELECT shipment_number FROM shipments WHERE order_id=?').get(order.id);
+    return res.json({ ok: true, already: true, shipment_number: ship ? ship.shipment_number : null });
+  }
+  if (order.pick_status !== 'to_pick') {
+    return res.status(400).json({ error: `คำสั่งซื้อนี้ไม่ได้อยู่ในคิวจัดของ (pick_status: ${order.pick_status || 'none'})` });
+  }
+  const pickedByName = String(req.body.picked_by_name || '').trim().slice(0, 120);
+  if (!pickedByName) return res.status(400).json({ error: 'กรุณาระบุชื่อผู้จัดของ' });
+  const pickedBy = req.user.username || req.user.full_name || String(req.user.id);
+  let shipment;
+  try {
+    db.transaction(() => {
+      db.prepare("UPDATE orders SET pick_status='picked', picked_at=datetime('now','localtime'), picked_by=?, picked_by_name=? WHERE id=?")
+        .run(pickedBy, pickedByName, order.id);
+      shipment = (createShipmentForOrder(order.id) || {}).shipment;
+    })();
+  } catch (e) {
+    console.error('[warehouse pick]', e.message);
+    return res.status(500).json({ error: 'จัดของไม่สำเร็จ: ' + e.message });
+  }
+  res.json({ ok: true, shipment_number: shipment ? shipment.shipment_number : null });
+});
+
+// Picking history — orders already picked (pick_status='picked'), with who picked
+// them + the Shipment that was issued. Read-only (no re-confirm). The frontend
+// filters by branch client-side off this list.
+app.get('/api/tms/warehouse/history', requireAuth, requireTmsManager, (req, res) => {
+  const orders = db.prepare(`
+    SELECT o.id, o.order_number, o.branch_code, o.bc_so_no, o.bc_to_no,
+           o.picked_at, o.picked_by, o.picked_by_name,
+           b.name as branch_name, s.shipment_number, s.status as shipment_status
+    FROM orders o
+    LEFT JOIN branches b ON b.code = o.branch_code
+    LEFT JOIN shipments s ON s.order_id = o.id
+    WHERE o.pick_status = 'picked'
+    ORDER BY o.picked_at DESC
+    LIMIT 500
+  `).all();
+  const lineStmt = db.prepare(`
+    SELECT ol.item_no, ol.item_name, ol.quantity, ic.uom
+    FROM order_lines ol
+    LEFT JOIN items_cache ic ON ic.item_no = ol.item_no
+    WHERE ol.order_id = ?
+    ORDER BY ol.item_no
+  `);
+  res.json(orders.map(o => ({ ...o, lines: lineStmt.all(o.id) })));
 });
 
 // ─── Driver PWA (Phase 1.4a — login + trip view) ───
@@ -3889,7 +4098,7 @@ const podUpload = multer({
   fileFilter: (req, file, cb) => cb(null, /image\/(jpeg|png|webp|heic|heif)/i.test(file.mimetype)),
 });
 
-app.post('/api/tms/driver/shipments/:id/pod', requireDriver, podUpload.single('photo'), (req, res) => {
+app.post('/api/tms/driver/shipments/:id/pod', requireDriver, podUpload.fields([{ name: 'photos', maxCount: 5 }, { name: 'photo', maxCount: 1 }]), (req, res) => {
   const shipment = db.prepare(`
     SELECT s.*, t.driver_id, t.status as trip_status
     FROM shipments s
@@ -3902,7 +4111,11 @@ app.post('/api/tms/driver/shipments/:id/pod', requireDriver, podUpload.single('p
   if (shipment.trip_status !== 'dispatched') return res.status(400).json({ error: 'Trip ยังไม่ออกรถ — กด "ออกรถ" ก่อน' });
 
   const { signature, signed_by_name = '', lat, lng, notes = '' } = req.body || {};
-  const photoUrl = req.file ? `/uploads/pod/${req.file.filename}` : '';
+  // Up to 5 POD photos. Accept the new `photos` field (multi) + legacy `photo`
+  // (single) so a driver app still on the old build keeps working.
+  const files = [...((req.files && req.files.photos) || []), ...((req.files && req.files.photo) || [])].slice(0, 5);
+  const photoUrls = files.map(f => `/uploads/pod/${f.filename}`);
+  const photoUrl = photoUrls[0] || ''; // first photo mirrors to pods.photo_url
   let signatureUrl = '';
   // signature is a data URL (image/png;base64,...). Convert to a file so
   // the UI can render <img src> on revisit and so we don't bloat the row.
@@ -3924,8 +4137,10 @@ app.post('/api/tms/driver/shipments/:id/pod', requireDriver, podUpload.single('p
   const driverLng = lng !== undefined && lng !== '' ? Number(lng) : null;
 
   db.transaction(() => {
-    db.prepare(`INSERT INTO pods (shipment_id, photo_url, signature_url, signed_by_name, driver_lat, driver_lng, notes)
+    const podRes = db.prepare(`INSERT INTO pods (shipment_id, photo_url, signature_url, signed_by_name, driver_lat, driver_lng, notes)
       VALUES (?,?,?,?,?,?,?)`).run(req.params.id, photoUrl, signatureUrl, signed_by_name, driverLat, driverLng, notes);
+    const insPhoto = db.prepare('INSERT INTO pod_photos (pod_id, photo_url) VALUES (?,?)');
+    for (const u of photoUrls) insPhoto.run(podRes.lastInsertRowid, u);
     db.prepare("UPDATE shipments SET status='delivered', delivered_at=datetime('now','localtime') WHERE id=?").run(req.params.id);
     // Auto-complete the trip when every stop is delivered. cancelled /
     // failed stops don't block completion — those are terminal-but-not-
@@ -3935,7 +4150,7 @@ app.post('/api/tms/driver/shipments/:id/pod', requireDriver, podUpload.single('p
       db.prepare("UPDATE trips SET status='completed', completed_at=datetime('now','localtime') WHERE id=?").run(shipment.trip_id);
     }
   })();
-  res.json({ ok: true, photo_url: photoUrl, signature_url: signatureUrl });
+  res.json({ ok: true, photo_urls: photoUrls, signature_url: signatureUrl });
 });
 
 // ─── BC connection test ───
