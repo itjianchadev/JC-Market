@@ -119,7 +119,10 @@ body{padding-bottom:env(safe-area-inset-bottom)}
 .pod-section label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;font-weight:600}
 .pod-camera-btn{display:flex;align-items:center;justify-content:center;gap:6px;padding:14px;background:#fafafa;border:2px dashed var(--border);border-radius:10px;cursor:pointer;color:var(--gold-dark);font-weight:600}
 .pod-camera-btn input{display:none}
-#podPhotoPreview img{display:block;margin-top:8px}
+.pod-thumbs{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.pod-thumb{position:relative;width:78px;height:78px}
+.pod-thumb img{width:78px;height:78px;object-fit:cover;border-radius:8px;border:1px solid var(--border)}
+.pod-thumb-x{position:absolute;top:-7px;right:-7px;width:22px;height:22px;border-radius:50%;background:#c0392b;color:#fff;border:none;font-size:14px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center}
 #sigCanvas{width:100%;height:140px;background:#fafafa;border:1px solid var(--border);border-radius:8px;touch-action:none;display:block}
 .pod-input{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;font-family:inherit;background:#fafafa}
 .pod-input:focus{outline:none;border-color:var(--gold);background:#fff}
@@ -188,12 +191,12 @@ body{padding-bottom:env(safe-area-inset-bottom)}
     <h3>📦 ส่งสินค้า · <span id="podStop"></span></h3>
     <form id="podForm" onsubmit="return submitPod(event)">
       <div class="pod-section">
-        <label>ถ่ายรูปสินค้า / ป้ายสาขา</label>
-        <label class="pod-camera-btn">
-          <span>📷 เปิดกล้อง / เลือกรูป</span>
-          <input type="file" name="photo" accept="image/*" capture="environment" onchange="onPhotoChange(this)" required>
+        <label>ถ่ายรูปสินค้า / ป้ายสาขา <span style="color:var(--muted);font-weight:400">(สูงสุด 5 รูป)</span></label>
+        <label class="pod-camera-btn" id="podAddBtn">
+          <span>📷 เพิ่มรูป (<span id="podCount">0</span>/5)</span>
+          <input type="file" accept="image/*" capture="environment" onchange="onPhotoAdd(this)">
         </label>
-        <div id="podPhotoPreview"></div>
+        <div id="podPhotoPreview" class="pod-thumbs"></div>
       </div>
       <div class="pod-section">
         <label>ลายเซ็นผู้รับ</label>
@@ -571,7 +574,7 @@ function openPod(shipmentId, branchCode, seq) {
   podState = { shipmentId, lastLatLng: null };
   document.getElementById('podStop').textContent = `จุดที่ ${seq} · ${branchCode}`;
   document.getElementById('podForm').reset();
-  document.getElementById('podPhotoPreview').innerHTML = '';
+  podPhotos = []; renderPodThumbs();
   document.getElementById('podErr').textContent = '';
   // Try to capture position once when opening — gives instant geotag
   // even if the GPS loop hasn't fired yet for this shipment.
@@ -626,25 +629,33 @@ function clearSignature() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 }
 
-function onPhotoChange(input) {
-  const file = input.files && input.files[0];
-  const preview = document.getElementById('podPhotoPreview');
-  preview.innerHTML = '';
-  if (!file) return;
-  const url = URL.createObjectURL(file);
-  preview.innerHTML = `<img src="${url}" style="max-width:100%;max-height:160px;border-radius:8px;border:1px solid var(--border)">`;
+let podPhotos = []; // File[] — up to 5 POD photos
+const POD_MAX_PHOTOS = 5;
+function renderPodThumbs() {
+  const el = document.getElementById('podPhotoPreview');
+  el.innerHTML = podPhotos.map((f, i) => `<div class="pod-thumb"><img src="${URL.createObjectURL(f)}"><button type="button" class="pod-thumb-x" onclick="removePodPhoto(${i})">×</button></div>`).join('');
+  const cnt = document.getElementById('podCount'); if (cnt) cnt.textContent = podPhotos.length;
+  const btn = document.getElementById('podAddBtn'); if (btn) btn.style.display = podPhotos.length >= POD_MAX_PHOTOS ? 'none' : '';
 }
+function onPhotoAdd(input) {
+  const file = input.files && input.files[0];
+  input.value = ''; // reset so the camera can capture another shot
+  if (!file) return;
+  if (podPhotos.length >= POD_MAX_PHOTOS) { toast('แนบได้สูงสุด 5 รูป'); return; }
+  podPhotos.push(file);
+  renderPodThumbs();
+}
+function removePodPhoto(i) { podPhotos.splice(i, 1); renderPodThumbs(); }
 
 async function submitPod(e) {
   e.preventDefault();
   if (!podState) return false;
   const form = e.target;
-  const file = form.photo.files[0];
-  if (!file) { document.getElementById('podErr').textContent = 'กรุณาถ่ายรูปสินค้า'; return false; }
+  if (!podPhotos.length) { document.getElementById('podErr').textContent = 'กรุณาถ่ายรูปสินค้าอย่างน้อย 1 รูป'; return false; }
   const canvas = document.getElementById('sigCanvas');
   const sigData = canvas.toDataURL('image/png');
   const fd = new FormData();
-  fd.append('photo', file);
+  podPhotos.forEach(f => fd.append('photos', f));
   fd.append('signature', sigData);
   fd.append('signed_by_name', form.signed_by_name.value || '');
   fd.append('notes', form.notes.value || '');

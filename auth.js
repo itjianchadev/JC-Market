@@ -134,11 +134,14 @@ function normalizePhone(s) {
 function driverLogin(phone) {
   const normalized = normalizePhone(phone);
   if (!normalized) return null;
+  // Match against ANY of the driver's registered phones (carrier_driver_phones),
+  // so a driver with multiple numbers can log in with whichever they use.
   const driver = db.prepare(`
     SELECT d.*, c.code as carrier_code, c.name as carrier_name
-    FROM carrier_drivers d
+    FROM carrier_driver_phones p
+    JOIN carrier_drivers d ON d.id = p.driver_id
     LEFT JOIN carriers c ON c.id = d.carrier_id
-    WHERE d.phone = ? AND d.active = 1
+    WHERE p.phone = ? AND d.active = 1
   `).get(normalized);
   if (!driver) return null;
   const token = jwt.sign({

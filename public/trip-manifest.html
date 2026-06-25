@@ -40,7 +40,7 @@ table.stops .addr{color:var(--muted);font-size:11px;margin-top:2px;line-height:1
 table.stops .order-ref{font-family:monospace;font-size:11px;color:var(--muted);margin-top:4px}
 table.stops .items{margin-top:8px}
 table.stops .items table{width:100%;border-collapse:collapse;font-size:11px}
-table.stops .items th{background:#f5efe5;padding:3px 6px;text-align:left;border:1px solid #999;font-weight:600}
+table.stops .items th{background:#f5efe5;color:#181818;padding:3px 6px;text-align:left;border:1px solid #999;font-weight:600}
 table.stops .items td{padding:3px 6px;border:1px solid #999}
 table.stops .items td.num{text-align:right}
 table.stops .sign-cell{width:160px}
@@ -140,10 +140,9 @@ function fmtMoney(n) { return (n || 0).toLocaleString('en-US', { minimumFraction
         ${(s.lines || []).length ? `
         <div class="items">
           <table>
-            <thead><tr><th>รหัส</th><th>สินค้า</th><th style="width:60px">จำนวน</th><th style="width:80px">รวม</th></tr></thead>
+            <thead><tr><th>รหัส</th><th>สินค้า</th><th style="width:60px">จำนวน</th><th style="width:64px">หน่วย</th></tr></thead>
             <tbody>
-              ${s.lines.map(l => `<tr><td>${l.item_no}</td><td>${l.item_name}</td><td class="num">${l.quantity}</td><td class="num">${fmtMoney(l.line_total)}</td></tr>`).join('')}
-              <tr><td colspan="3" style="text-align:right;font-weight:600">รวม</td><td class="num" style="font-weight:600">${fmtMoney(s.total)}</td></tr>
+              ${s.lines.map(l => `<tr><td>${l.item_no}</td><td>${l.item_name}</td><td class="num">${l.quantity}</td><td>${l.uom || ''}</td></tr>`).join('')}
             </tbody>
           </table>
         </div>` : '<div class="addr" style="margin-top:4px">(ไม่มีรายการสินค้า)</div>'}
@@ -167,11 +166,10 @@ function fmtMoney(n) { return (n || 0).toLocaleString('en-US', { minimumFraction
         <div class="box">
           <h3>Trip</h3>
           <div class="v">${trip.trip_number}</div>
-          <div class="sub">วันที่: ${trip.scheduled_date} · สถานะ: ${STATUS_TH[trip.status] || trip.status}</div>
+          <div class="sub">วันที่จัดส่ง: ${trip.scheduled_date} · สถานะ: ${STATUS_TH[trip.status] || trip.status}</div>
         </div>
         <div class="box">
           <h3>ค่าเที่ยว</h3>
-          <div class="v">฿${fmtMoney(trip.cost_agreed)}</div>
           <div class="sub">ตกลงราคา · ใช้ออก invoice ภายหลัง</div>
         </div>
       </div>
