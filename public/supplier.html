@@ -72,7 +72,7 @@
   </div>
 </div>
 
-<script src="/js/app.js?v=20260701a"></script>
+<script src="/js/app.js?v=20260701b"></script>
 <script>
 if (!requireLogin()) throw '';
 const me = getUser();
@@ -128,7 +128,7 @@ function openModal(id) {
   document.getElementById('mMeta').innerHTML =
     `<b>Shipment:</b> ${esc(r.shipment_number)}<br>` +
     `<b>สาขาปลายทาง:</b> ${esc(r.branch_name) || esc(r.branch_code) || '—'}<br>` +
-    (fmtDelivery(r.order_created_at) ? `<b>🚚 ${deliveryLabel()}:</b> ${fmtDelivery(r.order_created_at)}<br>` : '') +
+    (fmtDelivery(r.order_created_at) ? `<b>🚚 ${deliveryLabel()}:</b> ${fmtDelivery(r.order_created_at)}<br><span style="color:var(--muted);font-size:12px">${deliveryNote()}</span><br>` : '') +
     `<b>สถานะ:</b> ${lbl}` + (r.delivered_at ? ` · ส่งถึง ${r.delivered_at}` : '');
   document.getElementById('mLines').innerHTML = (r.lines || []).length
     ? r.lines.map(l => `<tr><td>${esc(l.item_name)}<br><small style="color:var(--muted)">${esc(l.item_no)}</small></td><td style="text-align:right">${(+l.quantity).toLocaleString()}</td></tr>`).join('')

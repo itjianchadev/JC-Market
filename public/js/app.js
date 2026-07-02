@@ -688,6 +688,11 @@ function fmtDelivery(createdAt){
   return del.toLocaleDateString(loc, { weekday:'long', day:'numeric', month:'short', year:'numeric' });
 }
 function deliveryLabel(){ return getLang() === 'en' ? 'Delivery (est.)' : 'รอบส่ง (คาดได้รับ)'; }
+function deliveryNote(){
+  return getLang() === 'en'
+    ? 'Note: 12:00 daily cut-off — order before 12:00 arrives the next day; after 12:00 arrives in 2 days.'
+    : 'หมายเหตุ: Cut-off 12:00 น. ทุกวัน — สั่งก่อน 12:00 น. ได้รับวันถัดไป, สั่งหลัง 12:00 น. ได้รับอีก 2 วันถัดไป';
+}
 
 function applyI18n(root){
   root = root || document;
