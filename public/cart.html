@@ -71,9 +71,9 @@ function render() {
           <td>฿${it.unit_price.toLocaleString()}</td>
           <td>
             <div class="qty-wrap">
-              <button class="btn sm ghost" onclick="updateQty(${it.id},${it.quantity-1})">-</button>
-              <input type="number" value="${it.quantity}" min="1" max="${it.inventory}" onchange="updateQty(${it.id},this.value)" style="width:${Math.max(40, String(it.quantity).length * 16 + 24)}px">
-              <button class="btn sm ghost" onclick="updateQty(${it.id},${it.quantity+1})">+</button>
+              <button class="btn sm ghost" onclick="updateQty(${it.id},${Math.round((it.quantity-qtyStep(it.uom))*100)/100})">-</button>
+              <input type="number" value="${it.quantity}" min="${qtyStep(it.uom)}" step="${qtyStep(it.uom)}" max="${it.inventory}" onchange="updateQty(${it.id},this.value)" style="width:${Math.max(40, String(it.quantity).length * 16 + 24)}px">
+              <button class="btn sm ghost" onclick="updateQty(${it.id},${Math.round((it.quantity+qtyStep(it.uom))*100)/100})">+</button>
             </div>
           </td>
           <td style="color:var(--muted)">${it.uom||'-'}</td>
@@ -96,8 +96,14 @@ function render() {
     </div>`;
 }
 
+// Units orderable in fractional amounts (e.g. 0.5 KG); others stay whole.
+const FRACTIONAL_UOMS = ['KG'];
+function qtyStep(uom) {
+  return FRACTIONAL_UOMS.includes(String(uom || '').toUpperCase()) ? 0.5 : 1;
+}
+
 async function updateQty(id, qty) {
-  qty = parseInt(qty);
+  qty = Math.round(parseFloat(qty) * 100) / 100;
   if (isNaN(qty) || qty < 0) return;
   try {
     await api('/api/cart/' + id, { method: 'PUT', body: JSON.stringify({ quantity: qty }) });

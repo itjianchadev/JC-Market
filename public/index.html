@@ -397,6 +397,13 @@ function alertNoPrice() {
   toast(t('shop.no_price_alert'));
 }
 
+// Units that can be ordered in fractional amounts (e.g. 0.5 KG). Everything
+// else (PCS, BOX, UNIT…) stays whole-number.
+const FRACTIONAL_UOMS = ['KG'];
+function qtyStep(uom) {
+  return FRACTIONAL_UOMS.includes(String(uom || '').toUpperCase()) ? 0.5 : 1;
+}
+
 function openModal(item) {
   selectedItem = item;
   document.getElementById('mName').textContent = itemName(item);
@@ -404,6 +411,9 @@ function openModal(item) {
   document.getElementById('mPrice').textContent = `฿${item.unit_price.toLocaleString()} /${item.uom}`;
   document.getElementById('mStock').textContent = t('shop.modal.remaining', { n: item.inventory, uom: item.uom });
   const qtyInput = document.getElementById('mQty');
+  const step = qtyStep(item.uom);
+  qtyInput.step = step;
+  qtyInput.min = step;
   qtyInput.value = 1;
   qtyInput.max = item.inventory;
   qtyInput.oninput = updateModalStock;
@@ -416,14 +426,16 @@ function closeModal() { document.getElementById('modal').style.display = 'none';
 
 function adjQty(d) {
   const inp = document.getElementById('mQty');
-  const v = Math.max(1, Math.min(selectedItem.inventory, parseInt(inp.value||1)+d));
-  inp.value = v;
+  const step = qtyStep(selectedItem.uom);
+  let v = (parseFloat(inp.value) || step) + d * step;
+  v = Math.max(step, Math.min(selectedItem.inventory, v));
+  inp.value = Math.round(v * 100) / 100;
   updateModalStock();
 }
 
 function updateModalStock() {
   if (!selectedItem) return;
-  const qty = parseInt(document.getElementById('mQty').value) || 1;
+  const qty = parseFloat(document.getElementById('mQty').value) || qtyStep(selectedItem.uom);
   const remaining = Math.max(0, selectedItem.inventory - qty);
   const el = document.getElementById('mStock');
   el.textContent = t('shop.modal.remaining', { n: remaining, uom: selectedItem.uom });
@@ -432,7 +444,7 @@ function updateModalStock() {
 
 async function addToCart() {
   if (!selectedItem) return;
-  const qty = parseInt(document.getElementById('mQty').value) || 1;
+  const qty = parseFloat(document.getElementById('mQty').value) || qtyStep(selectedItem.uom);
   try {
     await api('/api/cart/add', { method:'POST', body: JSON.stringify({ item_no: selectedItem.item_no, quantity: qty }) });
     toast(t('shop.added', { name: itemName(selectedItem), qty }));
