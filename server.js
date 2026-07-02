@@ -3548,7 +3548,7 @@ app.get('/api/supplier/pos', requireAuth, requireSupplier, (req, res) => {
   if (!vendor) return res.json([]);
   const rows = db.prepare(`
     SELECT s.id, s.order_id, s.shipment_number, s.status, s.delivered_at, s.created_at, s.note, s.deliverer,
-           o.order_number, o.bc_po_no, o.po_vendor_no, o.total,
+           o.order_number, o.bc_po_no, o.po_vendor_no, o.total, o.created_at as order_created_at,
            o.branch_code, b.name as branch_name
     FROM shipments s
     JOIN orders o ON o.id = s.order_id

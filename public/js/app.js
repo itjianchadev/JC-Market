@@ -668,6 +668,27 @@ function t(key, vars){
   if (vars) for (const k in vars) s = s.replace(new RegExp('\\{'+k+'\\}','g'), vars[k]);
   return s;
 }
+// ── Delivery-round rule ─────────────────────────────────────────────────────
+// Cut-off 12:00 (Asia/Bangkok). Order before 12:00 → arrive next day (D+1);
+// after 12:00 → D+2. Calendar days, weekends included. created_at is stored as
+// Bangkok local time ('YYYY-MM-DD HH:MM:SS').
+function expectedDeliveryDate(createdAt){
+  if(!createdAt) return null;
+  const d = new Date(String(createdAt).replace(' ','T'));
+  if(isNaN(d.getTime())) return null;
+  const add = d.getHours() < 12 ? 1 : 2;
+  const del = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  del.setDate(del.getDate() + add);
+  return del;
+}
+function fmtDelivery(createdAt){
+  const del = expectedDeliveryDate(createdAt);
+  if(!del) return '';
+  const loc = getLang() === 'en' ? 'en-GB' : 'th-TH';
+  return del.toLocaleDateString(loc, { weekday:'long', day:'numeric', month:'short', year:'numeric' });
+}
+function deliveryLabel(){ return getLang() === 'en' ? 'Delivery (est.)' : 'รอบส่ง (คาดได้รับ)'; }
+
 function applyI18n(root){
   root = root || document;
   // Title
