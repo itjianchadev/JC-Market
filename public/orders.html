@@ -42,7 +42,7 @@
   </div>
 </div>
 
-<script src="/js/app.js?v=20260625a"></script>
+<script src="/js/app.js?v=20260701a"></script>
 <script>
 if(!requireLogin()) throw '';
 if(!denyFinance()) throw '';
@@ -134,6 +134,7 @@ async function showDetail(id) {
     ${(o.bc_po_no || o.bc_to_no) ? `<div style="color:var(--muted);font-size:12px;margin-bottom:4px">Ref: ${o.order_number}</div>` : ''}
     <span class="status-badge ${st.cls}">${st.label}</span>
     <div style="color:var(--muted);font-size:13px;margin:8px 0">${o.created_at}${o.branch_code?' | '+o.branch_code:''}</div>
+    ${fmtDelivery(o.created_at) ? `<div style="font-size:13px;margin:8px 0;color:var(--gold-dark);font-weight:600">🚚 ${deliveryLabel()}: ${fmtDelivery(o.created_at)}</div>` : ''}
     <hr style="border-color:var(--border);margin:12px 0">
     <h4 style="margin-bottom:8px">${t('orders.items')}</h4>
     <table style="width:100%;font-size:14px">
