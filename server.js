@@ -432,6 +432,15 @@ const categoryGroupSrv = (cat, itemNo) =>
   (FRUIT_CATEGORIES_SRV.has(cat) || (itemNo && FRESH_ITEM_SUBCAT_SRV[itemNo])) ? 'fruit' : 'general';
 const groupLabelTH = g => g === 'fruit' ? 'ประเภทของสด' : 'ประเภทของแห้ง';
 
+// Order grouping key for the single-vendor / single-category rule (Phase 1).
+// Fresh goods carry a seeded vendor_no → group per vendor so one cart can't mix
+// two vendors' fresh goods (BC needs one PO per vendor). Everything else (dry
+// goods, unmapped) falls back to the legacy fruit/general split.
+const orderGroupKey = (it) =>
+  it && it.vendor_no ? 'V:' + it.vendor_no : categoryGroupSrv(it.category, it.item_no);
+const groupKeyLabel = (key) =>
+  key && key.startsWith('V:') ? 'ผู้ขาย ' + key.slice(2) : groupLabelTH(key);
+
 // Block-list helper: a FC with any past-due credit order can't place new
 // fruit orders until they've settled. Returns the count of outstanding
 // overdue credits — 0 means clear to order fruit.
@@ -488,16 +497,16 @@ app.post('/api/cart/add', requireAuth, (req, res) => {
   // cart — if its group differs from the new item's, block. (Cart is uniform
   // by induction, so checking any one row is enough.)
   const cartSample = db.prepare(`
-    SELECT i.category, c.item_no FROM cart_items c
+    SELECT i.category, i.vendor_no, c.item_no FROM cart_items c
     JOIN items_cache i ON i.item_no = c.item_no
     WHERE c.user_id = ? LIMIT 1
   `).get(req.user.id);
   if (cartSample) {
-    const existingGroup = categoryGroupSrv(cartSample.category, cartSample.item_no);
-    const newGroup = categoryGroupSrv(item.category, item.item_no);
-    if (existingGroup !== newGroup) {
+    const existingKey = orderGroupKey(cartSample);
+    const newKey = orderGroupKey(item);
+    if (existingKey !== newKey) {
       return res.status(400).json({
-        error: `ห้ามสั่งของข้ามหมวด — ตะกร้าเป็น "${groupLabelTH(existingGroup)}" อยู่แล้ว ของชิ้นนี้อยู่ในหมวด "${groupLabelTH(newGroup)}" กรุณาแยกออร์เดอร์ (checkout หรือล้างตะกร้าก่อน)`,
+        error: `ห้ามสั่งข้ามกลุ่ม — ตะกร้าเป็น "${groupKeyLabel(existingKey)}" อยู่แล้ว ของชิ้นนี้ "${groupKeyLabel(newKey)}" กรุณาแยกออร์เดอร์ (checkout หรือล้างตะกร้าก่อน)`,
       });
     }
   }
@@ -567,7 +576,7 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
   const paymentMethod = (!isJcBranch && rawMethod === 'credit_7d') ? 'credit_7d' : 'immediate';
   // Get cart
   const cartItems = db.prepare(`
-    SELECT c.item_no, c.quantity, c.unit_price, i.name as item_name, i.inventory, i.uom, i.category
+    SELECT c.item_no, c.quantity, c.unit_price, i.name as item_name, i.inventory, i.uom, i.category, i.vendor_no
     FROM cart_items c LEFT JOIN items_cache i ON i.item_no=c.item_no
     WHERE c.user_id=?
   `).all(req.user.id);
@@ -576,15 +585,17 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
 
   // Single-group enforcement — defense in depth (also blocked at /cart/add).
   // Catches legacy carts built before this rule was added, e.g. from a reorder.
-  const groups = new Set(cartItems.map(ci => categoryGroupSrv(ci.category, ci.item_no)));
-  if (groups.size > 1) {
+  const groupKeys = new Set(cartItems.map(orderGroupKey));
+  if (groupKeys.size > 1) {
     return res.status(400).json({
-      error: 'ห้ามสั่งของข้ามหมวดในออร์เดอร์เดียว — ตะกร้ามีทั้ง "ประเภทของแห้ง" และ "ประเภทของสด" กรุณาแยกออร์เดอร์',
+      error: 'ห้ามสั่งข้ามกลุ่ม (ผู้ขาย/หมวด) ในออร์เดอร์เดียว — 1 ออร์เดอร์ต้องเป็นผู้ขายเดียว กรุณาแยกออร์เดอร์',
     });
   }
 
-  // Credit-7d is only available for fruit orders.
-  const isFruitOrder = groups.has('fruit');
+  // Credit-7d is only available for fruit orders. Fresh goods map to 'fruit'
+  // via categoryGroupSrv regardless of vendor, so derive it independently of
+  // the per-vendor groupKeys above.
+  const isFruitOrder = cartItems.some(ci => categoryGroupSrv(ci.category, ci.item_no) === 'fruit');
   if (paymentMethod === 'credit_7d' && !isFruitOrder) {
     return res.status(400).json({ error: 'เครดิต 7 วันใช้ได้กับ "ผลไม้สด" เท่านั้น' });
   }
@@ -1275,6 +1286,20 @@ async function postOrderToBC(orderId) {
   return { ok: true, bc_so_id: soId, bc_so_no: soNo, order_number: newOrderNumber, vat_amount: vatAmount, total_incl_vat: totalInclVat, net_payable: netPayable };
 }
 
+// Resolve the PO vendor for an order. After the single-vendor cart rule, all
+// fresh lines in an order share one vendor_no → use it. Dry-goods orders (no
+// vendor_no on any line) fall back to BC_DEFAULT_VENDOR_NO. A manual vendor
+// passed to postPOToBC still overrides this.
+function resolveOrderVendor(orderId) {
+  const rows = db.prepare(`
+    SELECT DISTINCT i.vendor_no FROM order_lines ol
+    JOIN items_cache i ON i.item_no = ol.item_no
+    WHERE ol.order_id = ? AND i.vendor_no IS NOT NULL AND i.vendor_no != ''
+  `).all(orderId);
+  if (rows.length === 1) return rows[0].vendor_no;
+  return (process.env.BC_DEFAULT_VENDOR_NO || '').trim();
+}
+
 // ─── BC: Create Purchase Order from a verified order ───
 // Decoupled from Finance approval — Finance picks a vendor on the "Approved"
 // tab and triggers this. PO line cost (directUnitCost) is pulled from
@@ -1298,8 +1323,10 @@ async function postPOToBC(orderId, vendorNo) {
     throw new Error('Order ยังไม่มี BC SO — สร้าง SO ให้สำเร็จก่อน');
   }
   if (order.bc_po_no) return { already: true, bc_po_id: order.bc_po_id, bc_po_no: order.bc_po_no };
-  // Fallback to env default if caller didn't pass a vendor explicitly
-  vendorNo = (vendorNo || process.env.BC_DEFAULT_VENDOR_NO || '').trim();
+  // Vendor precedence: explicit arg (manual PO) → resolved from order lines
+  // (per-item vendor_no) → env default. The single-vendor cart rule guarantees
+  // one vendor per fresh order, so the resolved value is unambiguous.
+  vendorNo = (vendorNo || resolveOrderVendor(orderId) || process.env.BC_DEFAULT_VENDOR_NO || '').trim();
   if (!vendorNo) throw new Error('ไม่มี vendor — ตั้งค่า BC_DEFAULT_VENDOR_NO ใน .env ก่อน');
 
   const lines = db.prepare('SELECT * FROM order_lines WHERE order_id=?').all(orderId);
