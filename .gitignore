@@ -9,3 +9,5 @@ uploads/
 imports/
 # Claude Code per-repo launch config (developer preference, not project state)
 .claude/
+# Supabase CLI local cache (linked-project ref, not project state)
+supabase/.temp/
