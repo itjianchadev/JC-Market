@@ -131,6 +131,12 @@ try { db.exec("ALTER TABLE orders ADD COLUMN fully_received_at TEXT"); } catch (
 // ─── Migrate: bc_po_line_id on order_lines ───
 try { db.exec("ALTER TABLE order_lines ADD COLUMN bc_po_line_id TEXT DEFAULT ''"); } catch (e) {}
 
+// ─── Migrate: vendor_no on items_cache (Phase 1 vendor-based PO) ───
+// Default vendor per item for fresh goods. Sourced/kept in JC-Market because
+// BC Item.Vendor_No is empty today; PO creation routes to this vendor instead
+// of the single BC_DEFAULT_VENDOR_NO. Empty string = fall back to default.
+try { db.exec("ALTER TABLE items_cache ADD COLUMN vendor_no TEXT DEFAULT ''"); } catch (e) {}
+
 // ─── Migrate: received_date on goods_receipts ───
 // Business date of when goods arrived at the branch. Distinct from created_at
 // (which records when the user pressed "Confirm receive" in the app — they
