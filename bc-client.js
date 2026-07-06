@@ -394,9 +394,20 @@ async function getPurchaseOrderLines(poId) {
 // after the doc is created.
 async function setDocumentDimension(entity, docId, code, valueCode) {
   if (MOCK) return { mock: true };
-  return bcFetch(`/${entity}(${docId})/dimensionSetLines`, {
-    method: 'POST', body: JSON.stringify({ code, valueCode }),
-  });
+  const path = `/${entity}(${docId})/dimensionSetLines`;
+  // Customer/vendor default dimensions may already put this code on the doc, so
+  // a plain POST 400s ("dimension set line already exists"). Look it up first:
+  // PATCH the existing line's value (key = dimension id), else POST a new one.
+  const existing = await bcFetch(`${path}?$filter=code eq '${code}'`);
+  const line = (existing.value || [])[0];
+  if (line) {
+    return bcFetch(`${path}(${line.id})`, {
+      method: 'PATCH',
+      headers: { 'If-Match': line['@odata.etag'] || '*' },
+      body: JSON.stringify({ valueCode }),
+    });
+  }
+  return bcFetch(path, { method: 'POST', body: JSON.stringify({ code, valueCode }) });
 }
 
 // ─── Purchase Receipts (Posted) ───
