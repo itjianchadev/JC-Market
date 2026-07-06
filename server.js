@@ -632,11 +632,17 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
   const orderType = isJcBranch
     ? (isFruitOrder ? 'jc_purchase' : 'jc_transfer')
     : 'fc_purchase';
-  // JC orders skip Finance entirely — flip straight to 'verified'. FC fruit
-  // (credit_7d) does too: it's billed on the consolidated Tuesday cycle (no
-  // upfront slip to approve), so it auto-creates BC SO+PO below and never enters
-  // the Finance approval queue. FC general still goes through Finance (slip → approve).
-  const initialPaymentStatus = (isJcBranch || paymentMethod === 'credit_7d') ? 'verified' : 'pending';
+  // Payment status at checkout drives who creates BC docs and when:
+  //   credit_7d (FC fruit) → 'verified' — auto-creates BC SO+PO below, skips
+  //     Finance (billed on the Tuesday cycle, no upfront slip).
+  //   JC master → 'paid' — enters the Finance approval queue with NO slip. JC
+  //     doesn't pay; Finance approves the order, then verify creates the BC docs.
+  //   FC general/immediate → 'pending' — waits for the slip upload (→ 'paid'),
+  //     then Finance approves.
+  const initialPaymentStatus =
+    paymentMethod === 'credit_7d' ? 'verified'
+    : isJcBranch ? 'paid'
+    : 'pending';
 
   const tx = db.transaction(() => {
     // Create order (VAT=0 ก่อน จะอัพเดทจาก BC ทีหลัง)
@@ -703,40 +709,12 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
   //   jc_transfer                → BC Transfer Order (CTI → JC0xx)
   //   jc_purchase                → BC PO only (no SO — internal, not a sale)
   let bcSoResult = null, bcPoResult = null, bcToResult = null;
-  const defaultVendor = (process.env.BC_DEFAULT_VENDOR_NO || '').trim();
 
-  if (orderType === 'jc_transfer') {
-    try {
-      bcToResult = await postTransferOrderToBC(orderId, req.user.branch_code);
-    } catch (e) {
-      console.error('[checkout → BC TO]', e.message);
-      db.prepare("UPDATE orders SET bc_sync_error=? WHERE id=?").run('[TO] ' + e.message, orderId);
-      bcToResult = { ok: false, error: e.message };
-    }
-    // TMS shipment row — only if BC TO succeeded.
-    if (bcToResult && bcToResult.bc_to_no) {
-      try { routeOrderFulfilment(orderId); }
-      catch (e) { console.error('[checkout → fulfilment]', e.message); }
-    }
-  } else if (orderType === 'jc_purchase') {
-    if (defaultVendor) {
-      try {
-        bcPoResult = await postPOToBC(orderId, defaultVendor);
-      } catch (e) {
-        console.error('[checkout → BC PO (JC)]', e.message);
-        db.prepare("UPDATE orders SET bc_sync_error=? WHERE id=?").run('[PO] ' + e.message, orderId);
-        bcPoResult = { ok: false, error: e.message };
-      }
-    }
-    // TMS shipment row — only if BC PO succeeded.
-    if (bcPoResult && bcPoResult.bc_po_no) {
-      try { routeOrderFulfilment(orderId); }
-      catch (e) { console.error('[checkout → fulfilment]', e.message); }
-    }
-  } else if (orderType === 'fc_purchase' && paymentMethod === 'credit_7d') {
-    // FC fruit = credit (billed on the Tuesday cycle, no upfront slip). Auto-create
-    // BC SO + PO at checkout (the order is already 'verified') — skips the Finance
-    // gate. Safe: branches can't self-cancel and auto-cancel is off (no BC orphans).
+  // JC (jc_transfer / jc_purchase) no longer create BC at checkout — they now
+  // enter the Finance approval queue like FC (status 'paid' above). BC docs are
+  // created on approval in /api/orders/:id/verify. Only FC fruit credit_7d still
+  // auto-creates here (billed on the Tuesday cycle, no slip to approve).
+  if (orderType === 'fc_purchase' && paymentMethod === 'credit_7d') {
     try {
       bcSoResult = await postOrderToBC(orderId);
     } catch (e) {
@@ -744,9 +722,9 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
       db.prepare("UPDATE orders SET bc_sync_error=? WHERE id=?").run(e.message, orderId);
       bcSoResult = { ok: false, error: e.message };
     }
-    if (bcSoResult && bcSoResult.bc_so_no && defaultVendor) {
+    if (bcSoResult && bcSoResult.bc_so_no) {
       try {
-        bcPoResult = await postPOToBC(orderId, defaultVendor);
+        bcPoResult = await postPOToBC(orderId);  // vendor resolved from order lines
       } catch (e) {
         console.error('[checkout → BC PO (fruit credit)]', e.message);
         db.prepare("UPDATE orders SET bc_sync_error=? WHERE id=?").run('[PO] ' + e.message, orderId);
@@ -764,10 +742,8 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
   const createdRow = db.prepare('SELECT created_at FROM orders WHERE id=?').get(orderId);
 
   let msgBase;
-  if (orderType === 'jc_transfer') {
-    msgBase = `สร้างคำสั่งซื้อ ${orderNumber} (สาขา JC) — ${bcToResult && bcToResult.bc_to_no ? 'BC TO ' + bcToResult.bc_to_no : 'BC TO ค้าง (retry)'}`;
-  } else if (orderType === 'jc_purchase') {
-    msgBase = `สร้างคำสั่งซื้อ ${orderNumber} (สาขา JC · ผลไม้สด) — ${bcPoResult && bcPoResult.bc_po_no ? 'BC PO ' + bcPoResult.bc_po_no : 'BC PO ค้าง (retry)'}`;
+  if (orderType === 'jc_transfer' || orderType === 'jc_purchase') {
+    msgBase = `สร้างคำสั่งซื้อ ${orderNumber} (สาขา JC) — รอ Finance อนุมัติเพื่อสร้างเอกสาร BC`;
   } else if (paymentMethod === 'credit_7d') {
     msgBase = `สร้างคำสั่งซื้อ ${orderNumber} (เครดิต 7 วัน) — ${bcSoResult && bcSoResult.bc_so_no ? 'BC SO ' + bcSoResult.bc_so_no : 'BC SO ค้าง (retry)'}`;
   } else {
@@ -1069,8 +1045,13 @@ app.post('/api/orders/:id/verify', requireAuth, requireAdmin, async (req, res) =
       const tx = db.transaction(() => {
         db.prepare("UPDATE orders SET payment_status='verified' WHERE id=?").run(order.id);
         db.prepare("UPDATE payments SET verified=1, verified_by=?, verified_at=datetime('now','localtime') WHERE order_id=?").run(req.user.id, order.id);
-        db.prepare("INSERT INTO payment_receipts (id, order_id, receipt_number, issued_by, subtotal, shipping_fee, vat_amount, total, wht_amount, net_payable) VALUES (?,?,?,?,?,?,?,?,?,?)")
-          .run(rcptId, order.id, rcptNo, req.user.id, order.subtotal, 0, order.vat_amount, order.total, 0, order.net_payable || order.total); // per-order receipt: goods + VAT only (shipping/WHT billed monthly)
+        // JC master orders are internal (transfer/purchase) with no payment — no
+        // receipt. FC orders get a per-order receipt (goods + VAT; shipping/WHT
+        // billed monthly).
+        if (!String(order.order_type || '').startsWith('jc_')) {
+          db.prepare("INSERT INTO payment_receipts (id, order_id, receipt_number, issued_by, subtotal, shipping_fee, vat_amount, total, wht_amount, net_payable) VALUES (?,?,?,?,?,?,?,?,?,?)")
+            .run(rcptId, order.id, rcptNo, req.user.id, order.subtotal, 0, order.vat_amount, order.total, 0, order.net_payable || order.total); // per-order receipt: goods + VAT only (shipping/WHT billed monthly)
+        }
       });
       tx();
     } catch (e) {
@@ -1084,44 +1065,69 @@ app.post('/api/orders/:id/verify', requireAuth, requireAdmin, async (req, res) =
       return res.status(500).json({ error: 'อนุมัติไม่สำเร็จ: ' + e.message });
     }
 
-    // BC SO creation — runs AFTER local approval so the customer is locked
-    // in regardless of BC availability. If it fails, bc_sync_error is set
-    // and the admin "Retry BC" button on the dashboard can re-attempt.
-    let bcResult = null;
-    if (!order.bc_so_id) {
-      try {
-        bcResult = await postOrderToBC(order.id);
-      } catch (e) {
-        console.error('[verify approve → BC]', e.message);
-        db.prepare("UPDATE orders SET bc_sync_error=? WHERE id=?").run(e.message, order.id);
-        bcResult = { ok: false, error: e.message };
+    // BC document creation — runs AFTER local approval so the order is locked
+    // in regardless of BC availability. Failures set bc_sync_error and the
+    // admin "Retry BC" button can re-attempt. Documents depend on order_type:
+    //   fc_purchase → Sales Order + Purchase Order
+    //   jc_transfer → Transfer Order (CTI → JC0xx)
+    //   jc_purchase → Purchase Order only (internal, not a sale)
+    let bcResult = null, bcPoResult = null, bcToResult = null;
+    const otype = order.order_type || 'fc_purchase';
+
+    if (otype === 'jc_transfer') {
+      if (!order.bc_to_no) {
+        try {
+          bcToResult = await postTransferOrderToBC(order.id, order.branch_code);
+        } catch (e) {
+          console.error('[verify approve → BC TO]', e.message);
+          db.prepare("UPDATE orders SET bc_sync_error=? WHERE id=?").run('[TO] ' + e.message, order.id);
+          bcToResult = { ok: false, error: e.message };
+        }
+      } else {
+        bcToResult = { already: true, bc_to_no: order.bc_to_no };
+      }
+    } else if (otype === 'jc_purchase') {
+      if (!order.bc_po_no) {
+        try {
+          bcPoResult = await postPOToBC(order.id);  // vendor resolved from order lines
+        } catch (e) {
+          console.error('[verify approve → BC PO (JC)]', e.message);
+          db.prepare("UPDATE orders SET bc_sync_error=? WHERE id=?").run('[PO] ' + e.message, order.id);
+          bcPoResult = { ok: false, error: e.message };
+        }
+      } else {
+        bcPoResult = { already: true, bc_po_no: order.bc_po_no };
       }
     } else {
-      bcResult = { already: true, bc_so_no: order.bc_so_no };
-    }
-
-    // BC PO creation — only if SO succeeded AND BC_DEFAULT_VENDOR_NO is set.
-    // PO failures are non-fatal and never block approval; admin can retry
-    // from the Approvals "Approved" tab via the "สร้าง PO" button.
-    let bcPoResult = null;
-    const defaultVendor = (process.env.BC_DEFAULT_VENDOR_NO || '').trim();
-    if (bcResult && bcResult.bc_so_no && !order.bc_po_no && defaultVendor) {
-      try {
-        bcPoResult = await postPOToBC(order.id, defaultVendor);
-      } catch (e) {
-        console.error('[verify approve → BC PO]', e.message);
-        // Keep SO sync_error untouched; tack PO failure on with a prefix so it's distinguishable
-        db.prepare("UPDATE orders SET bc_sync_error=? WHERE id=?").run('[PO] ' + e.message, order.id);
-        bcPoResult = { ok: false, error: e.message };
+      // fc_purchase → SO, then PO (vendor resolved from order lines)
+      if (!order.bc_so_id) {
+        try {
+          bcResult = await postOrderToBC(order.id);
+        } catch (e) {
+          console.error('[verify approve → BC]', e.message);
+          db.prepare("UPDATE orders SET bc_sync_error=? WHERE id=?").run(e.message, order.id);
+          bcResult = { ok: false, error: e.message };
+        }
+      } else {
+        bcResult = { already: true, bc_so_no: order.bc_so_no };
+      }
+      if (bcResult && bcResult.bc_so_no && !order.bc_po_no) {
+        try {
+          bcPoResult = await postPOToBC(order.id);
+        } catch (e) {
+          console.error('[verify approve → BC PO]', e.message);
+          db.prepare("UPDATE orders SET bc_sync_error=? WHERE id=?").run('[PO] ' + e.message, order.id);
+          bcPoResult = { ok: false, error: e.message };
+        }
       }
     }
 
-    // Fulfilment routing — only if BC SO succeeded (BC SO is the source-of-truth
-    // for the goods that need to move). General goods are parked in the warehouse
-    // pick queue (Shipment issued on pick); fresh goods get a shipment now. PO
-    // failure does not block this: PO is procurement-side, fulfilment is delivery-side.
+    // Fulfilment routing — trigger once any BC "goods-moving" doc succeeded:
+    // SO (fc), Transfer Order (jc_transfer), or PO (jc_purchase). General goods
+    // park in the warehouse pick queue; fresh goods get a shipment now.
+    const bcMoved = (bcResult && bcResult.bc_so_no) || (bcToResult && bcToResult.bc_to_no) || (bcPoResult && bcPoResult.bc_po_no);
     let shipmentResult = null;
-    if (bcResult && bcResult.bc_so_no) {
+    if (bcMoved) {
       try {
         shipmentResult = routeOrderFulfilment(order.id);
       } catch (e) {
@@ -1130,17 +1136,22 @@ app.post('/api/orders/:id/verify', requireAuth, requireAdmin, async (req, res) =
     }
 
     const soMsg = bcResult && bcResult.bc_so_no ? ` · BC SO ${bcResult.bc_so_no}` : (bcResult && bcResult.error ? ' · BC SO ค้าง (retry ได้)' : '');
+    const toMsg = bcToResult && bcToResult.bc_to_no ? ` · BC TO ${bcToResult.bc_to_no}` : (bcToResult && bcToResult.error ? ' · BC TO ค้าง (retry ได้)' : '');
     const poMsg = bcPoResult && bcPoResult.bc_po_no ? ` · BC PO ${bcPoResult.bc_po_no}` : (bcPoResult && bcPoResult.error ? ' · BC PO ค้าง (retry ได้)' : '');
     const shpMsg = shipmentResult && shipmentResult.shipment
       ? ` · Shipment ${shipmentResult.shipment.shipment_number}`
       : (shipmentResult && shipmentResult.queued ? ' · เข้าคิวจัดของที่คลัง' : '');
+    const isJc = String(order.order_type || '').startsWith('jc_');
     res.json({
       ok: true,
-      receipt_number: rcptNo,
+      receipt_number: isJc ? null : rcptNo,
       bc_so: bcResult,
       bc_po: bcPoResult,
+      bc_to: bcToResult,
       shipment: shipmentResult ? shipmentResult.shipment : null,
-      message: `อนุมัติการชำระเงิน · ออกใบเสร็จ ${rcptNo}${soMsg}${poMsg}${shpMsg}`,
+      message: isJc
+        ? `อนุมัติคำสั่งซื้อสาขา JC${toMsg}${poMsg}${shpMsg}`
+        : `อนุมัติการชำระเงิน · ออกใบเสร็จ ${rcptNo}${soMsg}${poMsg}${shpMsg}`,
     });
   } else if (action === 'reject') {
     // Finance must give a reason — surfaces back to the FC + saves to the
