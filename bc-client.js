@@ -386,6 +386,19 @@ async function getPurchaseOrderLines(poId) {
   return bcFetch(`/purchaseOrders(${poId})/purchaseOrderLines`);
 }
 
+// ─── Document Dimensions ───
+// Stamp a Dimension onto a document header (e.g. DEPARTMENT = branch code).
+// entity = 'salesOrders' | 'purchaseOrders'. BC rejects an unknown valueCode,
+// so callers guard (try/catch) — a missing Department value must NOT block the
+// document. POSTing the same code twice also errors; only stamp once, right
+// after the doc is created.
+async function setDocumentDimension(entity, docId, code, valueCode) {
+  if (MOCK) return { mock: true };
+  return bcFetch(`/${entity}(${docId})/dimensionSetLines`, {
+    method: 'POST', body: JSON.stringify({ code, valueCode }),
+  });
+}
+
 // ─── Purchase Receipts (Posted) ───
 async function listPurchaseReceipts(orderNumber) {
   if (MOCK) return { mock: true, value: [] };
@@ -440,4 +453,4 @@ async function receivePurchaseOrderLines(poId, lineQtyMap) {
   return { ok: true };
 }
 
-module.exports = { MOCK, getToken, listItems, listItemCategories, listItemCards, listSalesPrices, listItemUnitsOfMeasure, getSalesBillings, createSalesOrder, getSalesOrder, addSalesOrderLine, shipAndInvoiceSalesOrder, findPostedInvoiceByExternalDoc, createSalesInvoice, addInvoiceLine, postInvoice, deleteSalesInvoice, deleteSalesOrder, listVendors, findLocationIdByCode, findGLAccountIdByNo, createPurchaseOrder, getPurchaseOrder, addPurchaseOrderLine, patchPurchaseOrderLine, getPurchaseOrderLines, listPurchaseReceipts, receivePurchaseOrderLines, createTransferOrder, addTransferOrderLine };
+module.exports = { MOCK, getToken, listItems, listItemCategories, listItemCards, listSalesPrices, listItemUnitsOfMeasure, getSalesBillings, createSalesOrder, getSalesOrder, addSalesOrderLine, shipAndInvoiceSalesOrder, findPostedInvoiceByExternalDoc, createSalesInvoice, addInvoiceLine, postInvoice, deleteSalesInvoice, deleteSalesOrder, listVendors, findLocationIdByCode, findGLAccountIdByNo, createPurchaseOrder, getPurchaseOrder, addPurchaseOrderLine, patchPurchaseOrderLine, getPurchaseOrderLines, listPurchaseReceipts, receivePurchaseOrderLines, setDocumentDimension, createTransferOrder, addTransferOrderLine };

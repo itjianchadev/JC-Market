@@ -1239,6 +1239,14 @@ async function postOrderToBC(orderId) {
   const soId = so.id;
   const soNo = so.number || '';
 
+  // Stamp DEPARTMENT = ordering branch onto the SO header (Phase 1). Guarded:
+  // BC rejects a branch with no Department dimension value, and that must not
+  // block the SO — log and continue.
+  if (order.branch_code) {
+    try { await bc.setDocumentDimension('salesOrders', soId, 'DEPARTMENT', order.branch_code); }
+    catch (e) { console.warn('[SO dimension DEPARTMENT]', order.branch_code, e.message); }
+  }
+
   // 2. Add order lines
   // Resolve the INTRANSIT location for the ACTIVE BC env (cached). Location
   // GUIDs differ per environment, so never hardcode — findLocationIdByCode keeps
@@ -1353,6 +1361,13 @@ async function postPOToBC(orderId, vendorNo) {
   });
   const poId = po.id;
   const poNo = po.number || '';
+
+  // Stamp DEPARTMENT = ordering branch onto the PO header (Phase 1). Guarded
+  // like the SO — a missing Department value must not block the PO.
+  if (order.branch_code) {
+    try { await bc.setDocumentDimension('purchaseOrders', poId, 'DEPARTMENT', order.branch_code); }
+    catch (e) { console.warn('[PO dimension DEPARTMENT]', order.branch_code, e.message); }
+  }
 
   // 2. Add lines. Two-step per line because BC runs Purchase Price lookup
   // during POST and OVERRIDES whatever directUnitCost we send: items with a
