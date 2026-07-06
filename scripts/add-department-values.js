@@ -15,7 +15,12 @@ if (ENV.toLowerCase().includes('production')) { console.error('REFUSE: BC_ENVIRO
 const COMMIT = process.argv.includes('--commit');
 const AB = E.BC_API_BASE || 'https://api.businesscentral.dynamics.com/v2.0';
 const API = `${AB}/${E.BC_TENANT_ID}/${ENV}/api/v2.0/companies(${E.BC_COMPANY_ID})`;
+const OD = `${AB}/${E.BC_TENANT_ID}/${ENV}/ODataV4/Company('${encodeURIComponent(E.BC_COMPANY_NAME)}')`;
 const DEPT_ID = '3f089041-753c-f011-be59-000d3ac901b1'; // DEPARTMENT dimension (dev2)
+// OData web service for Page 538 "Dimension Values" — must be published in BC
+// (Web Services → Page 538 → set a service name). API v2.0 dimensionValues is
+// read-only (405 on insert), so writes go through this OData page instead.
+const SERVICE = process.env.BC_WS_DIMENSION_VALUE || 'DimensionValues';
 
 async function req(url, opts = {}) {
   const t = await bc.getToken();
@@ -41,8 +46,8 @@ async function req(url, opts = {}) {
   console.log('\nPOSTing to BC dev2...');
   let ok = 0, fail = 0;
   for (const b of missing) {
-    const res = await req(`${API}/dimensions(${DEPT_ID})/dimensionValues`, {
-      method: 'POST', body: JSON.stringify({ code: b.code, displayName: (b.name || b.code).slice(0, 50) }),
+    const res = await req(`${OD}/${SERVICE}`, {
+      method: 'POST', body: JSON.stringify({ Dimension_Code: 'DEPARTMENT', Code: b.code, Name: (b.name || b.code).slice(0, 50) }),
     });
     if (res.ok) { ok++; console.log('  OK  ', b.code); }
     else { fail++; console.log('  FAIL', b.code, res.s, res.b.slice(0, 150)); }
