@@ -41,6 +41,11 @@ const HQ = [
   { username: 'ceo',     role: 'super_admin', name: 'CEO (ดูภาพรวมทั้งหมด)' },
 ];
 
+// --- Warehouse / logistics dispatcher (CTI portal: จัดของ + ขนส่ง). -----------
+const CTI = [
+  { username: 'cti', role: 'cti', name: 'CTI Warehouse Dispatcher (คลัง/จัดส่ง)' },
+];
+
 const SYMBOLS = ['@', '#', '$', '%', '&'];
 
 // 6 chars = 4 digits + 2 symbols, shuffled → e.g. @22#26. Crypto-random.
@@ -101,6 +106,17 @@ function main() {
   for (const h of HQ) {
     users.push({
       category: 'hq',
+      username: h.username,
+      password: uniquePw(),
+      role: h.role,
+      display_name: h.name,
+    });
+  }
+
+  // CTI warehouse/logistics dispatcher.
+  for (const h of CTI) {
+    users.push({
+      category: 'cti',
       username: h.username,
       password: uniquePw(),
       role: h.role,
