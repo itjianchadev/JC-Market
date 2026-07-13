@@ -24,11 +24,12 @@ const GROUPS = [
   { key: 'branch-jc', title: 'สาขา Master (JC)',   hint: 'บริษัทเป็นเจ้าของ · ไม่ผ่าน Finance · ไม่มีชำระเงิน' },
   { key: 'branch-fc', title: 'สาขาแฟรนไชส์ (JF)',  hint: 'จ่ายผ่านสลิป · ผ่าน Finance' },
   { key: 'supplier',  title: 'Supplier (ของสด)',   hint: 'ผู้ส่งของสด · เห็นเฉพาะ PO ของตัวเอง' },
+  { key: 'cti',       title: 'คลัง CTI',            hint: 'จัดของ (warehouse pick) + ขนส่ง (dispatch)' },
 ];
 
 const ROLE_TH = {
   branch_owner: 'เจ้าของสาขา', supplier: 'ผู้ขาย', finance: 'Finance',
-  admin_scm: 'SCM', super_admin: 'Admin',
+  admin_scm: 'SCM', super_admin: 'Admin', cti: 'คลัง/จัดส่ง',
 };
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
