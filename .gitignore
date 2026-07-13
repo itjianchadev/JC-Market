@@ -11,3 +11,6 @@ imports/
 .claude/
 # Supabase CLI local cache (linked-project ref, not project state)
 supabase/.temp/
+
+# local DB backups
+data/*.bak*

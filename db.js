@@ -798,11 +798,12 @@ try { db.exec("ALTER TABLE orders ADD COLUMN picked_by TEXT"); } catch (e) { /* 
 try { db.exec("ALTER TABLE orders ADD COLUMN picked_by_name TEXT DEFAULT ''"); } catch (e) { /* already exists */ } // free-text: who physically picked/packed
 
 // Seed a sample carrier + driver so admins can exercise the UI on day 1.
-// Idempotent: skipped if any carrier exists. Default password is 'drv1234' —
-// change after first login (driver PWA exposes /api/tms/driver/me/password later).
+// Idempotent: skipped if any carrier exists. Default password is 'drv1234'.
+// GATED behind SEED_DEMO_TMS=1 so this known-password login never auto-creates
+// on prod (go-live must not ship default credentials). Local dev: opt in.
 try {
   const carrierCount = db.prepare('SELECT COUNT(*) c FROM carriers').get().c;
-  if (carrierCount === 0) {
+  if (process.env.SEED_DEMO_TMS === '1' && carrierCount === 0) {
     const insC = db.prepare(`INSERT INTO carriers (code, name, contact_phone, default_cost_per_trip, note)
       VALUES (?,?,?,?,?)`);
     const c1 = insC.run('DEMO-LOG', 'Demo Logistics (ตัวอย่าง)', '02-000-0000', 1500, 'sample carrier — replace with real one');
