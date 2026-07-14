@@ -14,3 +14,6 @@ supabase/.temp/
 
 # local DB backups
 data/*.bak*
+
+# merchant payment QR image (not for git)
+QR-JC.jpg
