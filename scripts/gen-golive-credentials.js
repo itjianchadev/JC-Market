@@ -85,7 +85,9 @@ function main() {
       role: 'branch_owner',
       display_name: b.name,
       branch_code: b.code,
-      bc_customer_no: b.bc_customer_no || b.code, // reconciled convention = branch code
+      bc_customer_no: b.code, // BC customers are keyed by branch code on Production
+                              // (never the local branches.bc_customer_no, which can hold
+                              //  stale values like TK685003 that don't exist in BC)
       branch_type: b.branch_type,
     });
   }
