@@ -1377,14 +1377,16 @@ async function postPOToBC(orderId, vendorNo) {
   // the value sticks. NOT using line.unit_price here: that's the branch sales
   // price, not the vendor purchase cost.
   //
-  // Location: stamp the ordering branch (e.g. JC002 → Location Code JC002)
-  // when BC has a matching Location, so the PO shows who it's for. FC branches
-  // (JF***) don't exist as BC Locations today → fall back to INTRANSIT, which
-  // is also the safe default for any new branch we haven't set up in BC yet.
-  // Resolve both codes for the ACTIVE BC env (cached). On UAT-Dev 'INTRANSIT'
-  // resolves to 814291d6-… (unchanged); never hardcode — GUIDs differ per env.
+  // Location: JC master branches stamp their own Location (e.g. JC002 → JC002),
+  // which has Inventory Posting Setup so the receipt posts cleanly. FC (JF***)
+  // branches ship to INTRANSIT — this matches the validated UAT behaviour (JF
+  // Locations didn't exist there) and avoids requiring per-JF Inventory Posting
+  // Setup. The JF Locations exist in BC for reference but are intentionally not
+  // used on FC PO lines. Resolve codes for the ACTIVE BC env (cached); never
+  // hardcode — GUIDs differ per env.
   const intransitLocId = await bc.findLocationIdByCode('INTRANSIT').catch(() => null);
-  const branchLocId = await bc.findLocationIdByCode(order.branch_code).catch(() => null);
+  const isJc = (order.branch_code || '').toUpperCase().startsWith('JC');
+  const branchLocId = isJc ? await bc.findLocationIdByCode(order.branch_code).catch(() => null) : null;
   const lineLocationId = branchLocId || intransitLocId || undefined;
   for (const line of lines) {
     const item = db.prepare('SELECT id, unit_cost FROM items_cache WHERE item_no=?').get(line.item_no);
