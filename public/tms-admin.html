@@ -76,6 +76,15 @@
   .tms-side-group{flex-basis:100%;padding:6px 4px 2px}
 }
 @media(max-width:640px){.form-grid2{grid-template-columns:1fr}}
+.set-cards{display:flex;flex-wrap:wrap;gap:12px;margin:0 0 14px}
+.set-card{flex:1;min-width:150px;background:#fff;border:1px solid var(--gold);border-radius:12px;padding:12px 16px}
+.set-card .lbl{font-size:12px;color:var(--muted);margin-bottom:4px}
+.set-card .val{font-size:22px;font-weight:700;color:var(--gold-dark);line-height:1.1}
+.set-card .val small{font-size:13px;font-weight:600;color:var(--muted)}
+.dtable tbody tr.set-detail > td{background:rgba(173,156,130,.06);padding:0}
+.dtable tbody tr.set-detail table{width:100%;border-collapse:collapse;font-size:12px}
+.dtable tbody tr.set-detail th{background:transparent;color:var(--muted);font-weight:600;padding:8px 12px;border-bottom:1px dashed var(--gold)}
+.dtable tbody tr.set-detail td{padding:8px 12px;border-bottom:1px solid var(--border)}
 </style>
 </head><body data-i18n-title="tms.page_title">
 <div id="nav"></div>
@@ -110,6 +119,10 @@
       <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>
       <span>จัดส่งสำเร็จ</span>
       <span class="badge" id="sideDeliveryCount">0</span>
+    </button>
+    <button class="tms-sidebar-item" data-tab="settlement" onclick="switchTab('settlement')">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/><line x1="6" y1="15" x2="10" y2="15"/></svg>
+      <span>สรุปค่าขนส่ง</span>
     </button>
   </aside>
 
@@ -213,6 +226,45 @@
             <th>Shipment</th><th>ปลายทาง</th><th>คนขับ</th><th>ส่งเมื่อ</th><th>ผู้รับ</th><th>หลักฐาน</th>
           </tr></thead>
           <tbody id="deliveryBody"><tr><td colspan="6" class="empty">—</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Carrier settlement (สรุปค่าขนส่งต่อ carrier/รอบ) -->
+    <div class="tms-panel" id="panel-settlement">
+      <div class="toolbar" style="flex-wrap:wrap;gap:8px">
+        <h3 style="margin:0;color:var(--gold-dark)">สรุปค่าขนส่ง (Carrier Settlement)</h3>
+        <div class="spacer" style="flex:1"></div>
+        <label style="font-size:12px;color:var(--muted);align-self:center">รอบ</label>
+        <input type="date" id="setFrom" onchange="loadSettlement()" title="ตั้งแต่วันที่" style="padding:6px 10px;width:auto">
+        <span style="align-self:center;color:var(--muted)">–</span>
+        <input type="date" id="setTo" onchange="loadSettlement()" title="ถึงวันที่" style="padding:6px 10px;width:auto">
+        <select id="setPreset" onchange="applySettlementPreset()" style="padding:6px 10px;width:auto">
+          <option value="">— ช่วงด่วน —</option>
+          <option value="this_month">เดือนนี้</option>
+          <option value="last_month">เดือนก่อน</option>
+          <option value="this_week">สัปดาห์นี้</option>
+          <option value="today">วันนี้</option>
+        </select>
+        <select id="setCarrier" onchange="loadSettlement()" style="padding:6px 10px;width:auto">
+          <option value="">ทุก Carrier</option>
+        </select>
+        <label style="font-size:12px;color:var(--muted);align-self:center"><input type="checkbox" id="setInclCancelled" onchange="loadSettlement()" style="width:auto;margin-right:4px">รวมที่ยกเลิก</label>
+        <button class="btn sm ghost" onclick="exportSettlementCsv()" title="ส่งออก CSV รายเที่ยว">⬇ Export CSV</button>
+        <button class="btn sm ghost" onclick="loadSettlement()">รีเฟรช</button>
+      </div>
+      <p class="hint">สรุปค่าเที่ยว (cost_agreed) ต่อ Carrier ตามช่วงรอบที่เลือก · คลิกแถวเพื่อกางดูรายเที่ยว · ไม่รวมทริปที่ยกเลิก (ติ๊ก "รวมที่ยกเลิก" เพื่อแสดง)</p>
+      <div id="setSummaryCards" class="set-cards"></div>
+      <div class="card" style="padding:0;overflow-x:auto">
+        <table class="dtable">
+          <thead><tr>
+            <th>Carrier</th>
+            <th style="text-align:center">จำนวนเที่ยว</th>
+            <th style="text-align:center">จุดส่ง</th>
+            <th style="text-align:center">สำเร็จ / ไม่สำเร็จ</th>
+            <th style="text-align:right">รวมค่าเที่ยว (บาท)</th>
+          </tr></thead>
+          <tbody id="setBody"><tr><td colspan="5" class="empty">—</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -412,6 +464,7 @@ function switchTab(tab) {
   if (tab === 'pickhistory') loadPickHistory();
   if (tab === 'trips') loadTrips();
   if (tab === 'deliveries') loadDeliveries();
+  if (tab === 'settlement') loadSettlement();
 }
 
 let deliveriesCache = [];
@@ -1109,6 +1162,170 @@ async function cancelTrip(id, tripNo) {
     toast(t('tms.trip.status.cancelled'));
     loadTrips();
   } catch (e) { toast(e.message); }
+}
+
+// ─── Carrier settlement (สรุปค่าขนส่ง) ───
+// Read-only accounting report over trips.cost_agreed. All aggregation happens
+// server-side (/api/tms/settlements); this just renders + exports.
+let settlementCache = null;
+let settlementInit = false;
+
+const setFmtBaht = n => (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function pad2(n) { return String(n).padStart(2, '0'); }
+function ymd(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
+
+// Default the range to the current month the first time the tab opens.
+function ensureSettlementDefaults() {
+  if (settlementInit) return;
+  settlementInit = true;
+  const now = new Date();
+  const first = new Date(now.getFullYear(), now.getMonth(), 1);
+  const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  document.getElementById('setFrom').value = ymd(first);
+  document.getElementById('setTo').value = ymd(last);
+}
+
+// Fill the carrier filter from the carriers cache. Called on each load so it
+// self-heals if the tab opened before loadCarriers() resolved.
+function ensureSettlementCarriers() {
+  const sel = document.getElementById('setCarrier');
+  if (sel.options.length > 1) return; // already populated
+  if (!carriersCache.length) return;  // cache not ready yet
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">ทุก Carrier</option>' +
+    carriersCache.map(c => `<option value="${c.id}">${c.code} — ${c.name}</option>`).join('');
+  sel.value = cur;
+}
+
+function applySettlementPreset() {
+  const v = document.getElementById('setPreset').value;
+  if (!v) return;
+  const now = new Date();
+  let from, to;
+  if (v === 'this_month') {
+    from = new Date(now.getFullYear(), now.getMonth(), 1);
+    to = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  } else if (v === 'last_month') {
+    from = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    to = new Date(now.getFullYear(), now.getMonth(), 0);
+  } else if (v === 'this_week') {
+    const day = (now.getDay() + 6) % 7; // Monday = 0
+    from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - day);
+    to = new Date(from.getFullYear(), from.getMonth(), from.getDate() + 6);
+  } else if (v === 'today') {
+    from = to = now;
+  }
+  document.getElementById('setFrom').value = ymd(from);
+  document.getElementById('setTo').value = ymd(to);
+  loadSettlement();
+}
+
+async function loadSettlement() {
+  ensureSettlementDefaults();
+  ensureSettlementCarriers();
+  const qs = new URLSearchParams();
+  const from = document.getElementById('setFrom').value;
+  const to = document.getElementById('setTo').value;
+  const carrier = document.getElementById('setCarrier').value;
+  if (from) qs.set('from', from);
+  if (to) qs.set('to', to);
+  if (carrier) qs.set('carrier_id', carrier);
+  if (document.getElementById('setInclCancelled').checked) qs.set('include_cancelled', '1');
+  try {
+    settlementCache = await api('/api/tms/settlements' + (qs.toString() ? '?' + qs.toString() : ''));
+    renderSettlement();
+  } catch (e) { toast(e.message); }
+}
+
+function renderSettlement() {
+  if (!settlementCache) return;
+  const { rows, grand } = settlementCache;
+  // Summary cards.
+  document.getElementById('setSummaryCards').innerHTML = `
+    <div class="set-card"><div class="lbl">รวมค่าเที่ยวทั้งหมด</div><div class="val">${setFmtBaht(grand.cost_total)} <small>บาท</small></div></div>
+    <div class="set-card"><div class="lbl">จำนวนเที่ยว</div><div class="val">${grand.trip_count.toLocaleString()} <small>เที่ยว</small></div></div>
+    <div class="set-card"><div class="lbl">จุดส่งทั้งหมด</div><div class="val">${grand.stop_count.toLocaleString()} <small>จุด</small></div></div>
+    <div class="set-card"><div class="lbl">Carrier</div><div class="val">${rows.length.toLocaleString()} <small>ราย</small></div></div>`;
+
+  const el = document.getElementById('setBody');
+  if (!rows.length) {
+    el.innerHTML = `<tr><td colspan="5" class="empty">ไม่มีทริปในช่วงรอบที่เลือก</td></tr>`;
+    return;
+  }
+  const body = rows.map(r => `
+    <tr class="row-clickable" onclick="toggleSettlementDetail(${r.carrier_id}, this)">
+      <td><span class="caret" style="display:inline-block;width:14px;color:var(--muted)">▶</span><strong>${r.carrier_code || '-'}</strong><br><small style="color:var(--muted);padding-left:14px">${r.carrier_name || ''}</small></td>
+      <td style="text-align:center">${r.trip_count.toLocaleString()}</td>
+      <td style="text-align:center">${r.stop_count.toLocaleString()}</td>
+      <td style="text-align:center"><span style="color:var(--gold-dark)">${r.delivered_count}</span> / <span style="color:var(--err)">${r.failed_count}</span></td>
+      <td style="text-align:right;font-weight:700">${setFmtBaht(r.cost_total)}</td>
+    </tr>`).join('');
+  // Grand-total footer row.
+  const foot = `
+    <tr style="background:var(--beige)">
+      <td><strong>รวมทั้งหมด</strong></td>
+      <td style="text-align:center"><strong>${grand.trip_count.toLocaleString()}</strong></td>
+      <td style="text-align:center"><strong>${grand.stop_count.toLocaleString()}</strong></td>
+      <td style="text-align:center"><strong>${grand.delivered_count} / ${grand.failed_count}</strong></td>
+      <td style="text-align:right"><strong>${setFmtBaht(grand.cost_total)}</strong></td>
+    </tr>`;
+  el.innerHTML = body + foot;
+}
+
+// Expand/collapse a carrier row into its per-trip detail (built from the cached
+// trips list — no extra request).
+function toggleSettlementDetail(carrierId, rowEl) {
+  const next = rowEl.nextElementSibling;
+  if (next && next.classList.contains('set-detail')) {
+    next.remove();
+    const caret = rowEl.querySelector('.caret'); if (caret) caret.textContent = '▶';
+    return;
+  }
+  const trips = (settlementCache.trips || []).filter(t => t.carrier_id === carrierId);
+  const inner = trips.map(t => `
+    <tr>
+      <td><strong>${t.trip_number}</strong></td>
+      <td>${t.scheduled_date || '-'}</td>
+      <td>${t.driver_name || '<span style="color:var(--muted)">-</span>'}${t.vehicle_plate ? ' · ' + t.vehicle_plate : ''}</td>
+      <td>${t.status}</td>
+      <td style="text-align:center">${t.stop_count} (<span style="color:var(--gold-dark)">${t.delivered_count}</span>/<span style="color:var(--err)">${t.failed_count}</span>)</td>
+      <td style="text-align:right;font-weight:600">${setFmtBaht(t.cost_agreed)}</td>
+    </tr>`).join('');
+  const tr = document.createElement('tr');
+  tr.className = 'set-detail';
+  tr.innerHTML = `<td colspan="5"><table>
+    <thead><tr><th>เลขที่ทริป</th><th>วันที่</th><th>คนขับ · ทะเบียน</th><th>สถานะ</th><th style="text-align:center">จุดส่ง (สำเร็จ/ล้ม)</th><th style="text-align:right">ค่าเที่ยว</th></tr></thead>
+    <tbody>${inner || '<tr><td colspan="6" style="text-align:center;color:var(--muted)">—</td></tr>'}</tbody></table></td>`;
+  rowEl.after(tr);
+  const caret = rowEl.querySelector('.caret'); if (caret) caret.textContent = '▼';
+}
+
+// Client-side CSV export of the trip-level detail (what accounting reconciles).
+// UTF-8 BOM so Thai renders correctly in Excel.
+function exportSettlementCsv() {
+  if (!settlementCache || !(settlementCache.trips || []).length) { toast('ไม่มีข้อมูลให้ส่งออก'); return; }
+  const esc = v => {
+    const s = (v == null ? '' : String(v));
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const header = ['Carrier Code', 'Carrier Name', 'Trip No', 'Date', 'Driver', 'Vehicle', 'Status', 'Stops', 'Delivered', 'Failed', 'Cost Agreed'];
+  const lines = [header.join(',')];
+  for (const t of settlementCache.trips) {
+    lines.push([
+      t.carrier_code, t.carrier_name, t.trip_number, t.scheduled_date, t.driver_name || '',
+      t.vehicle_plate || '', t.status, t.stop_count, t.delivered_count, t.failed_count, (t.cost_agreed || 0),
+    ].map(esc).join(','));
+  }
+  lines.push(['', '', '', '', '', '', 'TOTAL', settlementCache.grand.trip_count, settlementCache.grand.delivered_count, settlementCache.grand.failed_count, settlementCache.grand.cost_total].map(esc).join(','));
+  const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const from = document.getElementById('setFrom').value || 'all';
+  const to = document.getElementById('setTo').value || 'all';
+  a.href = url;
+  a.download = `carrier-settlement_${from}_${to}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
 }
 
 loadPicking();

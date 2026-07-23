@@ -3866,6 +3866,67 @@ app.get('/api/tms/trips/:id/manifest', requireAuth, requireTmsManager, async (re
   } catch (e) { console.error('[manifest]', e.message); res.status(500).json({ error: e.message }); }
 });
 
+// ─── Carrier settlement (สรุปค่าขนส่ง) ───
+// Accounting view: total agreed trip cost (ค่าเที่ยว) per carrier over a billing
+// period (from..to on trips.scheduled_date). Read-only report built purely from
+// trips.cost_agreed — the number the planner locks in when the trip is created.
+// Cancelled trips carry no payment obligation, so they're excluded unless the
+// caller explicitly asks (include_cancelled=1). Returns per-carrier aggregate
+// rows, a grand total, and the trip-level detail so the UI can drill down and
+// export without a second round-trip.
+app.get('/api/tms/settlements', requireAuth, requireTmsManager, (req, res) => {
+  const { from, to, carrier_id, include_cancelled } = req.query;
+  const wheres = [], params = [];
+  if (from) { wheres.push('t.scheduled_date >= ?'); params.push(from); }
+  if (to)   { wheres.push('t.scheduled_date <= ?'); params.push(to); }
+  if (carrier_id) { wheres.push('t.carrier_id = ?'); params.push(carrier_id); }
+  if (String(include_cancelled) !== '1') wheres.push("t.status <> 'cancelled'");
+  const where = wheres.length ? `WHERE ${wheres.join(' AND ')}` : '';
+
+  // Per-trip rows with delivered/failed stop counts derived from shipments.
+  const trips = db.prepare(`
+    SELECT t.id, t.trip_number, t.scheduled_date, t.status, t.cost_agreed,
+           t.vehicle_plate, t.carrier_id,
+           c.code AS carrier_code, c.name AS carrier_name,
+           d.full_name AS driver_name,
+           (SELECT COUNT(*) FROM shipments s WHERE s.trip_id = t.id) AS stop_count,
+           (SELECT COUNT(*) FROM shipments s WHERE s.trip_id = t.id AND s.status = 'delivered') AS delivered_count,
+           (SELECT COUNT(*) FROM shipments s WHERE s.trip_id = t.id AND s.status = 'failed') AS failed_count
+    FROM trips t
+    LEFT JOIN carriers c ON c.id = t.carrier_id
+    LEFT JOIN carrier_drivers d ON d.id = t.driver_id
+    ${where}
+    ORDER BY c.code ASC, t.scheduled_date ASC, t.id ASC
+  `).all(...params);
+
+  // Fold trips into per-carrier aggregates + a grand total.
+  const byCarrier = new Map();
+  const grand = { trip_count: 0, stop_count: 0, delivered_count: 0, failed_count: 0, cost_total: 0 };
+  for (const tr of trips) {
+    const key = tr.carrier_id;
+    let row = byCarrier.get(key);
+    if (!row) {
+      row = {
+        carrier_id: tr.carrier_id, carrier_code: tr.carrier_code, carrier_name: tr.carrier_name,
+        trip_count: 0, stop_count: 0, delivered_count: 0, failed_count: 0, cost_total: 0,
+      };
+      byCarrier.set(key, row);
+    }
+    row.trip_count++;
+    row.stop_count += tr.stop_count;
+    row.delivered_count += tr.delivered_count;
+    row.failed_count += tr.failed_count;
+    row.cost_total += tr.cost_agreed || 0;
+    grand.trip_count++;
+    grand.stop_count += tr.stop_count;
+    grand.delivered_count += tr.delivered_count;
+    grand.failed_count += tr.failed_count;
+    grand.cost_total += tr.cost_agreed || 0;
+  }
+  const rows = [...byCarrier.values()].sort((a, b) => (a.carrier_code || '').localeCompare(b.carrier_code || ''));
+  res.json({ from: from || null, to: to || null, rows, grand, trips });
+});
+
 // ─── Completed deliveries + POD (CTI warehouse visibility) ───
 // Delivered general-goods (channel='cti') shipments with their proof-of-delivery
 // (photo, signature, recipient, GPS, time) so the CTI dispatcher can review them.
