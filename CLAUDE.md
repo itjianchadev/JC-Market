@@ -67,6 +67,17 @@ After its BC trigger document succeeds, `routeOrderFulfilment()` (Phase 1.2) sen
 - **Receipt/print PDF styles intentionally keep `#181818`** — paper readability matters more than the no-black brand rule for screens.
 - **CI palette**: white + gold (`#AD9C82` brand, `#8a7d66` darker, `#2a2118` warm text). No pure black on screen.
 
+## Deployment (DigitalOcean droplet)
+
+Production runs on a DO droplet; the live SQLite DB is the file `data/stock-market.db` **on the droplet** (not in git). Node process is managed by **pm2**.
+
+- **`ecosystem.config.js`** — pm2 config. Single `fork` instance on purpose: better-sqlite3 is single-writer, never cluster it. Secrets stay in `.env` on the droplet.
+- **`deploy.sh`** — run *on the droplet*: `bash /opt/jc-market/deploy.sh`. Backs up the DB → pulls branch (ff-only) → `npm install --omit=dev` → `pm2 restart` → health-checks `/api/health`. Override with `JC_APP_DIR`, `JC_DEPLOY_BRANCH`, `PORT`.
+- **`scripts/backup-db.sh`** — safe `sqlite3 .backup` snapshot (live-safe). Cron-friendly; keeps the newest `JC_BACKUP_KEEP` (default 48) under `data/backups/` (gitignored).
+- First-time droplet setup: `apt install -y git build-essential python3 sqlite3` + Node LTS + `npm i -g pm2`, then `pm2 start ecosystem.config.js && pm2 save && pm2 startup`.
+- Migrations are the idempotent `ALTER`s in `db.js` — they run automatically on server boot, so a deploy needs no separate migrate step.
+- **Inspect the live DB**: `sqlite3 data/stock-market.db` on the droplet, or `.backup` + `scp` the snapshot down and open in DB Browser for SQLite. Don't `scp` the live `.db` directly while the server is writing — use `.backup` first.
+
 ## Scripts (under `scripts/`)
 
 | Script | What it does |
