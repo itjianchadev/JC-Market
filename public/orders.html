@@ -228,7 +228,7 @@ async function showDetail(id) {
   // Slip (already uploaded) — suppress for 'failed' since the re-upload UI is the primary action
   if (o.payment && o.payment.slip_path && o.payment_status !== 'failed') {
     html += `<hr style="border-color:var(--border);margin:12px 0"><h4>${t('orders.slip')}</h4>
-      <img src="${o.payment.slip_path}" style="max-width:280px;border-radius:8px;margin-top:8px">`;
+      ${slipView(o.payment.slip_path, 280)}`;
     if (o.payment.verified) html += `<p style="color:var(--ok);font-size:13px;margin-top:4px">${t('orders.verified_at', { at: o.payment.verified_at })}</p>`;
   }
 

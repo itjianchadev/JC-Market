@@ -898,6 +898,38 @@ function renderNav(active) {
   return html;
 }
 
+// ─── Payment slip rendering (images AND PDFs) ───
+// Slips accept image/* and .pdf. An <img> tag cannot render a PDF, so a PDF
+// slip shows as a broken image and "can't be opened". These helpers render an
+// image thumbnail for pictures and a clickable PDF badge for PDFs, and open the
+// full slip in a lightbox (image) or a new tab (PDF).
+function isPdfSlip(p) { return /\.pdf(\?|#|$)/i.test(p || ''); }
+
+// Small thumbnail cell (e.g. Finance approvals table).
+function slipThumb(p) {
+  if (!p) return '<span style="color:var(--muted);font-size:11px">—</span>';
+  if (isPdfSlip(p)) return `<a href="${p}" target="_blank" rel="noopener" class="slip-thumb" style="display:inline-flex;align-items:center;justify-content:center;text-decoration:none;font-size:12px;font-weight:600;color:var(--gold-dark)" title="เปิดสลิป PDF">📄 PDF</a>`;
+  return `<img src="${p}" class="slip-thumb" onclick="openSlip('${p}')">`;
+}
+
+// Larger inline preview (e.g. order detail). maxW in px.
+function slipView(p, maxW) {
+  if (!p) return '';
+  maxW = maxW || 280;
+  if (isPdfSlip(p)) return `<a href="${p}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:8px;margin-top:8px;padding:12px 16px;border:1px solid var(--border);border-radius:8px;text-decoration:none;color:var(--gold-dark);font-weight:600">📄 เปิดสลิป (PDF)</a>`;
+  return `<img src="${p}" style="max-width:${maxW}px;border-radius:8px;margin-top:8px;cursor:pointer" onclick="openSlip('${p}')">`;
+}
+
+// Full-size view: image → lightbox if the page has one, else new tab; PDF → new tab.
+function openSlip(p) {
+  if (!p) return;
+  if (isPdfSlip(p)) { window.open(p, '_blank', 'noopener'); return; }
+  const lb = document.getElementById('lightbox');
+  const img = document.getElementById('lightboxImg');
+  if (lb && img) { img.src = p; lb.style.display = 'flex'; }
+  else window.open(p, '_blank', 'noopener');
+}
+
 // Auto-apply i18n on DOMContentLoaded for static elements
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => applyI18n());

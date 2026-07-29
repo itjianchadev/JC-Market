@@ -15,14 +15,22 @@ const { verifySlip, hashFile, MOCK_VERIFY } = require('./slip-verify');
 const PORT = process.env.PORT || 3862;
 const SYNC_INTERVAL = (parseInt(process.env.ITEM_SYNC_INTERVAL_MINUTES) || 5) * 60 * 1000;
 const app = express();
+
+// Ensure the slip/POD upload directory exists. It's gitignored, so a fresh
+// deploy has no `uploads/` folder — and multer.diskStorage does NOT create its
+// destination. Without this, every slip upload fails with ENOENT, so branches
+// can't submit slips and Finance has nothing to view.
+const UPLOADS_DIR = path.join(__dirname, 'uploads');
+require('fs').mkdirSync(UPLOADS_DIR, { recursive: true });
+
 app.use(express.json({ limit: '5mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/uploads', express.static(UPLOADS_DIR));
 
 // Multer for slip upload
 const upload = multer({
   storage: multer.diskStorage({
-    destination: path.join(__dirname, 'uploads'),
+    destination: UPLOADS_DIR,
     filename: (req, file, cb) => cb(null, `slip_${Date.now()}_${Math.random().toString(36).slice(2,8)}${path.extname(file.originalname)}`),
   }),
   limits: { fileSize: 10 * 1024 * 1024 },

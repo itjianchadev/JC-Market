@@ -58,7 +58,9 @@
           <div style="display:flex;justify-content:space-between;font-size:24px;font-weight:700"><span data-i18n="checkout.grand">รวม</span><span id="grandTotal" style="color:var(--gold)"></span></div>
           <div style="color:var(--err);font-size:12px;margin-top:4px;text-align:right" data-i18n="checkout.shipping_note">ราคานี้ไม่รวมค่าขนส่ง</div>
 
-          <!-- FC fruit orders are always Credit 7 days (immediate-pay removed per ops feedback). -->
+          <!-- Retired 2026-07: FC fruit orders used to force Credit-7 days here.
+               All orders now pay immediately + upload a slip at checkout, so this
+               box is kept hidden (never shown by placeOrder/renderCart). -->
           <div id="payMethodBox" style="display:none;margin-top:16px">
             <div style="font-size:13px;font-weight:600;margin-bottom:8px" data-i18n="checkout.payment_method">วิธีชำระเงิน</div>
             <!-- Single fixed method (credit_7d) shown as an info card, not a radio, so the
@@ -221,14 +223,9 @@ async function init() {
     renderCartItems();
     document.getElementById('subtotal').textContent = `฿${cartData.subtotal.toLocaleString()}`;
     document.getElementById('grandTotal').textContent = `฿${cartData.subtotal.toLocaleString()}`;
-    // Payment method picker shows ONLY for FC fruit carts. JC master branches
-    // never pay (Transfer Order / internal PO), so the radio doesn't apply.
-    const me = getUser() || {};
-    const isJc = me.branch_type === 'jc';
-    const firstCat = cartData.items[0] && cartData.items[0].category;
-    if (!isJc && firstCat && categoryGroup(firstCat) === 'fruit') {
-      document.getElementById('payMethodBox').style.display = 'block';
-    }
+    // All FC orders (fruit + general) now pay immediately and upload a slip at
+    // checkout — credit-7d was retired per ops decision (2026-07). The credit
+    // info card (payMethodBox) is no longer shown for any cart.
   } catch (e) { alert(e.message); }
 }
 
@@ -247,12 +244,11 @@ let lastOrderResp = null;
 let savedItems = null; // snapshot ของ items ก่อน cart ถูกล้าง ใช้สำหรับ PDF
 async function placeOrder() {
   const note = document.getElementById('note').value;
-  // FC fruit carts are credit_7d (the only method shown); FC general + JC pay
-  // immediately. Derive from the fruit picker's visibility so a hidden credit_7d
-  // radio can never leak credit terms into a general/JC order (the server also
-  // rejects credit_7d for non-fruit, but keep the client honest too).
-  const isFruitCart = document.getElementById('payMethodBox').style.display === 'block';
-  const paymentMethod = isFruitCart ? 'credit_7d' : 'immediate';
+  // Every FC order — fruit and general alike — pays immediately and uploads a
+  // slip at checkout. Credit-7d was retired per ops decision (2026-07); fruit no
+  // longer skips the slip step. (JC branches are forced to immediate server-side
+  // since they don't pay at all.)
+  const paymentMethod = 'immediate';
   try {
     // snapshot items ก่อน server ล้าง cart
     savedItems = cartData ? cartData.items.map(it => ({
