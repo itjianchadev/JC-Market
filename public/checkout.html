@@ -263,7 +263,9 @@ async function placeOrder() {
     // JC master branch: no payment, no Finance — BC TO (general) or PO (fruit)
     // was already created at checkout. Jump straight to step 3 with the
     // appropriate document number.
-    if (r.is_jc) {
+    // When allow_slip is set (JC_ALLOW_SLIP on) JC is routed through the normal
+    // QR + slip step instead, so fall through to the immediate-payment flow.
+    if (r.is_jc && !r.allow_slip) {
       document.getElementById('step1').style.display = 'none';
       document.getElementById('step3').style.display = 'block';
       document.getElementById('doneOrderNo').textContent = r.order_number;
