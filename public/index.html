@@ -166,7 +166,10 @@ if(!denyPortal()) throw '';
 document.getElementById('nav').innerHTML = renderNav('index.html');
 
 const me = getUser();
-const isAdminView = me && (me.role === 'super_admin' || me.role === 'admin_scm');
+// Roles that can toggle item visibility (SCM control of what owners see).
+const VIS_ROLES = ['super_admin', 'admin_scm', 'test_superadmin', 'test_adminscm'];
+const canToggleVis = !!(me && VIS_ROLES.includes(me.role));
+const isAdminView = canToggleVis;
 
 let selectedItem = null;
 let activeCat = '';      // selected sub-category code (mutually exclusive with activeGroup)
@@ -192,7 +195,8 @@ if (isAdminView) {
     <th data-i18n="shop.col.stock">คงเหลือ</th>
     <th data-i18n="shop.col.uom">หน่วย</th>
     <th data-i18n="shop.col.last_order">สั่งล่าสุด</th>
-    <th style="text-align:center"></th>`;
+    <th style="text-align:center"></th>
+    <th style="text-align:center">${getLang()==='th'?'แสดงหน้า Owner':'Show to Owner'}</th>`;
   applyI18n(thead);
 } else {
   // FC catalog hides no-price / out-of-stock items permanently (see renderItems),
@@ -298,7 +302,7 @@ function renderItems() {
     ? `${baseInfo} · ${t('shop.oos_hidden', { n: oosHidden })}`
     : baseInfo;
   const el = document.getElementById('itemBody');
-  if (!filtered.length) { el.innerHTML = `<tr><td colspan="${isAdminView?7:6}" style="color:var(--muted);padding:20px;text-align:center">${t('shop.no_items')}</td></tr>`; return; }
+  if (!filtered.length) { el.innerHTML = `<tr><td colspan="${isAdminView?8:6}" style="color:var(--muted);padding:20px;text-align:center">${t('shop.no_items')}</td></tr>`; return; }
 
   const noPriceLabel = t('shop.no_price');
   const priceCell = it => (it.unit_price > 0)
@@ -324,6 +328,9 @@ function renderItems() {
         <td class="col-uom">${it.uom}</td>
         <td style="font-size:12px">${lastCell}</td>
         <td class="col-action"><button class="btn sm ghost" onclick='event.stopPropagation();openHistory("${it.item_no}", ${JSON.stringify(it).replace(/'/g,"&#39;")})'>${histBtn}</button></td>
+        <td style="text-align:center" onclick="event.stopPropagation()" title="${getLang()==='th'?'เปิด = แสดงให้ owner เห็น / ปิด = ซ่อน':'On = visible to owner / Off = hidden'}">
+          <label class="switch"><input type="checkbox" ${it.scm_hidden ? '' : 'checked'} onchange="toggleItemVis('${it.item_no}', this)"><span class="slider"></span></label>
+        </td>
       </tr>`;
     }).join('');
     return;
@@ -349,6 +356,25 @@ function renderItems() {
       <td class="col-action"><button class="btn sm" style="background:${btnColor};color:#fff" onclick='event.stopPropagation();${rowClick}'>${btnLabel}</button></td>
     </tr>`;
   }).join('');
+}
+
+// ─── SCM: toggle whether an item shows to branch owners ───
+// checked = visible to owner · unchecked = hidden. Persists via scm_hidden
+// (survives BC sync). Restricted server-side to SCM / Super Admin roles.
+async function toggleItemVis(itemNo, inputEl) {
+  const show = inputEl.checked;
+  inputEl.disabled = true;
+  try {
+    await api('/api/admin/items/' + encodeURIComponent(itemNo) + '/visibility',
+      { method: 'PATCH', body: JSON.stringify({ hidden: !show }) });
+    const it = allItems.find(x => x.item_no === itemNo);
+    if (it) it.scm_hidden = show ? 0 : 1;
+  } catch (e) {
+    inputEl.checked = !show; // revert on failure
+    alert(e.message || 'error');
+  } finally {
+    inputEl.disabled = false;
+  }
 }
 
 // ─── Admin: open history modal ───

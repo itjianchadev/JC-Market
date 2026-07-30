@@ -137,6 +137,11 @@ try { db.exec("ALTER TABLE order_lines ADD COLUMN bc_po_line_id TEXT DEFAULT ''"
 // of the single BC_DEFAULT_VENDOR_NO. Empty string = fall back to default.
 try { db.exec("ALTER TABLE items_cache ADD COLUMN vendor_no TEXT DEFAULT ''"); } catch (e) {}
 
+// ─── SCM manual visibility flag (survives BC sync) ───
+// 0 = shown to branch owners · 1 = hidden by SCM. sync.js only writes `active`,
+// never this column, so an SCM hide is NOT overwritten by the 5-min BC sync.
+try { db.exec("ALTER TABLE items_cache ADD COLUMN scm_hidden INTEGER DEFAULT 0"); } catch (e) {}
+
 // ─── Migrate: received_date on goods_receipts ───
 // Business date of when goods arrived at the branch. Distinct from created_at
 // (which records when the user pressed "Confirm receive" in the app — they

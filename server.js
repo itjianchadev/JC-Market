@@ -14,6 +14,16 @@ const { verifySlip, hashFile, MOCK_VERIFY } = require('./slip-verify');
 
 const PORT = process.env.PORT || 3862;
 const SYNC_INTERVAL = (parseInt(process.env.ITEM_SYNC_INTERVAL_MINUTES) || 5) * 60 * 1000;
+// When on, JC-master (company-owned) branches also go through the QR + slip
+// payment flow instead of the no-pay 'paid' shortcut. Accounting stays the JC
+// model (VAT 0, BC Transfer Order / internal PO created on Finance verify) —
+// this only un-hides the payment page + slip upload. Default OFF. Set
+// JC_ALLOW_SLIP=1 in .env to enable; flip back to 0 to restore no-pay JC.
+const JC_ALLOW_SLIP = process.env.JC_ALLOW_SLIP === '1';
+// Roles allowed to toggle item visibility on the shop (SCM controls what branch
+// owners see). Kept separate from requireAdmin so Finance is intentionally excluded.
+const ITEM_VIS_ROLES = new Set(['super_admin', 'admin_scm', 'test_superadmin', 'test_adminscm']);
+function canManageItemVis(u) { return !!u && ITEM_VIS_ROLES.has(u.role); }
 const app = express();
 app.use(express.json({ limit: '5mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -352,7 +362,10 @@ app.delete('/api/users/:id', requireAuth, (req, res) => {
 // ─── Items (from cache) ───
 app.get('/api/items', requireAuth, (req, res) => {
   const { q = '', category = '' } = req.query;
+  // Branch (owner) users only see items SCM hasn't hidden. HQ admin/SCM see all
+  // active items (incl. hidden) so the shop admin view can render the toggle.
   let sql = 'SELECT * FROM items_cache WHERE active=1';
+  if (!isHqAdmin(req.user)) sql += ' AND scm_hidden=0';
   const params = [];
   if (q) { sql += ' AND (name LIKE ? OR name_en LIKE ? OR item_no LIKE ?)'; params.push(`%${q}%`, `%${q}%`, `%${q}%`); }
   if (category) { sql += ' AND category=?'; params.push(category); }
@@ -407,8 +420,21 @@ app.get('/api/admin/items/:item_no/history', requireAuth, requireAdmin, (req, re
   res.json(rows);
 });
 
+// ─── SCM: toggle whether an item shows on the shop to branch owners ───
+// scm_hidden survives BC sync (sync.js never writes it). Only SCM / Super Admin
+// (and their test accounts) may change it — Finance is intentionally excluded.
+app.patch('/api/admin/items/:item_no/visibility', requireAuth, (req, res) => {
+  if (!canManageItemVis(req.user)) return res.status(403).json({ error: 'เฉพาะ SCM / Super Admin เท่านั้น' });
+  // Applies to ALL items — both fresh (ประเภทของสด) and dry (ประเภทของแห้ง).
+  const hidden = (req.body && (req.body.hidden === true || req.body.hidden === 1 || req.body.hidden === '1')) ? 1 : 0;
+  const info = db.prepare('UPDATE items_cache SET scm_hidden=? WHERE item_no=?').run(hidden, req.params.item_no);
+  if (!info.changes) return res.status(404).json({ error: 'Item not found' });
+  res.json({ ok: true, item_no: req.params.item_no, scm_hidden: hidden });
+});
+
 app.get('/api/items/categories', requireAuth, (req, res) => {
-  res.json(db.prepare('SELECT DISTINCT category FROM items_cache WHERE active=1 AND category<>"" ORDER BY category').all().map(r => r.category));
+  const extra = isHqAdmin(req.user) ? '' : ' AND scm_hidden=0';
+  res.json(db.prepare(`SELECT DISTINCT category FROM items_cache WHERE active=1${extra} AND category<>'' ORDER BY category`).all().map(r => r.category));
 });
 
 // ─── Cart ───
@@ -639,9 +665,11 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
   //     doesn't pay; Finance approves the order, then verify creates the BC docs.
   //   FC general/immediate → 'pending' — waits for the slip upload (→ 'paid'),
   //     then Finance approves.
+  //   JC master + JC_ALLOW_SLIP on → 'pending' too, so the QR/slip UI shows and
+  //     the branch attaches a payment slip before Finance verify (BC still TRO/PO).
   const initialPaymentStatus =
     paymentMethod === 'credit_7d' ? 'verified'
-    : isJcBranch ? 'paid'
+    : (isJcBranch && !JC_ALLOW_SLIP) ? 'paid'
     : 'pending';
 
   const tx = db.transaction(() => {
@@ -691,7 +719,7 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
   // Generate PromptPay QR for FC only — JC branches don't pay. Per-order QR
   // encodes the goods total (net_payable === total); shipping is billed monthly.
   let qrDataUrl = '';
-  if (!isJcBranch) {
+  if (!isJcBranch || JC_ALLOW_SLIP) {
     try {
       qrDataUrl = await generateQR(netPayable);
     } catch (e) {
@@ -742,7 +770,7 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
   const createdRow = db.prepare('SELECT created_at FROM orders WHERE id=?').get(orderId);
 
   let msgBase;
-  if (orderType === 'jc_transfer' || orderType === 'jc_purchase') {
+  if ((orderType === 'jc_transfer' || orderType === 'jc_purchase') && !JC_ALLOW_SLIP) {
     msgBase = `สร้างคำสั่งซื้อ ${orderNumber} (สาขา JC) — รอ Finance อนุมัติเพื่อสร้างเอกสาร BC`;
   } else if (paymentMethod === 'credit_7d') {
     msgBase = `สร้างคำสั่งซื้อ ${orderNumber} (เครดิต 7 วัน) — ${bcSoResult && bcSoResult.bc_so_no ? 'BC SO ' + bcSoResult.bc_so_no : 'BC SO ค้าง (retry)'}`;
@@ -764,6 +792,7 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
     credit_due_at: creditDueAt,
     is_fruit: isFruitOrder,
     is_jc: !!isJcBranch,
+    allow_slip: !!(isJcBranch && JC_ALLOW_SLIP), // JC master routed through QR/slip flow
     order_type: orderType,
     bc_so: bcSoResult,
     bc_po: bcPoResult,
