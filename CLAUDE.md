@@ -78,6 +78,14 @@ Production runs on a DO droplet; the live SQLite DB is the file `data/stock-mark
 - Migrations are the idempotent `ALTER`s in `db.js` — they run automatically on server boot, so a deploy needs no separate migrate step.
 - **Inspect the live DB**: `sqlite3 data/stock-market.db` on the droplet, or `.backup` + `scp` the snapshot down and open in DB Browser for SQLite. Don't `scp` the live `.db` directly while the server is writing — use `.backup` first.
 
+### Sandbox (second instance on the same droplet)
+A parallel test instance runs next to production — same droplet, separate port + `.env` + DB (SQLite is per-file, so the two never conflict).
+- **`scripts/setup-sandbox.sh`** — one-shot: clones a second checkout (default `/var/www/jc-market-sandbox`), writes a sandbox `.env` (PORT=3864, fresh JWT, `BC_ENVIRONMENT=Jiancha_develop`, empty `SLIPOK_API_KEY`→mock), optionally seeds its DB from a prod `.backup`, `npm install`, starts pm2 as **`jc-market-sandbox`**, health-checks. Idempotent — keeps an existing sandbox `.env`/DB. Override via `JC_SANDBOX_DIR`, `JC_SANDBOX_BRANCH`, `JC_SANDBOX_PORT`, `JC_COPY_PROD_DB=yes|no|ask`.
+- **`ecosystem.sandbox.config.js`** — pm2 config for the sandbox (name `jc-market-sandbox`, single fork).
+- **`scripts/nginx-sandbox.conf.example`** — nginx block for `sandbox.jianchathailand.com` → `127.0.0.1:3864` (+ `certbot` for SSL).
+- **Redeploy the sandbox** with the same `deploy.sh`: `JC_APP_NAME=jc-market-sandbox JC_APP_DIR=/var/www/jc-market-sandbox PORT=3864 JC_ECOSYSTEM=ecosystem.sandbox.config.js bash deploy.sh` (deploy.sh now reads `JC_APP_NAME`/`JC_ECOSYSTEM`).
+- Keep the sandbox on **BC dev** and SlipOK mock so testing never creates real BC docs or hits the SlipOK quota.
+
 ## Scripts (under `scripts/`)
 
 | Script | What it does |

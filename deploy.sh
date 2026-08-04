@@ -15,12 +15,17 @@
 # Override defaults with env vars, e.g.:
 #     JC_DEPLOY_BRANCH=main JC_APP_DIR=/root/jc-market bash deploy.sh
 #
+# Redeploy the SANDBOX instance with the same script:
+#     JC_APP_NAME=jc-market-sandbox JC_APP_DIR=/var/www/jc-market-sandbox \
+#     JC_DEPLOY_BRANCH=main PORT=3864 JC_ECOSYSTEM=ecosystem.sandbox.config.js bash deploy.sh
+#
 set -euo pipefail
 
-APP_NAME="jc-market"
+APP_NAME="${JC_APP_NAME:-jc-market}"
 APP_DIR="${JC_APP_DIR:-/opt/jc-market}"
 BRANCH="${JC_DEPLOY_BRANCH:-main}"
 PORT="${PORT:-3863}"
+ECOSYSTEM="${JC_ECOSYSTEM:-ecosystem.config.js}"
 
 log()  { printf '\033[1;33m==>\033[0m %s\n' "$*"; }
 fail() { printf '\033[1;31m!! %s\033[0m\n' "$*" >&2; exit 1; }
@@ -61,7 +66,7 @@ if pm2 describe "$APP_NAME" >/dev/null 2>&1; then
   pm2 restart "$APP_NAME" --update-env
 else
   log "Starting pm2 process for the first time"
-  pm2 start ecosystem.config.js
+  pm2 start "$ECOSYSTEM"
   pm2 save
 fi
 
