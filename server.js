@@ -594,14 +594,6 @@ function genOrderNumber() {
   return prefix + String(seq).padStart(4, '0');
 }
 
-// Stamp the fixed delivery (รอบส่ง) date on a freshly inserted order. Mirrors
-// expectedDeliveryDate() in public/js/app.js: 12:00 cut-off, before → D+1,
-// after → D+2, calendar days. Computed from the row's own created_at so it is
-// immutable afterwards — goods receipts never touch it.
-const stampDeliveryDate = db.prepare(`UPDATE orders
-  SET delivery_date = date(created_at, CASE WHEN time(created_at) < '12:00:00' THEN '+1 day' ELSE '+2 day' END)
-  WHERE id = ?`);
-
 app.post('/api/orders/checkout', requireAuth, async (req, res) => {
   // can_order permission check. HQ admin ไม่ใช่คนสั่งของ — ปิดเด็ดขาด
   if (isHqAdmin(req.user)) return res.status(403).json({ error: 'HQ Admin ไม่ใช่ผู้สั่งซื้อ / HQ Admin cannot place orders' });
@@ -692,7 +684,6 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
     // Create order (VAT=0 ก่อน จะอัพเดทจาก BC ทีหลัง)
     db.prepare(`INSERT INTO orders (id, order_number, user_id, branch_code, subtotal, vat_amount, total, note, payment_method, credit_due_at, order_type, payment_status)
       VALUES (?,?,?,?,?,0,?,?,?,?,?,?)`).run(orderId, orderNumber, req.user.id, req.user.branch_code || '', subtotal, subtotal, note, paymentMethod, creditDueAt, orderType, initialPaymentStatus);
-    stampDeliveryDate.run(orderId);
 
     // Create order lines
     const insLine = db.prepare('INSERT INTO order_lines (order_id, item_no, item_name, quantity, unit_price, line_total) VALUES (?,?,?,?,?,?)');
@@ -822,39 +813,23 @@ app.post('/api/orders/checkout', requireAuth, async (req, res) => {
 });
 
 // ─── Orders: List ───
-// Shared SELECT for the orders list. Besides the raw order row it carries:
-//   branch_code      — falls back to the ordering user's branch for legacy rows
-//   branch_type      — 'fc' / 'jc' from branches (approvals JF/JC filter)
-//   verified_at/by   — Finance approval stamp from the payments row
-//   bc_receipt_no    — latest BC Posted Purchase Receipt from goods_receipts
-//   last_received_date — latest goods-receipt business date (partial receives)
-const ORDERS_LIST_SELECT = `
-  SELECT o.*,
-         COALESCE(NULLIF(o.branch_code, ''), u.branch_code, '') as branch_code,
-         u.full_name as user_name, u.branch_name,
-         b.branch_type,
-         rb.full_name as rejected_by_name,
-         vb.full_name as verified_by_name,
-         p.verified_at,
-         (SELECT gr.bc_receipt_no FROM goods_receipts gr
-           WHERE gr.order_id = o.id AND gr.bc_receipt_no != ''
-           ORDER BY gr.created_at DESC LIMIT 1) as bc_receipt_no,
-         (SELECT MAX(COALESCE(NULLIF(gr.received_date, ''), substr(gr.created_at, 1, 10)))
-            FROM goods_receipts gr WHERE gr.order_id = o.id) as last_received_date
-  FROM orders o
-  LEFT JOIN users u  ON u.id = o.user_id
-  LEFT JOIN branches b ON b.code = COALESCE(NULLIF(o.branch_code, ''), u.branch_code)
-  LEFT JOIN users rb ON rb.id = o.rejected_by
-  LEFT JOIN payments p ON p.id = (SELECT id FROM payments WHERE order_id = o.id ORDER BY id DESC LIMIT 1)
-  LEFT JOIN users vb ON vb.id = p.verified_by AND p.verified = 1`;
-
 app.get('/api/orders', requireAuth, (req, res) => {
   let sql, params;
   if (isHqAdmin(req.user)) {
-    sql = ORDERS_LIST_SELECT + ` ORDER BY o.created_at DESC`;
+    sql = `SELECT o.*, u.full_name as user_name, u.branch_name,
+                  rb.full_name as rejected_by_name
+           FROM orders o
+           LEFT JOIN users u  ON u.id=o.user_id
+           LEFT JOIN users rb ON rb.id=o.rejected_by
+           ORDER BY o.created_at DESC`;
     params = [];
   } else {
-    sql = ORDERS_LIST_SELECT + ` WHERE o.user_id=? ORDER BY o.created_at DESC`;
+    sql = `SELECT o.*, u.full_name as user_name, u.branch_name,
+                  rb.full_name as rejected_by_name
+           FROM orders o
+           LEFT JOIN users u  ON u.id=o.user_id
+           LEFT JOIN users rb ON rb.id=o.rejected_by
+           WHERE o.user_id=? ORDER BY o.created_at DESC`;
     params = [req.user.id];
   }
   res.json(db.prepare(sql).all(...params));
@@ -869,20 +844,10 @@ app.get('/api/orders/:id', requireAuth, (req, res) => {
     WHERE o.id=?`).get(req.params.id);
   if (!order) return res.status(404).json({ error: 'Order not found' });
   if (!isHqAdmin(req.user) && order.user_id !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
-  // unit_cost / uom come from items_cache (vendor purchase cost — what the BC
-  // PO line carries), used by the PO print view. unit_price stays the branch
-  // sales price.
-  const lines = db.prepare('SELECT ol.*, i.name_en as item_name_en, i.unit_cost, i.uom FROM order_lines ol LEFT JOIN items_cache i ON i.item_no=ol.item_no WHERE ol.order_id=?').all(order.id);
+  const lines = db.prepare('SELECT ol.*, i.name_en as item_name_en FROM order_lines ol LEFT JOIN items_cache i ON i.item_no=ol.item_no WHERE ol.order_id=?').all(order.id);
   const payment = db.prepare('SELECT * FROM payments WHERE order_id=? ORDER BY id DESC LIMIT 1').get(order.id);
   const receipts = db.prepare('SELECT gr.*, u.full_name as received_by_name FROM goods_receipts gr LEFT JOIN users u ON u.id=gr.received_by WHERE gr.order_id=? ORDER BY gr.created_at DESC').all(order.id);
-  const buyer = db.prepare(`
-    SELECT u.full_name, u.branch_name, u.phone as user_phone,
-           COALESCE(NULLIF(?, ''), u.branch_code, '') as branch_code,
-           b.name as branch_display_name, b.address as branch_address, b.phone as branch_phone,
-           b.branch_type, COALESCE(NULLIF(u.bc_customer_no, ''), b.bc_customer_no, '') as bc_customer_no
-    FROM users u LEFT JOIN branches b ON b.code = COALESCE(NULLIF(?, ''), u.branch_code)
-    WHERE u.id = ?`).get(order.branch_code || '', order.branch_code || '', order.user_id) || null;
-  res.json({ ...order, lines, payment, receipts, buyer });
+  res.json({ ...order, lines, payment, receipts });
 });
 
 // ─── Orders: QR regenerate ───
@@ -2825,7 +2790,6 @@ app.post('/api/orders/:id/reorder', requireAuth, async (req, res) => {
   const tx = db.transaction(() => {
     db.prepare(`INSERT INTO orders (id, order_number, user_id, branch_code, subtotal, shipping_fee, vat_amount, total, wht_rate, wht_base, wht_amount, net_payable, note)
       VALUES (?,?,?,?,?,?,?,?,0,0,0,?,?)`).run(orderId, orderNumber, req.user.id, req.user.branch_code || '', subtotal, reShipping, reVat, reTotal, reNet, `สั่งใหม่จาก ${oldOrder.order_number}`);
-    stampDeliveryDate.run(orderId);
 
     const insLine = db.prepare('INSERT INTO order_lines (order_id, item_no, item_name, quantity, unit_price, line_total) VALUES (?,?,?,?,?,?)');
     for (const ci of cartItems) {
