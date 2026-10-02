@@ -128,16 +128,6 @@ try { db.exec("ALTER TABLE orders ADD COLUMN shipped_at TEXT"); } catch (e) {}
 try { db.exec("ALTER TABLE orders ADD COLUMN shipped_by TEXT DEFAULT ''"); } catch (e) {}
 try { db.exec("ALTER TABLE orders ADD COLUMN fully_received_at TEXT"); } catch (e) {}
 
-// ─── Migrate: delivery_date on orders ───
-// Fixed delivery (รอบส่ง) date stamped at checkout from the 12:00 cut-off rule
-// (order before 12:00 → D+1, after → D+2; calendar days). Stored so the
-// approvals list shows the planned delivery date and it never moves when the
-// branch records a goods receipt (received_date lives on goods_receipts).
-try { db.exec("ALTER TABLE orders ADD COLUMN delivery_date TEXT DEFAULT ''"); } catch (e) {}
-db.exec(`UPDATE orders
-         SET delivery_date = date(created_at, CASE WHEN time(created_at) < '12:00:00' THEN '+1 day' ELSE '+2 day' END)
-         WHERE (delivery_date IS NULL OR delivery_date = '') AND created_at IS NOT NULL`);
-
 // ─── Migrate: bc_po_line_id on order_lines ───
 try { db.exec("ALTER TABLE order_lines ADD COLUMN bc_po_line_id TEXT DEFAULT ''"); } catch (e) {}
 
@@ -152,6 +142,13 @@ try { db.exec("ALTER TABLE items_cache ADD COLUMN vendor_no TEXT DEFAULT ''"); }
 // never this column, so an SCM hide is NOT overwritten by the 5-min BC sync.
 try { db.exec("ALTER TABLE items_cache ADD COLUMN scm_hidden INTEGER DEFAULT 0"); } catch (e) {}
 
+// ─── Migrate: received_date on goods_receipts ───
+// Business date of when goods arrived at the branch. Distinct from created_at
+// (which records when the user pressed "Confirm receive" in the app — they
+// may enter goods received yesterday into the app today). When the order
+// becomes fully received, orders.fully_received_at is set to the GR's
+// received_date rather than NOW(), so reports line up with reality.
+try { db.exec("ALTER TABLE goods_receipts ADD COLUMN received_date TEXT DEFAULT ''"); } catch (e) {}
 
 // ─── Goods Receipts ───
 db.exec(`
@@ -177,16 +174,6 @@ CREATE TABLE IF NOT EXISTS goods_receipt_lines (
   note TEXT DEFAULT ''
 );
 `);
-
-// ─── Migrate: received_date on goods_receipts ───
-// (Must run after the CREATE TABLE above — on a fresh DB the table does not
-// exist yet when the earlier migrations run, so the ALTER used to be skipped.)
-// Business date of when goods arrived at the branch. Distinct from created_at
-// (which records when the user pressed "Confirm receive" in the app — they
-// may enter goods received yesterday into the app today). When the order
-// becomes fully received, orders.fully_received_at is set to the GR's
-// received_date rather than NOW(), so reports line up with reality.
-try { db.exec("ALTER TABLE goods_receipts ADD COLUMN received_date TEXT DEFAULT ''"); } catch (e) {}
 
 // ─── Stock issues (FC consumes stock from branch on-hand) ───
 // goods_receipts → stock IN (received from HQ).

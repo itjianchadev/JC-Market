@@ -694,26 +694,6 @@ function deliveryNote(){
     : 'หมายเหตุ: Cut-off 12:00 น. ทุกวัน — สั่งก่อน 12:00 น. ได้รับวันถัดไป, สั่งหลัง 12:00 น. ได้รับอีก 2 วันถัดไป';
 }
 
-// ── Date display helpers (DD/MM/YYYY + HH:MM) ───────────────────────────────
-// Server timestamps are Bangkok-local 'YYYY-MM-DD HH:MM:SS' (or 'YYYY-MM-DD'
-// for business dates). These format without going through Date() so there is
-// no timezone drift in the browser.
-function fmtDMY(s){
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s || '').trim());
-  return m ? `${m[3]}/${m[2]}/${m[1]}` : '';
-}
-function fmtHM(s){
-  const m = /(\d{2}):(\d{2})(?::\d{2})?$/.exec(String(s || '').trim());
-  return m ? `${m[1]}:${m[2]}` : '';
-}
-// Two-line cell: date on top, time (if any) underneath.
-function fmtDateTimeCell(s){
-  const d = fmtDMY(s);
-  if (!d) return '<span style="color:var(--muted)">—</span>';
-  const t = fmtHM(s);
-  return `<div style="white-space:nowrap">${d}</div>${t ? `<div style="font-size:11px;color:var(--muted)">${t}</div>` : ''}`;
-}
-
 function applyI18n(root){
   root = root || document;
   // Title

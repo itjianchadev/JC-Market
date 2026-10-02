@@ -12,7 +12,7 @@
 .tab-btn .count{background:var(--border);color:var(--muted);padding:1px 9px;border-radius:10px;font-size:12px;font-weight:600}
 .tab-btn.active .count{background:var(--gold);color:#fff}
 .appr-table{width:100%;border-collapse:collapse;font-size:13px}
-.appr-table th{text-align:left;font-size:12px;padding:8px;white-space:nowrap;background:var(--beige);color:var(--gold-dark);position:sticky;top:0;font-weight:600;border-bottom:1px solid var(--gold)}
+.appr-table th{text-align:left;font-size:12px;padding:8px;background:var(--beige);color:var(--gold-dark);position:sticky;top:0;font-weight:600;border-bottom:1px solid var(--gold)}
 .appr-table td{padding:10px 8px;border-bottom:1px solid var(--border);vertical-align:middle}
 .appr-table tr:hover{background:rgba(173,156,130,.06)}
 .slip-thumb{width:60px;height:60px;object-fit:cover;border-radius:6px;cursor:pointer;border:1px solid var(--border)}
@@ -30,51 +30,15 @@
 .status-paid{background:#fff3e0;color:#e65100}
 .empty{text-align:center;padding:60px 20px;color:var(--muted)}
 .empty p{font-size:48px;margin-bottom:12px}
-.bc-no{font-family:monospace;font-size:12px;color:var(--gold-dark);white-space:nowrap}
+.bc-no{font-family:monospace;font-size:12px;color:var(--gold-dark)}
 .lightbox{position:fixed;inset:0;background:rgba(42,33,24,.85);z-index:1000;display:none;align-items:center;justify-content:center;padding:20px;cursor:pointer}
 .lightbox img{max-width:90%;max-height:90vh;object-fit:contain;border-radius:8px}
-/* ── Approved-tab toolbar (search + filters) ── */
-.appr-tools{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:10px;margin:-6px 0 14px}
-.appr-search{position:relative;flex:1 1 260px;max-width:420px}
-.appr-search input{padding-right:38px;font-size:13px;border-radius:20px;background:#fff}
-.appr-search svg{position:absolute;right:13px;top:50%;transform:translateY(-50%);width:17px;height:17px;color:var(--muted);pointer-events:none}
-.appr-filter{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
-.pill-group{display:inline-flex;gap:4px}
-.pill{padding:4px 12px;border-radius:14px;border:1px solid var(--border-strong);background:#fff;color:var(--text);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;transition:.15s}
-.pill:hover{border-color:var(--gold)}
-.pill.active{background:var(--text);color:#fff;border-color:var(--text)}
-.date-range{display:inline-flex;align-items:center;gap:4px}
-.date-range input{width:auto;padding:5px 8px;font-size:12px;border-radius:8px}
-.appr-table td.num,.appr-table th.num{text-align:right;white-space:nowrap}
-.appr-table .sel-col{width:34px;text-align:center;padding-left:10px;padding-right:4px}
-.appr-table input[type=checkbox]{width:16px;height:16px;cursor:pointer;accent-color:var(--gold-dark);margin:0;vertical-align:middle}
-.icon-print{display:inline-block;width:20px;height:20px;background-color:var(--gold-dark);-webkit-mask:url(/img/icon-printer.svg) center/contain no-repeat;mask:url(/img/icon-printer.svg) center/contain no-repeat;vertical-align:middle}
-.btn-print{background:none;border:none;cursor:pointer;padding:4px;border-radius:6px;line-height:0;position:relative}
-.btn-print:hover{background:rgba(173,156,130,.18)}
-.btn-print:disabled{opacity:.4;cursor:not-allowed}
-.btn-print .sel-count{position:absolute;top:-4px;right:-6px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--gold);color:#fff;font-size:10px;font-weight:700;line-height:16px;text-align:center}
-.doc-status{font-size:11px;font-weight:600;line-height:1.5;white-space:nowrap}
-.doc-status.ok{color:#2e7d32}
-.doc-status.wait{color:#e65100}
-.doc-status.err{color:#c62828}
-.date-cell{white-space:nowrap}
-.date-cell .ico{margin-right:3px}
-.table-note{font-size:11px;color:var(--muted);padding:8px 10px;border-top:1px solid var(--border)}
-tr.row-selected td{background:rgba(173,156,130,.12)}
 </style>
 </head><body>
 <div id="nav"></div>
 <div class="container">
   <h2 style="margin-bottom:4px" id="pageTitle">รายการอนุมัติการชำระเงิน</h2>
   <p style="color:var(--muted);font-size:13px;margin-bottom:16px" id="pageSub">Finance ตรวจสอบสลิปก่อนสร้าง BC Sales Order</p>
-
-  <!-- Approved-tab tools: search box (above the tabs, right) -->
-  <div class="appr-tools" id="approvedSearchRow" style="display:none">
-    <div class="appr-search">
-      <input type="search" id="apprSearch" placeholder="ค้นหา: เลข SO / PO / วันที่รับของ / วันจัดส่ง / รหัสสาขา / vendor no." autocomplete="off" oninput="onApprovedFilterChange()">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-    </div>
-  </div>
 
   <div class="tab-row">
     <button class="tab-btn active" data-tab="pending" onclick="switchTab('pending')">
@@ -86,20 +50,6 @@ tr.row-selected td{background:rgba(173,156,130,.12)}
     <button class="tab-btn" data-tab="rejected" onclick="switchTab('rejected')">
       ❌ ปฏิเสธ <span class="count" id="rejectedCount">0</span>
     </button>
-    <div class="appr-filter" id="approvedFilterRow" style="display:none;margin-left:auto">
-      <span>สาขา:</span>
-      <div class="pill-group" id="branchTypePills">
-        <button type="button" class="pill active" data-bt="all" onclick="setBranchType('all')">ทั้งหมด</button>
-        <button type="button" class="pill" data-bt="fc" onclick="setBranchType('fc')">JF</button>
-        <button type="button" class="pill" data-bt="jc" onclick="setBranchType('jc')">JC</button>
-      </div>
-      <span style="margin-left:6px">📅</span>
-      <div class="date-range">
-        <input type="date" id="apprFrom" title="วันที่อนุมัติ ตั้งแต่" onchange="onApprovedFilterChange()">
-        <span>–</span>
-        <input type="date" id="apprTo" title="วันที่อนุมัติ ถึง" onchange="onApprovedFilterChange()">
-      </div>
-    </div>
   </div>
 
   <!-- Pending panel -->
@@ -128,29 +78,19 @@ tr.row-selected td{background:rgba(173,156,130,.12)}
       <table class="appr-table">
         <thead>
           <tr>
-            <th class="sel-col">
-              <button type="button" class="btn-print" id="printPoBtn" title="พิมพ์ใบ PO ของรายการที่เลือก" onclick="printSelectedPO()">
-                <span class="icon-print"></span><span class="sel-count" id="selCount" style="display:none">0</span>
-              </button>
-            </th>
             <th>วันที่อนุมัติ</th>
             <th>คำสั่งซื้อ</th>
             <th>สาขา</th>
-            <th>รหัสสาขา</th>
-            <th>วันจัดส่ง</th>
-            <th>วันรับของ</th>
-            <th class="num">ยอด</th>
+            <th>ยอด</th>
             <th>BC SO</th>
             <th>BC PO</th>
-            <th>BC RC</th>
             <th>BC Invoice</th>
-            <th>สถานะเอกสาร</th>
+            <th>ผู้อนุมัติ</th>
             <th>สลิป</th>
           </tr>
         </thead>
-        <tbody id="approvedBody"><tr><td colspan="14" class="empty">กำลังโหลด...</td></tr></tbody>
+        <tbody id="approvedBody"><tr><td colspan="9" class="empty">กำลังโหลด...</td></tr></tbody>
       </table>
-      <div class="table-note" id="approvedNote" style="display:none"></div>
     </div>
   </div>
 
@@ -200,7 +140,7 @@ tr.row-selected td{background:rgba(173,156,130,.12)}
 </div>
 
 
-<script src="/js/app.js?v=20261002"></script>
+<script src="/js/app.js?v=20260701b"></script>
 <script>
 if(!requireLogin()) throw '';
 const u = getUser();
@@ -220,9 +160,6 @@ function switchTab(tab) {
   document.getElementById('panelApproved').style.display = tab === 'approved' ? 'block' : 'none';
   document.getElementById('panelRejected').style.display = tab === 'rejected' ? 'block' : 'none';
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
-  // Search + JF/JC/date filters only apply to the approved list.
-  document.getElementById('approvedSearchRow').style.display = tab === 'approved' ? 'flex' : 'none';
-  document.getElementById('approvedFilterRow').style.display = tab === 'approved' ? 'flex' : 'none';
   // Reflect in URL so a refresh keeps you on the same tab
   const url = new URL(location.href);
   url.searchParams.set('tab', tab);
@@ -271,7 +208,7 @@ async function renderPending() {
       : '<span style="color:var(--muted);font-size:11px">—</span>';
     return `
       <tr>
-        <td class="date-cell" style="color:var(--muted)">${fmtDateTimeCell(o.created_at)}</td>
+        <td style="white-space:nowrap;color:var(--muted)">${o.created_at}</td>
         <td>
           <strong>${o.order_number}</strong>
           ${(o.slip_retry_count || 0) > 0 ? `<div style="display:inline-block;margin-left:6px;padding:2px 8px;border-radius:10px;background:#fef3c7;color:#92400e;font-size:11px;font-weight:600">🔁 อัปโหลดใหม่ #${o.slip_retry_count}</div>` : ''}
@@ -289,174 +226,34 @@ async function renderPending() {
   }).join('');
 }
 
-// ─── Approved tab: filters + search ─────────────────────────────────────────
-let branchTypeFilter = 'all';          // all | fc | jc
-const selectedForPrint = new Set();    // order ids ticked for PO printing
-const APPROVED_MAX_ROWS = 200;
-
-function setBranchType(bt) {
-  branchTypeFilter = bt;
-  document.querySelectorAll('#branchTypePills .pill').forEach(p => p.classList.toggle('active', p.dataset.bt === bt));
-  renderApproved();
-}
-function onApprovedFilterChange() { renderApproved(); }
-
-// Effective branch type: branches.branch_type when known, else infer from the
-// order type (jc_* = JC master) or the branch code prefix.
-function orderBranchType(o) {
-  if (o.branch_type === 'jc' || o.branch_type === 'fc') return o.branch_type;
-  if (String(o.order_type || '').startsWith('jc_')) return 'jc';
-  return String(o.branch_code || '').toUpperCase().startsWith('JC') ? 'jc' : 'fc';
-}
-// Finance approval timestamp — payments.verified_at, falling back to paid_at
-// for rows approved before that column was tracked.
-function approvedAt(o) { return o.verified_at || o.paid_at || o.created_at || ''; }
-// Business date of the (latest) goods receipt — blank until the branch
-// presses "รับของ".
-function receivedDate(o) { return o.fully_received_at || o.last_received_date || ''; }
-
-// Search across the fields Finance actually looks things up by: order no,
-// BC SO / PO / TO, delivery date, receive date (ISO or DD/MM/YYYY), branch
-// code, vendor no. Every token typed must match somewhere (AND).
-function approvedHaystack(o) {
-  const del = o.delivery_date || '';
-  const rcv = receivedDate(o);
-  return [
-    o.order_number, o.bc_so_no, o.bc_po_no, o.bc_to_no, o.bc_receipt_no, o.bc_invoice_no,
-    o.branch_code, o.branch_name, o.user_name, o.po_vendor_no,
-    del, fmtDMY(del), rcv, fmtDMY(rcv),
-  ].filter(Boolean).join(' ').toLowerCase();
-}
-
-function filteredApproved() {
-  const q = (document.getElementById('apprSearch').value || '').trim().toLowerCase();
-  const tokens = q ? q.split(/\s+/) : [];
-  const from = document.getElementById('apprFrom').value || '';
-  const to = document.getElementById('apprTo').value || '';
-  return approvedData.filter(o => {
-    if (branchTypeFilter !== 'all' && orderBranchType(o) !== branchTypeFilter) return false;
-    const ad = String(approvedAt(o)).slice(0, 10);
-    if (from && ad < from) return false;
-    if (to && ad > to) return false;
-    if (tokens.length) {
-      const hay = approvedHaystack(o);
-      if (!tokens.every(tk => hay.includes(tk))) return false;
-    }
-    return true;
-  });
-}
-
-// "สถานะเอกสาร": are the BC docs this order needs all present, and has the
-// branch received the goods yet. BC doc set depends on order_type:
-//   fc_purchase → SO + PO · jc_transfer → TO · jc_purchase → PO
-function docStatusCell(o) {
-  const type = String(o.order_type || 'fc_purchase');
-  let docsOk;
-  if (type === 'jc_transfer') docsOk = !!o.bc_to_no;
-  else if (type === 'jc_purchase') docsOk = !!o.bc_po_no;
-  else docsOk = !!o.bc_so_no && !!o.bc_po_no;
-  const parts = [];
-  if (o.bc_sync_error) parts.push(`<div class="doc-status err" title="${escapeAttr(o.bc_sync_error)}">เอกสาร BC ผิดพลาด</div>`);
-  else parts.push(`<div class="doc-status ${docsOk ? 'ok' : 'wait'}">${docsOk ? 'เอกสาร BC ครบ' : 'รอเอกสาร BC'}</div>`);
-  const fs = o.fulfillment_status || 'pending';
-  if (fs === 'received') parts.push(`<div class="doc-status ok">รับของแล้ว</div>`);
-  else if (fs === 'partial') parts.push(`<div class="doc-status wait">รับของบางส่วน</div>`);
-  else parts.push(`<div class="doc-status wait">รอรับของ</div>`);
-  return parts.join('');
-}
-function escapeAttr(v) { return String(v || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
-
-function updatePrintButton() {
-  const n = selectedForPrint.size;
-  const badge = document.getElementById('selCount');
-  badge.textContent = n;
-  badge.style.display = n ? 'inline-block' : 'none';
-  document.getElementById('printPoBtn').disabled = n === 0;
-}
-function toggleSelect(id, checked) {
-  if (checked) selectedForPrint.add(id); else selectedForPrint.delete(id);
-  const row = document.getElementById('apr-' + id);
-  if (row) row.classList.toggle('row-selected', checked);
-  updatePrintButton();
-}
-
 function renderApproved() {
   const el = document.getElementById('approvedBody');
-  const note = document.getElementById('approvedNote');
-  // Drop selections for orders that are no longer in the approved list
-  // (e.g. after a refresh) so the print button never targets stale ids.
-  const ids = new Set(approvedData.map(o => o.id));
-  for (const id of [...selectedForPrint]) if (!ids.has(id)) selectedForPrint.delete(id);
-  updatePrintButton();
-
   if (!approvedData.length) {
-    el.innerHTML = `<tr><td colspan="14" class="empty"><p>📋</p>ยังไม่มีรายการที่อนุมัติ</td></tr>`;
-    note.style.display = 'none';
+    el.innerHTML = `<tr><td colspan="9" class="empty"><p>📋</p>ยังไม่มีรายการที่อนุมัติ</td></tr>`;
     return;
   }
-  const rows = filteredApproved();
-  if (!rows.length) {
-    el.innerHTML = `<tr><td colspan="14" class="empty"><p>🔍</p>ไม่พบรายการที่ตรงกับเงื่อนไขค้นหา</td></tr>`;
-    note.style.display = 'none';
-    return;
-  }
-  const shown = rows.slice(0, APPROVED_MAX_ROWS);
-  el.innerHTML = shown.map(o => {
+  el.innerHTML = approvedData.slice(0, 100).map(o => {
     // PO cell: show number if created, otherwise "สร้าง PO" button.
     // Disabled when there's no BC SO yet (BC sync error path) — must have SO first.
     const poCell = o.bc_po_no
       ? `<span class="bc-no">${o.bc_po_no}</span>${o.po_vendor_no ? `<div style="font-size:10px;color:var(--muted)">vendor: ${o.po_vendor_no}</div>` : ''}`
-      : (o.bc_so_no || o.order_type === 'jc_purchase'
+      : (o.bc_so_no
         ? `<button class="btn-approve" style="font-size:12px;padding:4px 10px" onclick="retryCreatePO('${o.id}', this)">🔁 สร้าง PO</button>`
-        : (o.order_type === 'jc_transfer'
-          ? `<span style="color:var(--muted);font-size:11px">— TRO —</span>`
-          : `<span style="color:var(--muted);font-size:11px">— รอ SO —</span>`));
-    const soCell = o.order_type === 'jc_transfer'
-      ? `<span class="bc-no" title="Transfer Order">${o.bc_to_no || '—'}</span>${o.bc_to_no ? '<div style="font-size:10px;color:var(--muted)">TRO</div>' : ''}`
-      : `<span class="bc-no">${o.bc_so_no || '—'}</span>`;
-    const rcv = receivedDate(o);
-    const checked = selectedForPrint.has(o.id);
+        : `<span style="color:var(--muted);font-size:11px">— รอ SO —</span>`);
     return `
-    <tr id="apr-${o.id}" class="${checked ? 'row-selected' : ''}">
-      <td class="sel-col"><input type="checkbox" ${checked ? 'checked' : ''} onchange="toggleSelect('${o.id}', this.checked)" title="เลือกเพื่อพิมพ์ใบ PO"></td>
-      <td class="date-cell" style="color:var(--muted)">${fmtDateTimeCell(approvedAt(o))}</td>
+    <tr>
+      <td style="white-space:nowrap;color:var(--muted)">${o.paid_at || o.created_at}</td>
       <td><strong>${o.order_number}</strong></td>
       <td>${o.branch_name || o.user_name || '-'}</td>
-      <td><span class="bc-no" style="color:var(--text)">${o.branch_code || '—'}</span></td>
-      <td class="date-cell">${o.delivery_date ? `<span class="ico">🚚</span>${fmtDMY(o.delivery_date)}` : '<span style="color:var(--muted)">—</span>'}</td>
-      <td class="date-cell">${rcv ? `<span class="ico">✅</span>${fmtDMY(rcv)}` : '<span style="color:var(--muted)">—</span>'}</td>
-      <td class="num" style="font-weight:700;color:var(--gold-dark)">฿${(o.net_payable||o.total).toLocaleString()}${o.wht_amount > 0 ? `<div style="font-size:10px;color:var(--muted);font-weight:400">${t('approvals.amount_net_hint', { total: o.total.toLocaleString(), wht: o.wht_amount.toLocaleString() })}</div>` : ''}</td>
-      <td>${soCell}</td>
+      <td style="font-weight:700;color:var(--gold-dark)">฿${(o.net_payable||o.total).toLocaleString()}${o.wht_amount > 0 ? `<div style="font-size:10px;color:var(--muted);font-weight:400">${t('approvals.amount_net_hint', { total: o.total.toLocaleString(), wht: o.wht_amount.toLocaleString() })}</div>` : ''}</td>
+      <td><span class="bc-no">${o.bc_so_no || '—'}</span></td>
       <td>${poCell}</td>
-      <td><span class="bc-no">${o.bc_receipt_no || '<span style="color:var(--muted);font-family:inherit">— รอรับของ —</span>'}</span></td>
       <td><span class="bc-no">${o.bc_invoice_no || (o.bc_posted ? '(posted)' : '—')}</span></td>
-      <td>${docStatusCell(o)}</td>
+      <td style="font-size:12px">${o.verified_by_name || '-'}</td>
       <td><a href="/orders.html?id=${o.id}" style="font-size:11px;color:var(--gold-dark);text-decoration:underline">ดูรายละเอียด</a></td>
     </tr>
   `;
   }).join('');
-  if (rows.length > shown.length) {
-    note.textContent = `แสดง ${shown.length} จาก ${rows.length} รายการ — ใช้ช่องค้นหาหรือช่วงวันที่เพื่อจำกัดผลลัพธ์`;
-    note.style.display = 'block';
-  } else {
-    note.textContent = `${rows.length} รายการ`;
-    note.style.display = rows.length !== approvedData.length ? 'block' : 'none';
-  }
-}
-
-// ─── Print PO for the ticked rows ────────────────────────────────────────────
-// Opens /po-print.html with the selected order ids; that page fetches each
-// order and renders one PO document per page. Orders without a BC PO number
-// yet (SO-only, or JC transfer orders) are skipped with a notice.
-function printSelectedPO() {
-  if (!selectedForPrint.size) { toast('กรุณาติ๊กเลือกรายการที่ต้องการพิมพ์ใบ PO ก่อน'); return; }
-  const picked = approvedData.filter(o => selectedForPrint.has(o.id));
-  const withPo = picked.filter(o => o.bc_po_no);
-  const skipped = picked.length - withPo.length;
-  if (!withPo.length) { toast('รายการที่เลือกยังไม่มีเลข PO จาก BC — พิมพ์ไม่ได้'); return; }
-  if (skipped > 0) toast(`ข้าม ${skipped} รายการที่ยังไม่มีเลข PO`);
-  const url = '/po-print.html?ids=' + encodeURIComponent(withPo.map(o => o.id).join(','));
-  window.open(url, '_blank');
 }
 
 async function renderRejected() {
@@ -473,7 +270,7 @@ async function renderRejected() {
     const slipPath = (det.payment || {}).slip_path || '';
     return `
       <tr>
-        <td class="date-cell" style="color:var(--muted)">${fmtDateTimeCell(o.rejected_at)}</td>
+        <td style="white-space:nowrap;color:var(--muted)">${o.rejected_at || '-'}</td>
         <td><strong>${o.order_number}</strong></td>
         <td>${o.branch_name || o.user_name || '-'}</td>
         <td style="font-weight:700;color:var(--gold-dark)">฿${(o.net_payable||o.total).toLocaleString()}${o.wht_amount > 0 ? `<div style="font-size:10px;color:var(--muted);font-weight:400">${t('approvals.amount_net_hint', { total: o.total.toLocaleString(), wht: o.wht_amount.toLocaleString() })}</div>` : ''}</td>
