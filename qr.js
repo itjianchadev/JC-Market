@@ -15,13 +15,20 @@
  * QR_DEMO=1 overrides both: the QR encodes plain text (not an EMVCo payload),
  * so banking apps refuse it, and a red DEMO badge is drawn over the centre.
  * For the demo site only — it looks like a payment QR but can never move money.
+ * Ignored when BC_ENVIRONMENT is Production (same default as bc-client.js), so
+ * a stray QR_DEMO=1 on the production server still serves the real QR.
  */
 const generatePayload = require('promptpay-qr');
 const QRCode = require('qrcode');
 
 const PROMPTPAY_ID = process.env.PROMPTPAY_ID || '0000000000'; // เบอร์/เลขนิติบุคคล
 const STATIC_PAYLOAD = (process.env.PROMPTPAY_QR_PAYLOAD || '').trim();
-const QR_DEMO = process.env.QR_DEMO === '1';
+const BC_ENVIRONMENT = process.env.BC_ENVIRONMENT || 'Production';
+const IS_PRODUCTION = BC_ENVIRONMENT.trim().toLowerCase() === 'production';
+const QR_DEMO = process.env.QR_DEMO === '1' && !IS_PRODUCTION;
+if (process.env.QR_DEMO === '1' && IS_PRODUCTION) {
+  console.warn('[QR] QR_DEMO=1 ignored: BC_ENVIRONMENT is Production, serving the real payment QR');
+}
 
 // CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF) — the EMVCo QR checksum.
 function crc16(s) {
