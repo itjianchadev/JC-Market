@@ -420,7 +420,7 @@ function saveQR() {
   if (!lastOrderResp || !lastOrderResp.qr_data_url) { toast('QR not ready'); return; }
   const a = document.createElement('a');
   a.href = lastOrderResp.qr_data_url;
-  a.download = `QR_${lastOrderResp.order_number}.png`;
+  a.download = `QR_${lastOrderResp.order_number}.${lastOrderResp.qr_data_url.startsWith('data:image/svg') ? 'svg' : 'png'}`;
   document.body.appendChild(a);
   a.click();
   a.remove();

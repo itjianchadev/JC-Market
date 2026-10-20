@@ -11,12 +11,17 @@
  *     account as the static QR.
  *  2. Fallback — generate a plain PromptPay (tag 29) QR from PROMPTPAY_ID.
  *     Used only when PROMPTPAY_QR_PAYLOAD is not configured.
+ *
+ * QR_DEMO=1 overrides both: the QR encodes plain text (not an EMVCo payload),
+ * so banking apps refuse it, and a red DEMO badge is drawn over the centre.
+ * For the demo site only — it looks like a payment QR but can never move money.
  */
 const generatePayload = require('promptpay-qr');
 const QRCode = require('qrcode');
 
 const PROMPTPAY_ID = process.env.PROMPTPAY_ID || '0000000000'; // เบอร์/เลขนิติบุคคล
 const STATIC_PAYLOAD = (process.env.PROMPTPAY_QR_PAYLOAD || '').trim();
+const QR_DEMO = process.env.QR_DEMO === '1';
 
 // CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF) — the EMVCo QR checksum.
 function crc16(s) {
@@ -52,7 +57,28 @@ function injectAmount(base, amount) {
   return body + crc16(body);
 }
 
+// Non-payable QR for the demo site. Error correction H tolerates the badge
+// covering the centre modules, so the text still decodes when scanned.
+async function generateDemoQR(amount) {
+  const amt = Number(amount);
+  const text = `JC-MARKET DEMO - NOT A PAYMENT QR - THB ${Number.isFinite(amt) ? amt.toFixed(2) : '-'}`;
+  const svg = await QRCode.toString(text, {
+    type: 'svg',
+    errorCorrectionLevel: 'H',
+    width: 400,
+    margin: 2,
+    color: { dark: '#000', light: '#fff' },
+  });
+  const size = Number((svg.match(/viewBox="0 0 (\d+) \d+"/) || [])[1]) || 33;
+  const w = size * 0.42, h = size * 0.16;
+  const badge = `<rect x="${(size - w) / 2}" y="${(size - h) / 2}" width="${w}" height="${h}" rx="${h * 0.2}" fill="#b3261e" stroke="#fff" stroke-width="${h * 0.08}"/>`
+    + `<text x="${size / 2}" y="${size / 2}" fill="#fff" font-family="Arial, sans-serif" font-weight="700" font-size="${h * 0.62}" text-anchor="middle" dominant-baseline="central">DEMO</text>`;
+  const out = svg.replace('</svg>', badge + '</svg>');
+  return 'data:image/svg+xml;base64,' + Buffer.from(out).toString('base64');
+}
+
 async function generateQR(amount) {
+  if (QR_DEMO) return generateDemoQR(amount);
   const payload = STATIC_PAYLOAD
     ? injectAmount(STATIC_PAYLOAD, amount)
     : generatePayload(PROMPTPAY_ID, { amount });
